@@ -12,7 +12,7 @@ from pathlib import Path
 import click
 
 # ---------------------------------------------------------------------------
-# Config
+# Config (env vars — override these to customize behavior)
 # ---------------------------------------------------------------------------
 
 CONTAINER = os.getenv("GLUETUN_CONTAINER", "gluetun")
@@ -20,8 +20,17 @@ COMPOSE_FILE = os.getenv(
     "GLUETUN_COMPOSE_FILE", str(Path(__file__).resolve().parent / "vpn.yml")
 )
 PROVIDER = os.getenv("GLUETUN_PROVIDER", "surfshark")
-CACHE_FILE = Path(tempfile.gettempdir()) / "gluetun-servers.json"
 CACHE_TTL = int(os.getenv("GLUETUN_CACHE_TTL", "3600"))
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+GLUETUN_IMAGE = "qmcgaw/gluetun:latest"
+IP_INFO_URL = "https://ipinfo.io"
+SERVER_SEP = " - "
+FZF_HEIGHT = "40%"
+CACHE_FILE = Path(tempfile.gettempdir()) / "gluetun-servers.json"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -65,7 +74,7 @@ def compose(*args, env_overrides=None):
 
 def _fetch_servers():
     result = run(
-        "docker", "run", "--rm", "qmcgaw/gluetun:latest",
+        "docker", "run", "--rm", GLUETUN_IMAGE,
         "format-servers", f"-{PROVIDER}",
         capture=True, check=False,
     )
@@ -114,7 +123,7 @@ def fzf_select(items, prompt="> "):
             "  or: git clone --depth 1 https://github.com/junegunn/fzf ~/.fzf && ~/.fzf/install"
         )
     proc = subprocess.run(
-        ["fzf", "--prompt", prompt, "--height", "40%", "--reverse"],
+        ["fzf", "--prompt", prompt, "--height", FZF_HEIGHT, "--reverse"],
         input="\n".join(items),
         capture_output=True,
         text=True,
@@ -154,10 +163,30 @@ def restart():
 
 
 @cli.command()
+@click.option("-f", "--follow", is_flag=True, help="Follow log output")
+@click.option("-n", "--tail", default="50", help="Number of lines to show")
+def logs(follow, tail):
+    """Show container logs."""
+    args = ["logs"]
+    if follow:
+        args.append("-f")
+    args.extend(["--tail", tail, CONTAINER])
+    run(*args)
+
+
+@cli.command()
+def update():
+    """Pull latest gluetun image and recreate the container."""
+    run("docker", "pull", GLUETUN_IMAGE)
+    compose("up", "-d", "--force-recreate")
+    click.echo("Updated and restarted.")
+
+
+@cli.command()
 def ip():
     """Show the current public VPN IP."""
     result = run(
-        "docker", "exec", CONTAINER, "wget", "-qO-", "https://ipinfo.io",
+        "docker", "exec", CONTAINER, "wget", "-qO-", IP_INFO_URL,
         capture=True, check=False,
     )
     if result.returncode != 0:
@@ -178,7 +207,7 @@ def status():
     click.echo(f"Container: {CONTAINER} ({result.stdout.strip()})")
 
     result = run(
-        "docker", "exec", CONTAINER, "wget", "-qO-", "https://ipinfo.io",
+        "docker", "exec", CONTAINER, "wget", "-qO-", IP_INFO_URL,
         capture=True, check=False,
     )
     if result.returncode == 0:
@@ -209,7 +238,7 @@ def server():
     if not selection:
         raise SystemExit("No selection.")
 
-    parts = selection.split(" - ", 1)
+    parts = selection.split(SERVER_SEP, 1)
     country = parts[0].strip()
     city = parts[1].strip() if len(parts) > 1 else None
 
