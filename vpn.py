@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""vpn — Gluetun CLI manager."""
+
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+
+import click
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+CONTAINER = os.getenv("GLUETUN_CONTAINER", "gluetun")
+COMPOSE_FILE = os.getenv(
+    "GLUETUN_COMPOSE_FILE", str(Path(__file__).resolve().parent / "vpn.yml")
+)
+PROVIDER = os.getenv("GLUETUN_PROVIDER", "surfshark")
+CACHE_FILE = Path(tempfile.gettempdir()) / "gluetun-servers.json"
+CACHE_TTL = int(os.getenv("GLUETUN_CACHE_TTL", "3600"))
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def run(*args, capture=False, check=True):
+    """Run a command. Returns CompletedProcess."""
+    result = subprocess.run(
+        args if len(args) > 1 else args[0],
+        shell=len(args) == 1,
+        capture_output=capture,
+        text=True,
+    )
+    if check and result.returncode != 0:
+        msg = (result.stderr or result.stdout or "").strip()
+        raise SystemExit(f"Error: {msg}" if msg else f"Command failed ({result.returncode})")
+    return result
+
+
+def compose(*args, env_overrides=None):
+    """Run docker compose with the vpn.yml file."""
+    cmd = ["docker", "compose", "-f", COMPOSE_FILE, *args]
+    if env_overrides:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            for k, v in env_overrides.items():
+                f.write(f"{k}={v}\n")
+            f.flush()
+            try:
+                cmd = ["docker", "compose", "-f", COMPOSE_FILE, "--env-file", f.name, *args]
+                return run(*cmd)
+            finally:
+                os.unlink(f.name)
+    return run(*cmd)
+
+
+# ---------------------------------------------------------------------------
+# Server cache
+# ---------------------------------------------------------------------------
+
+
+def _fetch_servers():
+    result = run(
+        "docker", "run", "--rm", "qmcgaw/gluetun:latest",
+        "format-servers", f"-{PROVIDER}",
+        capture=True, check=False,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _read_cache():
+    if not CACHE_FILE.exists():
+        return None
+    try:
+        data = json.loads(CACHE_FILE.read_text())
+        if time.time() - data.get("ts", 0) < CACHE_TTL:
+            return data["servers"]
+    except (json.JSONDecodeError, KeyError):
+        pass
+    return None
+
+
+def _write_cache(servers):
+    CACHE_FILE.write_text(json.dumps({"ts": time.time(), "servers": servers}))
+
+
+def get_servers():
+    servers = _read_cache()
+    if servers is not None:
+        return servers
+    servers = _fetch_servers()
+    if servers:
+        _write_cache(servers)
+    return servers
+
+
+# ---------------------------------------------------------------------------
+# fzf
+# ---------------------------------------------------------------------------
+
+
+def fzf_select(items, prompt="> "):
+    """Pipe items to fzf. Returns selected string or None."""
+    if not shutil.which("fzf"):
+        raise SystemExit(
+            "fzf is not installed.\n"
+            "  sudo apt install fzf\n"
+            "  or: git clone --depth 1 https://github.com/junegunn/fzf ~/.fzf && ~/.fzf/install"
+        )
+    proc = subprocess.run(
+        ["fzf", "--prompt", prompt, "--height", "40%", "--reverse"],
+        input="\n".join(items),
+        capture_output=True,
+        text=True,
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+@click.group()
+def cli():
+    """Gluetun VPN manager."""
+
+
+@cli.command()
+def up():
+    """Start the VPN container."""
+    compose("up", "-d")
+    click.echo("VPN started.")
+
+
+@cli.command()
+def down():
+    """Stop the VPN container."""
+    compose("down")
+    click.echo("VPN stopped.")
+
+
+@cli.command()
+def restart():
+    """Restart the VPN container."""
+    compose("restart")
+    click.echo("VPN restarted.")
+
+
+@cli.command()
+def ip():
+    """Show the current public VPN IP."""
+    result = run(
+        "docker", "exec", CONTAINER, "wget", "-qO-", "https://ipinfo.io",
+        capture=True, check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit("Could not fetch IP. Is the container running?")
+    click.echo(result.stdout)
+
+
+@cli.command()
+def status():
+    """Show container status and public IP."""
+    result = run(
+        "docker", "inspect", "--format", "{{.State.Status}}", CONTAINER,
+        capture=True, check=False,
+    )
+    if result.returncode != 0:
+        click.echo(f"Container '{CONTAINER}' not found.")
+        return
+    click.echo(f"Container: {CONTAINER} ({result.stdout.strip()})")
+
+    result = run(
+        "docker", "exec", CONTAINER, "wget", "-qO-", "https://ipinfo.io",
+        capture=True, check=False,
+    )
+    if result.returncode == 0:
+        click.echo(result.stdout)
+    else:
+        click.echo("(Could not fetch public IP)")
+
+
+@cli.command()
+def servers():
+    """List available servers."""
+    srvs = get_servers()
+    if not srvs:
+        raise SystemExit("No servers found. Is Docker running?")
+    click.echo(f"{len(srvs)} servers available:\n")
+    for s in srvs:
+        click.echo(f"  {s}")
+
+
+@cli.command()
+def server():
+    """Interactively select a server and restart."""
+    srvs = get_servers()
+    if not srvs:
+        raise SystemExit("No servers found. Is Docker running?")
+
+    selection = fzf_select(srvs, prompt="Select server: ")
+    if not selection:
+        raise SystemExit("No selection.")
+
+    parts = selection.split(" - ", 1)
+    country = parts[0].strip()
+    city = parts[1].strip() if len(parts) > 1 else None
+
+    click.echo(f"Location: {country}" + (f" / {city}" if city else ""))
+
+    compose("down")
+
+    overrides = {"SERVER_COUNTRIES": country}
+    if city:
+        overrides["SERVER_CITIES"] = city
+    compose("up", "-d", env_overrides=overrides)
+
+    click.echo(f"VPN restarted → {country}" + (f" / {city}" if city else ""))
+
+
+if __name__ == "__main__":
+    cli()

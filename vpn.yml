@@ -1,0 +1,26 @@
+name: vpn
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "8000:8000/tcp"
+    environment:
+      - VPN_SERVICE_PROVIDER=surfshark
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=changeme
+      - WIREGUARD_ADDRESSES=changeme/16
+      - HTTP_CONTROL_SERVER_ADDRESS=:8000
+      - HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE={"auth":"apikey","apikey":"changeme"}
+      - FIREWALL=on
+      - WIREGUARD_MTU=1420
+      - PUBLICIP_TIMEOUT=10s
+      - DOT=off
+      - DNS_PLAINTEXT_ADDRESS=1.1.1.1
+      - SERVER_COUNTRIES=${SERVER_COUNTRIES:-United States}
+      - SERVER_CITIES=${SERVER_CITIES:-}
+    restart: always
