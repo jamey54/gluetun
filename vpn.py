@@ -31,8 +31,8 @@ IP_INFO_URL = "https://ipinfo.io"
 SERVER_SEP = " - "
 FZF_HEIGHT = "40%"
 CACHE_FILE = Path(tempfile.gettempdir()) / "gluetun-servers.json"
-IP_FETCH_RETRIES = 10
-IP_FETCH_DELAY = 3
+IP_FETCH_RETRIES = 15
+IP_FETCH_DELAY = 2
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -74,7 +74,7 @@ def compose(*args, env_overrides=None):
 # ---------------------------------------------------------------------------
 
 
-def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY):
+def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_city=None):
     """Fetch public IP info with retries. Returns parsed dict or None."""
     for attempt in range(retries):
         result = run(
@@ -83,7 +83,12 @@ def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY):
         )
         if result.returncode == 0:
             try:
-                return json.loads(result.stdout)
+                info = json.loads(result.stdout)
+                if not expected_city:
+                    return info
+                actual = info.get("city", "")
+                if actual and actual.lower() == expected_city.lower():
+                    return info
             except json.JSONDecodeError:
                 pass
         if attempt < retries - 1:
@@ -92,20 +97,23 @@ def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY):
     return None
 
 
-def print_ip_status(expected_country=None, expected_city=None):
-    """Fetch and display IP info. Warns if location doesn't match."""
-    info = fetch_ip_info()
+def print_ip_status(expected_country=None, expected_city=None, stop_on_mismatch=False):
+    """Fetch and display IP info. Stops container if VPN is down (when stop_on_mismatch=True)."""
+    info = fetch_ip_info(expected_city=expected_city)
     if not info:
-        click.echo("Could not fetch public IP.")
-        return
+        click.echo("Could not fetch public IP — VPN connection failed.")
+        if stop_on_mismatch:
+            compose("down")
+            click.echo("Container stopped — no traffic will flow.")
+        return False
     click.echo(f"IP:       {info.get('ip', '?')}")
     click.echo(f"Location: {info.get('city', '?')}, {info.get('country', '?')}")
     click.echo(f"Org:      {info.get('org', '?')}")
-
     if expected_city:
-        actual_city = info.get("city", "")
-        if actual_city and actual_city.lower() != expected_city.lower():
-            click.echo(f"Warning: Expected city '{expected_city}', got '{actual_city}'")
+        actual = info.get("city", "")
+        if actual and actual.lower() != expected_city.lower():
+            click.echo(f"Warning: Expected city '{expected_city}', got '{actual}'")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +303,7 @@ def server():
     compose("up", "-d", env_overrides=overrides)
 
     click.echo(f"VPN restarted → {country}" + (f" / {city}" if city else ""))
-    print_ip_status(expected_country=country, expected_city=city)
+    print_ip_status(expected_country=country, expected_city=city, stop_on_mismatch=True)
 
 
 if __name__ == "__main__":
