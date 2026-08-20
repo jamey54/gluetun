@@ -314,6 +314,7 @@ def select_server(items, prompt="Select server: "):
         message=prompt,
         choices=items,
         use_search_filter=True,
+        use_jk_keys=False,
     ).ask()
 
 
