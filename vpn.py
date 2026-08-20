@@ -80,7 +80,20 @@ def _fetch_servers():
     )
     if result.returncode != 0:
         return []
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    servers = []
+    for line in result.stdout.splitlines():
+        if not line.strip().startswith("|"):
+            continue
+        cols = [c.strip() for c in line.split("|")]
+        cols = [c for c in cols if c]
+        if len(cols) < 3:
+            continue
+        if cols[0] in ("Region", "---", ""):
+            continue
+        country = cols[1]
+        city = cols[2]
+        servers.append(f"{country}{SERVER_SEP}{city}")
+    return servers
 
 
 def _read_cache():
@@ -171,7 +184,7 @@ def logs(follow, tail):
     if follow:
         args.append("-f")
     args.extend(["--tail", tail, CONTAINER])
-    run(*args)
+    compose(*args)
 
 
 @cli.command()
