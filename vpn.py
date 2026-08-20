@@ -6,10 +6,12 @@ import os
 import subprocess
 import tempfile
 import time
+import unicodedata
 from pathlib import Path
 
 import click
 import questionary
+from questionary import Separator
 
 # ---------------------------------------------------------------------------
 # Config (env vars — override these to customize behavior)
@@ -63,7 +65,7 @@ PROVIDERS = {
 GLUETUN_IMAGE = "qmcgaw/gluetun:latest"
 IP_INFO_URL = "https://ipinfo.io"
 SERVER_SEP = " - "
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 CACHE_DIR = Path.home() / ".cache" / "gluetun"
 CACHE_FILE = CACHE_DIR / "servers.json"
 IP_FETCH_RETRIES = 15
@@ -109,6 +111,47 @@ def compose(*args, env_overrides=None):
             return run(*cmd)
         finally:
             os.unlink(f.name)
+
+
+def _strip_accents(s):
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+
+
+COUNTRY_CODES = {
+    "Albania": "AL", "Algeria": "DZ", "Argentina": "AR", "Armenia": "AM",
+    "Australia": "AU", "Austria": "AT", "Azerbaijan": "AZ", "Bahamas": "BS",
+    "Bahrain": "BH", "Bangladesh": "BD", "Belarus": "BY", "Belgium": "BE",
+    "Bolivia": "BO", "Bosnia and Herzegovina": "BA", "Brazil": "BR",
+    "Bulgaria": "BG", "Cambodia": "KH", "Canada": "CA", "Chile": "CL",
+    "Colombia": "CO", "Costa Rica": "CR", "Croatia": "HR", "Cyprus": "CY",
+    "Czech Republic": "CZ", "Czechia": "CZ", "Denmark": "DK", "Ecuador": "EC",
+    "Estonia": "EE", "Finland": "FI", "France": "FR", "Georgia": "GE",
+    "Germany": "DE", "Ghana": "GH", "Greece": "GR", "Guatemala": "GT",
+    "Honduras": "HN", "Hong Kong": "HK", "Hungary": "HU", "Iceland": "IS",
+    "India": "IN", "Indonesia": "ID", "Ireland": "IE", "Israel": "IL",
+    "Italy": "IT", "Jamaica": "JM", "Japan": "JP", "Jordan": "JO",
+    "Kazakhstan": "KZ", "Kenya": "KE", "Kuwait": "KW", "Latvia": "LV",
+    "Lithuania": "LT", "Luxembourg": "LU", "Malaysia": "MY", "Malta": "MT",
+    "Mexico": "MX", "Moldova": "MD", "Monaco": "MC", "Mongolia": "MN",
+    "Montenegro": "ME", "Morocco": "MA", "Myanmar": "MM", "Nepal": "NP",
+    "Netherlands": "NL", "New Zealand": "NZ", "Nigeria": "NG",
+    "North Macedonia": "MK", "Norway": "NO", "Pakistan": "PK", "Panama": "PA",
+    "Paraguay": "PY", "Peru": "PE", "Philippines": "PH", "Poland": "PL",
+    "Portugal": "PT", "Romania": "RO", "Russia": "RU", "Saudi Arabia": "SA",
+    "Serbia": "RS", "Singapore": "SG", "Slovakia": "SK", "Slovenia": "SI",
+    "South Africa": "ZA", "South Korea": "KR", "Spain": "ES", "Sri Lanka": "LK",
+    "Sweden": "SE", "Switzerland": "CH", "Taiwan": "TW", "Thailand": "TH",
+    "Turkey": "TR", "UAE": "AE", "United Arab Emirates": "AE",
+    "Ukraine": "UA", "United Kingdom": "GB", "United States": "US",
+    "Uruguay": "UY", "Uzbekistan": "UZ", "Venezuela": "VE", "Vietnam": "VN",
+}
+
+
+def _country_flag(country):
+    code = COUNTRY_CODES.get(country)
+    if not code or len(code) != 2:
+        return ""
+    return chr(0x1F1E6 + ord(code[0]) - ord("A")) + chr(0x1F1E6 + ord(code[1]) - ord("A")) + " "
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +225,7 @@ def get_provider_env(provider):
 
 def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_city=None):
     """Fetch public IP info with retries. If expected_city is set, retries until it matches."""
+    prev_city = None
     for attempt in range(retries):
         result = run(
             "docker", "exec", CONTAINER, "wget", "-qO-", IP_INFO_URL,
@@ -193,8 +237,12 @@ def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_city=
                 if not expected_city:
                     return info
                 actual = info.get("city", "")
-                if actual and actual.lower() == expected_city.lower():
+                if actual and _strip_accents(actual).lower() == _strip_accents(expected_city).lower():
                     return info
+                if prev_city is not None and actual != prev_city:
+                    click.echo(f"Location changed to {actual}, VPN is connected.")
+                    return info
+                prev_city = actual
                 click.echo(f"Connected to {actual or '?'}, waiting for {expected_city}... ({attempt + 1}/{retries})")
             except json.JSONDecodeError:
                 pass
@@ -232,7 +280,7 @@ def _fetch_servers(provider):
         return []
     lines = result.stdout.splitlines()
 
-    country_idx = city_idx = vpn_idx = None
+    country_idx = city_idx = vpn_idx = hostname_idx = None
     for line in lines:
         cells = line.split("|")
         for i, cell in enumerate(cells):
@@ -243,6 +291,8 @@ def _fetch_servers(provider):
                 city_idx = i
             elif text == "vpn" and vpn_idx is None:
                 vpn_idx = i
+            elif text == "hostname" and hostname_idx is None:
+                hostname_idx = i
         if country_idx is not None and city_idx is not None:
             break
 
@@ -263,8 +313,9 @@ def _fetch_servers(provider):
                 continue
         country = cells[country_idx].strip()
         city = cells[city_idx].strip()
+        hostname = cells[hostname_idx].strip().strip("`") if hostname_idx is not None and hostname_idx < len(cells) else ""
         if country and city and country.lower() != "country":
-            servers.append(f"{country}{SERVER_SEP}{city}")
+            servers.append({"country": country, "city": city, "hostname": hostname})
     return servers
 
 
@@ -288,7 +339,7 @@ def _write_cache(servers):
 
 
 def get_servers():
-    """Fetch servers for all active providers. Returns dict[provider, list[str]]."""
+    """Fetch servers for all active providers. Returns dict[provider, list[dict]]."""
     cached = _read_cache()
     if cached is not None:
         return cached
@@ -306,13 +357,36 @@ def get_servers():
 # ---------------------------------------------------------------------------
 
 
-def select_server(items, prompt="Select server: "):
-    """Interactive fuzzy selection using questionary."""
+def select_server(by_provider, prompt="Select server: "):
+    """Interactive server selection with provider grouping."""
+
+    def _search_matcher(search_filter, choice):
+        if isinstance(choice, Separator):
+            return True
+        title = choice.title if isinstance(choice.title, str) else " ".join(
+            frag[1] for frag in choice.title
+        )
+        return search_filter.lower() in title.lower()
+
+    choices = []
+    for provider, srvs in by_provider.items():
+        if not srvs:
+            continue
+        choices.append(Separator(f"  {provider.upper()}"))
+        for s in srvs:
+            flag = _country_flag(s["country"])
+            title = f"{flag}{s['country']} / {s['city']}"
+            if s["hostname"]:
+                title += f"  ({s['hostname']})"
+            value = f"[{provider}] {s['country']}{SERVER_SEP}{s['city']}"
+            choices.append(questionary.Choice(title=title, value=value))
+
     return questionary.select(
         message=prompt,
-        choices=items,
+        choices=choices,
         use_search_filter=True,
         use_jk_keys=False,
+        search_matcher=_search_matcher,
     ).ask()
 
 
@@ -417,7 +491,8 @@ def servers():
         if srvs:
             click.echo(f"\n--- {provider} ({len(srvs)} servers) ---")
             for s in srvs:
-                click.echo(f"  {s}")
+                host = f"  ({s['hostname']})" if s.get("hostname") else ""
+                click.echo(f"  {s['country']}{SERVER_SEP}{s['city']}{host}")
 
 
 @cli.command()
@@ -427,12 +502,7 @@ def server():
     if not any(by_provider.values()):
         raise SystemExit("No servers found. Is Docker running?")
 
-    items = []
-    for provider, srvs in by_provider.items():
-        for s in srvs:
-            items.append(f"[{provider}] {s}")
-
-    selection = select_server(items)
+    selection = select_server(by_provider)
     if not selection:
         raise SystemExit("No selection.")
 
