@@ -90,9 +90,6 @@ def run(*args, capture=False, check=True):
 
 def compose(*args, env_overrides=None):
     """Run docker compose with the vpn.yml file."""
-    cmd = ["docker", "compose", "-f", COMPOSE_FILE, *args]
-    if not env_overrides:
-        return run(*cmd)
     env_path = Path(COMPOSE_FILE).parent / ".env"
     merged = {}
     if env_path.exists():
@@ -101,7 +98,8 @@ def compose(*args, env_overrides=None):
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
                 merged[k.strip()] = v.strip()
-    merged.update(env_overrides)
+    if env_overrides:
+        merged.update(env_overrides)
     with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
         for k, v in merged.items():
             f.write(f"{k}={v}\n")
@@ -323,9 +321,15 @@ def select_server(items, prompt="Select server: "):
 # ---------------------------------------------------------------------------
 
 
+DEBUG = False
+
+
 @click.group()
-def cli():
+@click.option("--debug", is_flag=True, envvar="VPN_DEBUG", help="Enable debug output")
+def cli(debug):
     """Gluetun VPN manager."""
+    global DEBUG
+    DEBUG = debug
 
 
 @cli.command()
@@ -333,7 +337,10 @@ def cli():
 def up(provider):
     """Start the VPN container."""
     provider = validate_provider(provider)
-    compose("up", "-d", env_overrides=get_provider_env(provider))
+    overrides = get_provider_env(provider)
+    if DEBUG:
+        click.echo(f"Env: {' '.join(f'{k}={v}' for k, v in overrides.items())}")
+    compose("up", "-d", env_overrides=overrides)
     click.echo(f"VPN started ({provider}).")
     print_ip_status()
 
@@ -372,7 +379,10 @@ def update():
     if not provider:
         raise SystemExit("No running container. Use 'vpn up --provider <name>' first.")
     run("docker", "pull", GLUETUN_IMAGE)
-    compose("up", "-d", "--force-recreate", env_overrides=get_provider_env(provider))
+    overrides = get_provider_env(provider)
+    if DEBUG:
+        click.echo(f"Env: {' '.join(f'{k}={v}' for k, v in overrides.items())}")
+    compose("up", "-d", "--force-recreate", env_overrides=overrides)
     click.echo(f"Updated and restarted ({provider}).")
     print_ip_status()
 
@@ -438,6 +448,8 @@ def server():
     overrides["SERVER_COUNTRIES"] = country
     if city:
         overrides["SERVER_CITIES"] = city
+    if DEBUG:
+        click.echo(f"Env: {' '.join(f'{k}={v}' for k, v in overrides.items())}")
     compose("up", "-d", env_overrides=overrides)
 
     click.echo(f"VPN restarted ({provider}) → {country}" + (f" / {city}" if city else ""))
