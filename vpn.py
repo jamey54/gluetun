@@ -31,6 +31,8 @@ IP_INFO_URL = "https://ipinfo.io"
 SERVER_SEP = " - "
 FZF_HEIGHT = "40%"
 CACHE_FILE = Path(tempfile.gettempdir()) / "gluetun-servers.json"
+IP_FETCH_RETRIES = 10
+IP_FETCH_DELAY = 3
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -65,6 +67,45 @@ def compose(*args, env_overrides=None):
             finally:
                 os.unlink(f.name)
     return run(*cmd)
+
+
+# ---------------------------------------------------------------------------
+# IP info
+# ---------------------------------------------------------------------------
+
+
+def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY):
+    """Fetch public IP info with retries. Returns parsed dict or None."""
+    for attempt in range(retries):
+        result = run(
+            "docker", "exec", CONTAINER, "wget", "-qO-", IP_INFO_URL,
+            capture=True, check=False,
+        )
+        if result.returncode == 0:
+            try:
+                return json.loads(result.stdout)
+            except json.JSONDecodeError:
+                pass
+        if attempt < retries - 1:
+            click.echo(f"Waiting for VPN connection... ({attempt + 1}/{retries})")
+            time.sleep(delay)
+    return None
+
+
+def print_ip_status(expected_country=None, expected_city=None):
+    """Fetch and display IP info. Warns if location doesn't match."""
+    info = fetch_ip_info()
+    if not info:
+        click.echo("Could not fetch public IP.")
+        return
+    click.echo(f"IP:       {info.get('ip', '?')}")
+    click.echo(f"Location: {info.get('city', '?')}, {info.get('country', '?')}")
+    click.echo(f"Org:      {info.get('org', '?')}")
+
+    if expected_city:
+        actual_city = info.get("city", "")
+        if actual_city and actual_city.lower() != expected_city.lower():
+            click.echo(f"Warning: Expected city '{expected_city}', got '{actual_city}'")
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +177,7 @@ def fzf_select(items, prompt="> "):
             "  or: git clone --depth 1 https://github.com/junegunn/fzf ~/.fzf && ~/.fzf/install"
         )
     proc = subprocess.run(
-        ["fzf", "--prompt", prompt, "--height", FZF_HEIGHT, "--reverse"],
+        ["fzf", "--prompt", prompt, "--height", FZF_HEIGHT, "--reverse", "--track"],
         input="\n".join(items),
         capture_output=True,
         text=True,
@@ -159,6 +200,7 @@ def up():
     """Start the VPN container."""
     compose("up", "-d")
     click.echo("VPN started.")
+    print_ip_status()
 
 
 @cli.command()
@@ -173,6 +215,7 @@ def restart():
     """Restart the VPN container."""
     compose("restart")
     click.echo("VPN restarted.")
+    print_ip_status()
 
 
 @cli.command()
@@ -193,18 +236,13 @@ def update():
     run("docker", "pull", GLUETUN_IMAGE)
     compose("up", "-d", "--force-recreate")
     click.echo("Updated and restarted.")
+    print_ip_status()
 
 
 @cli.command()
 def ip():
     """Show the current public VPN IP."""
-    result = run(
-        "docker", "exec", CONTAINER, "wget", "-qO-", IP_INFO_URL,
-        capture=True, check=False,
-    )
-    if result.returncode != 0:
-        raise SystemExit("Could not fetch IP. Is the container running?")
-    click.echo(result.stdout)
+    print_ip_status()
 
 
 @cli.command()
@@ -218,15 +256,7 @@ def status():
         click.echo(f"Container '{CONTAINER}' not found.")
         return
     click.echo(f"Container: {CONTAINER} ({result.stdout.strip()})")
-
-    result = run(
-        "docker", "exec", CONTAINER, "wget", "-qO-", IP_INFO_URL,
-        capture=True, check=False,
-    )
-    if result.returncode == 0:
-        click.echo(result.stdout)
-    else:
-        click.echo("(Could not fetch public IP)")
+    print_ip_status()
 
 
 @cli.command()
@@ -265,6 +295,7 @@ def server():
     compose("up", "-d", env_overrides=overrides)
 
     click.echo(f"VPN restarted → {country}" + (f" / {city}" if city else ""))
+    print_ip_status(expected_country=country, expected_city=city)
 
 
 if __name__ == "__main__":
