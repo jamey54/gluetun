@@ -359,14 +359,25 @@ def get_servers():
 
 def select_server(by_provider, prompt="Select server: "):
     """Interactive server selection with provider grouping."""
+    from questionary.prompts.common import InquirerControl
 
-    def _search_matcher(search_filter, choice):
-        if isinstance(choice, Separator):
-            return True
-        title = choice.title if isinstance(choice.title, str) else " ".join(
-            frag[1] for frag in choice.title
+    _orig_filtered = InquirerControl.filtered_choices.fget
+
+    @property
+    def _filtered_with_separators(self):
+        if not self.search_filter:
+            return self.choices
+        filtered = [
+            c for c in self.choices
+            if isinstance(c, Separator)
+            or self.search_filter.lower() in c.title.lower()
+        ]
+        self.found_in_search = any(
+            not isinstance(c, Separator) for c in filtered
         )
-        return search_filter.lower() in title.lower()
+        return filtered if self.found_in_search else self.choices
+
+    InquirerControl.filtered_choices = _filtered_with_separators
 
     choices = []
     for provider, srvs in by_provider.items():
@@ -381,13 +392,15 @@ def select_server(by_provider, prompt="Select server: "):
             value = f"[{provider}] {s['country']}{SERVER_SEP}{s['city']}"
             choices.append(questionary.Choice(title=title, value=value))
 
-    return questionary.select(
-        message=prompt,
-        choices=choices,
-        use_search_filter=True,
-        use_jk_keys=False,
-        search_matcher=_search_matcher,
-    ).ask()
+    try:
+        return questionary.select(
+            message=prompt,
+            choices=choices,
+            use_search_filter=True,
+            use_jk_keys=False,
+        ).ask()
+    finally:
+        InquirerControl.filtered_choices = _orig_filtered
 
 
 # ---------------------------------------------------------------------------
