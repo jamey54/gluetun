@@ -19,8 +19,42 @@ CONTAINER = os.getenv("GLUETUN_CONTAINER", "gluetun")
 COMPOSE_FILE = os.getenv(
     "GLUETUN_COMPOSE_FILE", str(Path(__file__).resolve().parent / "vpn.yml")
 )
-PROVIDER = os.getenv("GLUETUN_PROVIDER", "surfshark")
 CACHE_TTL = int(os.getenv("GLUETUN_CACHE_TTL", "3600"))
+
+
+def _load_dotenv():
+    env_path = Path(COMPOSE_FILE).parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+
+
+_load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Provider registry
+# ---------------------------------------------------------------------------
+
+PROVIDERS = {
+    "surfshark": {
+        "required_env": ["SURFSHARK_WIREGUARD_PRIVATE_KEY"],
+        "env_map": {
+            "WIREGUARD_PRIVATE_KEY": "SURFSHARK_WIREGUARD_PRIVATE_KEY",
+            "WIREGUARD_ADDRESSES": "SURFSHARK_WIREGUARD_ADDRESSES",
+        },
+    },
+    "protonvpn": {
+        "required_env": ["PROTONVPN_WIREGUARD_PRIVATE_KEY"],
+        "env_map": {
+            "WIREGUARD_PRIVATE_KEY": "PROTONVPN_WIREGUARD_PRIVATE_KEY",
+            "WIREGUARD_ADDRESSES": "PROTONVPN_WIREGUARD_ADDRESSES",
+        },
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -56,17 +90,90 @@ def run(*args, capture=False, check=True):
 def compose(*args, env_overrides=None):
     """Run docker compose with the vpn.yml file."""
     cmd = ["docker", "compose", "-f", COMPOSE_FILE, *args]
-    if env_overrides:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
-            for k, v in env_overrides.items():
-                f.write(f"{k}={v}\n")
-            f.flush()
-            try:
-                cmd = ["docker", "compose", "-f", COMPOSE_FILE, "--env-file", f.name, *args]
-                return run(*cmd)
-            finally:
-                os.unlink(f.name)
-    return run(*cmd)
+    if not env_overrides:
+        return run(*cmd)
+    env_path = Path(COMPOSE_FILE).parent / ".env"
+    merged = {}
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                merged[k.strip()] = v.strip()
+    merged.update(env_overrides)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+        for k, v in merged.items():
+            f.write(f"{k}={v}\n")
+        f.flush()
+        try:
+            cmd = ["docker", "compose", "-f", COMPOSE_FILE, "--env-file", f.name, *args]
+            return run(*cmd)
+        finally:
+            os.unlink(f.name)
+
+
+# ---------------------------------------------------------------------------
+# Provider helpers
+# ---------------------------------------------------------------------------
+
+
+def validate_provider(name):
+    """Validate provider name and check required env vars. Returns lowercase name."""
+    name = name.lower()
+    if name not in PROVIDERS:
+        valid = ", ".join(sorted(PROVIDERS))
+        raise SystemExit(f"Unknown provider '{name}'. Available: {valid}")
+    missing = [v for v in PROVIDERS[name]["required_env"] if not os.getenv(v)]
+    if missing:
+        raise SystemExit(f"Missing env vars for {name}: {', '.join(missing)}")
+    return name
+
+
+def get_active_providers():
+    """Return providers whose required env vars are all set."""
+    return {
+        name: cfg
+        for name, cfg in PROVIDERS.items()
+        if all(os.getenv(v) for v in cfg["required_env"])
+    }
+
+
+def get_current_provider():
+    """Read VPN_SERVICE_PROVIDER from the running container."""
+    result = run(
+        "docker", "inspect", "--format",
+        "{{range .Config.Env}}{{println .}}{{end}}", CONTAINER,
+        capture=True, check=False,
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if line.startswith("VPN_SERVICE_PROVIDER="):
+            return line.split("=", 1)[1]
+    return None
+
+
+def parse_server_selection(selection):
+    """Parse '[provider] Country / City' into (provider, country, city)."""
+    provider = None
+    if selection.startswith("["):
+        bracket, rest = selection.split("]", 1)
+        provider = bracket[1:]
+        selection = rest.strip()
+    parts = selection.split(SERVER_SEP, 1)
+    country = parts[0].strip()
+    city = parts[1].strip() if len(parts) > 1 else None
+    return provider, country, city
+
+
+def get_provider_env(provider):
+    """Map provider-specific env vars to Gluetun's generic env vars."""
+    overrides = {"VPN_SERVICE_PROVIDER": provider}
+    for gluetun_var, provider_var in PROVIDERS[provider]["env_map"].items():
+        value = os.getenv(provider_var)
+        if value:
+            overrides[gluetun_var] = value
+    return overrides
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +182,7 @@ def compose(*args, env_overrides=None):
 
 
 def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_city=None):
-    """Fetch public IP info with retries. Returns parsed dict or None."""
+    """Fetch public IP info with retries. If expected_city is set, retries until it matches."""
     for attempt in range(retries):
         result = run(
             "docker", "exec", CONTAINER, "wget", "-qO-", IP_INFO_URL,
@@ -89,30 +196,25 @@ def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_city=
                 actual = info.get("city", "")
                 if actual and actual.lower() == expected_city.lower():
                     return info
+                click.echo(f"Connected to {actual or '?'}, waiting for {expected_city}... ({attempt + 1}/{retries})")
             except json.JSONDecodeError:
                 pass
-        if attempt < retries - 1:
+        elif attempt < retries - 1:
             click.echo(f"Waiting for VPN connection... ({attempt + 1}/{retries})")
+        if attempt < retries - 1:
             time.sleep(delay)
     return None
 
 
-def print_ip_status(expected_country=None, expected_city=None, stop_on_mismatch=False):
-    """Fetch and display IP info. Stops container if VPN is down (when stop_on_mismatch=True)."""
+def print_ip_status(expected_city=None):
+    """Fetch and display IP info."""
     info = fetch_ip_info(expected_city=expected_city)
     if not info:
-        click.echo("Could not fetch public IP — VPN connection failed.")
-        if stop_on_mismatch:
-            compose("down")
-            click.echo("Container stopped — no traffic will flow.")
+        click.echo("Could not fetch public IP.")
         return False
     click.echo(f"IP:       {info.get('ip', '?')}")
     click.echo(f"Location: {info.get('city', '?')}, {info.get('country', '?')}")
     click.echo(f"Org:      {info.get('org', '?')}")
-    if expected_city:
-        actual = info.get("city", "")
-        if actual and actual.lower() != expected_city.lower():
-            click.echo(f"Warning: Expected city '{expected_city}', got '{actual}'")
     return True
 
 
@@ -121,26 +223,44 @@ def print_ip_status(expected_country=None, expected_city=None, stop_on_mismatch=
 # ---------------------------------------------------------------------------
 
 
-def _fetch_servers():
+def _fetch_servers(provider):
     result = run(
         "docker", "run", "--rm", GLUETUN_IMAGE,
-        "format-servers", f"-{PROVIDER}",
+        "format-servers", f"-{provider}",
         capture=True, check=False,
     )
     if result.returncode != 0:
         return []
-    servers = []
-    for line in result.stdout.splitlines():
+    lines = result.stdout.splitlines()
+
+    country_idx = city_idx = None
+    for line in lines:
         if not line.strip().startswith("|"):
             continue
-        cols = [c.strip() for c in line.split("|")]
-        cols = [c for c in cols if c]
-        if len(cols) < 3:
+        cols = [c.strip() for c in line.split("|") if c.strip()]
+        for i, col in enumerate(cols):
+            lower = col.lower()
+            if lower == "country":
+                country_idx = i
+            elif lower == "city":
+                city_idx = i
+        if country_idx is not None and city_idx is not None:
+            break
+
+    if country_idx is None or city_idx is None:
+        country_idx, city_idx = 1, 2
+
+    servers = []
+    for line in lines:
+        if not line.strip().startswith("|"):
             continue
-        if cols[0] in ("Region", "---", ""):
+        cols = [c.strip() for c in line.split("|") if c.strip()]
+        if len(cols) <= max(country_idx, city_idx):
             continue
-        country = cols[1]
-        city = cols[2]
+        if cols[0] in ("---", "") or cols[0].lower() in ("region", "country", "city"):
+            continue
+        country = cols[country_idx]
+        city = cols[city_idx]
         servers.append(f"{country}{SERVER_SEP}{city}")
     return servers
 
@@ -162,13 +282,17 @@ def _write_cache(servers):
 
 
 def get_servers():
-    servers = _read_cache()
-    if servers is not None:
-        return servers
-    servers = _fetch_servers()
-    if servers:
-        _write_cache(servers)
-    return servers
+    """Fetch servers for all active providers. Returns dict[provider, list[str]]."""
+    cached = _read_cache()
+    if cached is not None:
+        return cached
+    active = get_active_providers()
+    by_provider = {}
+    for provider in active:
+        by_provider[provider] = _fetch_servers(provider)
+    if any(by_provider.values()):
+        _write_cache(by_provider)
+    return by_provider
 
 
 # ---------------------------------------------------------------------------
@@ -204,10 +328,12 @@ def cli():
 
 
 @cli.command()
-def up():
+@click.option("--provider", required=True, help="VPN provider (e.g. surfshark, protonvpn)")
+def up(provider):
     """Start the VPN container."""
-    compose("up", "-d")
-    click.echo("VPN started.")
+    provider = validate_provider(provider)
+    compose("up", "-d", env_overrides=get_provider_env(provider))
+    click.echo(f"VPN started ({provider}).")
     print_ip_status()
 
 
@@ -241,9 +367,12 @@ def logs(follow, tail):
 @cli.command()
 def update():
     """Pull latest gluetun image and recreate the container."""
+    provider = get_current_provider()
+    if not provider:
+        raise SystemExit("No running container. Use 'vpn up --provider <name>' first.")
     run("docker", "pull", GLUETUN_IMAGE)
-    compose("up", "-d", "--force-recreate")
-    click.echo("Updated and restarted.")
+    compose("up", "-d", "--force-recreate", env_overrides=get_provider_env(provider))
+    click.echo(f"Updated and restarted ({provider}).")
     print_ip_status()
 
 
@@ -269,41 +398,49 @@ def status():
 
 @cli.command()
 def servers():
-    """List available servers."""
-    srvs = get_servers()
-    if not srvs:
+    """List available servers for all active providers."""
+    by_provider = get_servers()
+    if not any(by_provider.values()):
         raise SystemExit("No servers found. Is Docker running?")
-    click.echo(f"{len(srvs)} servers available:\n")
-    for s in srvs:
-        click.echo(f"  {s}")
+    for provider, srvs in by_provider.items():
+        if srvs:
+            click.echo(f"\n--- {provider} ({len(srvs)} servers) ---")
+            for s in srvs:
+                click.echo(f"  {s}")
 
 
 @cli.command()
 def server():
     """Interactively select a server and restart."""
-    srvs = get_servers()
-    if not srvs:
+    by_provider = get_servers()
+    if not any(by_provider.values()):
         raise SystemExit("No servers found. Is Docker running?")
 
-    selection = fzf_select(srvs, prompt="Select server: ")
+    items = []
+    for provider, srvs in by_provider.items():
+        for s in srvs:
+            items.append(f"[{provider}] {s}")
+
+    selection = fzf_select(items, prompt="Select server: ")
     if not selection:
         raise SystemExit("No selection.")
 
-    parts = selection.split(SERVER_SEP, 1)
-    country = parts[0].strip()
-    city = parts[1].strip() if len(parts) > 1 else None
+    provider, country, city = parse_server_selection(selection)
+    provider = validate_provider(provider)
 
+    click.echo(f"Provider: {provider}")
     click.echo(f"Location: {country}" + (f" / {city}" if city else ""))
 
     compose("down")
 
-    overrides = {"SERVER_COUNTRIES": country}
+    overrides = get_provider_env(provider)
+    overrides["SERVER_COUNTRIES"] = country
     if city:
         overrides["SERVER_CITIES"] = city
     compose("up", "-d", env_overrides=overrides)
 
-    click.echo(f"VPN restarted → {country}" + (f" / {city}" if city else ""))
-    print_ip_status(expected_country=country, expected_city=city, stop_on_mismatch=True)
+    click.echo(f"VPN restarted ({provider}) → {country}" + (f" / {city}" if city else ""))
+    print_ip_status(expected_city=city)
 
 
 if __name__ == "__main__":
