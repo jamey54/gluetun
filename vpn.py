@@ -63,7 +63,9 @@ PROVIDERS = {
 GLUETUN_IMAGE = "qmcgaw/gluetun:latest"
 IP_INFO_URL = "https://ipinfo.io"
 SERVER_SEP = " - "
-CACHE_FILE = Path(tempfile.gettempdir()) / "gluetun-servers.json"
+CACHE_VERSION = 1
+CACHE_DIR = Path.home() / ".cache" / "gluetun"
+CACHE_FILE = CACHE_DIR / "servers.json"
 IP_FETCH_RETRIES = 15
 IP_FETCH_DELAY = 2
 
@@ -232,7 +234,7 @@ def _fetch_servers(provider):
         return []
     lines = result.stdout.splitlines()
 
-    country_idx = city_idx = None
+    country_idx = city_idx = vpn_idx = None
     for line in lines:
         cells = line.split("|")
         for i, cell in enumerate(cells):
@@ -241,6 +243,8 @@ def _fetch_servers(provider):
                 country_idx = i
             elif text == "city" and city_idx is None:
                 city_idx = i
+            elif text == "vpn" and vpn_idx is None:
+                vpn_idx = i
         if country_idx is not None and city_idx is not None:
             break
 
@@ -255,6 +259,10 @@ def _fetch_servers(provider):
         inner = [c.strip() for c in cells[1:-1]]
         if not inner or all(c == "" or c.startswith("-") for c in inner):
             continue
+        if vpn_idx is not None and vpn_idx < len(cells):
+            vpn_type = cells[vpn_idx].strip().lower()
+            if vpn_type != "wireguard":
+                continue
         country = cells[country_idx].strip()
         city = cells[city_idx].strip()
         if country and city and country.lower() != "country":
@@ -267,6 +275,8 @@ def _read_cache():
         return None
     try:
         data = json.loads(CACHE_FILE.read_text())
+        if data.get("v") != CACHE_VERSION:
+            return None
         if time.time() - data.get("ts", 0) < CACHE_TTL:
             return data["servers"]
     except (json.JSONDecodeError, KeyError):
@@ -275,7 +285,8 @@ def _read_cache():
 
 
 def _write_cache(servers):
-    CACHE_FILE.write_text(json.dumps({"ts": time.time(), "servers": servers}))
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_FILE.write_text(json.dumps({"v": CACHE_VERSION, "ts": time.time(), "servers": servers}))
 
 
 def get_servers():
