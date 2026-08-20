@@ -48,7 +48,7 @@ PROVIDERS = {
         },
     },
     "protonvpn": {
-        "required_env": ["PROTONVPN_WIREGUARD_PRIVATE_KEY"],
+        "required_env": ["PROTONVPN_WIREGUARD_PRIVATE_KEY", "PROTONVPN_WIREGUARD_ADDRESSES"],
         "env_map": {
             "WIREGUARD_PRIVATE_KEY": "PROTONVPN_WIREGUARD_PRIVATE_KEY",
             "WIREGUARD_ADDRESSES": "PROTONVPN_WIREGUARD_ADDRESSES",
