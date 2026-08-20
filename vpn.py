@@ -185,7 +185,7 @@ def fzf_select(items, prompt="> "):
             "  or: git clone --depth 1 https://github.com/junegunn/fzf ~/.fzf && ~/.fzf/install"
         )
     proc = subprocess.run(
-        ["fzf", "--prompt", prompt, "--height", FZF_HEIGHT, "--reverse", "--track"],
+        ["fzf", "--prompt", prompt, "--height", FZF_HEIGHT, "--reverse"],
         input="\n".join(items),
         capture_output=True,
         text=True,
