@@ -235,14 +235,12 @@ def _fetch_servers(provider):
 
     country_idx = city_idx = None
     for line in lines:
-        if not line.strip().startswith("|"):
-            continue
-        cols = [c.strip() for c in line.split("|") if c.strip()]
-        for i, col in enumerate(cols):
-            lower = col.lower()
-            if lower == "country":
+        cells = line.split("|")
+        for i, cell in enumerate(cells):
+            text = cell.strip().lower()
+            if text == "country" and country_idx is None:
                 country_idx = i
-            elif lower == "city":
+            elif text == "city" and city_idx is None:
                 city_idx = i
         if country_idx is not None and city_idx is not None:
             break
@@ -252,16 +250,16 @@ def _fetch_servers(provider):
 
     servers = []
     for line in lines:
-        if not line.strip().startswith("|"):
+        cells = line.split("|")
+        if len(cells) <= max(country_idx, city_idx):
             continue
-        cols = [c.strip() for c in line.split("|") if c.strip()]
-        if len(cols) <= max(country_idx, city_idx):
+        inner = [c.strip() for c in cells[1:-1]]
+        if not inner or all(c == "" or c.startswith("-") for c in inner):
             continue
-        if cols[0] in ("---", "") or cols[0].lower() in ("region", "country", "city"):
-            continue
-        country = cols[country_idx]
-        city = cols[city_idx]
-        servers.append(f"{country}{SERVER_SEP}{city}")
+        country = cells[country_idx].strip()
+        city = cells[city_idx].strip()
+        if country and city and country.lower() != "country":
+            servers.append(f"{country}{SERVER_SEP}{city}")
     return servers
 
 
@@ -309,7 +307,7 @@ def fzf_select(items, prompt="> "):
             "  or: git clone --depth 1 https://github.com/junegunn/fzf ~/.fzf && ~/.fzf/install"
         )
     proc = subprocess.run(
-        ["fzf", "--prompt", prompt, "--height", FZF_HEIGHT, "--reverse", "--bind", "change:first"],
+        ["fzf", "--prompt", prompt, "--height", FZF_HEIGHT, "--reverse", "--exact", "--bind", "change:first"],
         input="\n".join(items),
         capture_output=True,
         text=True,
