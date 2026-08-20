@@ -59,10 +59,17 @@ All settings are overridable via environment variables:
 
 ## vpn.yml
 
-Replace the `changeme` values with your Surfshark WireGuard credentials:
+Secrets are stored in `.env` (not committed — see `.gitignore`).
+
+```bash
+cp .env.sample .env
+# edit .env with your Surfshark WireGuard credentials
+```
+
+Required values in `.env`:
 
 - `WIREGUARD_PRIVATE_KEY`
 - `WIREGUARD_ADDRESSES`
-- `HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE` (API key)
+- `HTTP_CONTROL_SERVER_API_KEY`
 
-Location is set via `SERVER_COUNTRIES` / `SERVER_CITIES` — use `vpn server` to change interactively.
+Location is set via `SERVER_COUNTRIES` / `SERVER_CITIES` in `vpn.yml` — use `vpn server` to change interactively.
