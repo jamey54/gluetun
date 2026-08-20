@@ -3,13 +3,13 @@
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
 
 import click
+import questionary
 
 # ---------------------------------------------------------------------------
 # Config (env vars — override these to customize behavior)
@@ -63,7 +63,6 @@ PROVIDERS = {
 GLUETUN_IMAGE = "qmcgaw/gluetun:latest"
 IP_INFO_URL = "https://ipinfo.io"
 SERVER_SEP = " - "
-FZF_HEIGHT = "40%"
 CACHE_FILE = Path(tempfile.gettempdir()) / "gluetun-servers.json"
 IP_FETCH_RETRIES = 15
 IP_FETCH_DELAY = 2
@@ -294,25 +293,17 @@ def get_servers():
 
 
 # ---------------------------------------------------------------------------
-# fzf
+# Interactive selection
 # ---------------------------------------------------------------------------
 
 
-def fzf_select(items, prompt="> "):
-    """Pipe items to fzf. Returns selected string or None."""
-    if not shutil.which("fzf"):
-        raise SystemExit(
-            "fzf is not installed.\n"
-            "  sudo apt install fzf\n"
-            "  or: git clone --depth 1 https://github.com/junegunn/fzf ~/.fzf && ~/.fzf/install"
-        )
-    proc = subprocess.run(
-        ["fzf", "--prompt", prompt, "--height", FZF_HEIGHT, "--reverse", "--exact", "--bind", "change:first"],
-        input="\n".join(items),
-        capture_output=True,
-        text=True,
-    )
-    return proc.stdout.strip() if proc.returncode == 0 else None
+def select_server(items, prompt="Select server: "):
+    """Interactive fuzzy selection using questionary."""
+    return questionary.select(
+        message=prompt,
+        choices=items,
+        use_search_filter=True,
+    ).ask()
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +410,7 @@ def server():
         for s in srvs:
             items.append(f"[{provider}] {s}")
 
-    selection = fzf_select(items, prompt="Select server: ")
+    selection = select_server(items)
     if not selection:
         raise SystemExit("No selection.")
 
