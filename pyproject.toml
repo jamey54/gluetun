@@ -9,7 +9,10 @@ requires-python = ">=3.10"
 dependencies = ["click", "questionary", "rich"]
 
 [tool.setuptools]
-py-modules = ["vpn"]
+packages = ["vpn"]
+
+[tool.setuptools.package-data]
+vpn = ["vpn.yml"]
 
 [project.scripts]
 vpn = "vpn:cli"
