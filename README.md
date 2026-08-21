@@ -11,15 +11,13 @@ Both providers can be active simultaneously (their servers appear side by side i
 
 ## Requirements
 
-- Python 3.8+
-- [click](https://click.palletsprojects.com/) — `pip install click`
-- [fzf](https://github.com/junegunn/fzf) — `sudo apt install fzf`
+- Python 3.10+
+- [click](https://click.palletsprojects.com/), [questionary](https://questionary.readthedocs.io/) and [rich](https://rich.readthedocs.io/) — installed automatically via `pip install .`
 
 ## Install
 
 ```bash
-pip install click
-sudo apt install fzf
+pip install .
 chmod +x vpn.py
 ```
 
@@ -69,7 +67,7 @@ You only need to set credentials for providers you actually use.
 | `vpn status` | Container state + public IP |
 | `vpn logs` | Show container logs (`-f` to follow, `-n` for line count) |
 | `vpn update` | Pull latest gluetun image + recreate |
-| `vpn server` | Interactive fzf search — pick location, restart |
+| `vpn server` | Interactive picker — pick location, restart |
 | `vpn servers` | List available servers (all active providers) |
 
 ## Provider details
@@ -92,9 +90,9 @@ vpn up --provider protonvpn
 
 ## Server selection
 
-`vpn servers` lists servers for all providers with valid credentials in `.env`.
+`vpn servers` lists all servers in an aligned table (provider, country, city, server) for every provider with valid credentials in `.env`.
 
-`vpn server` opens an fzf picker showing servers from all active providers. The selected provider is automatically used when restarting the container.
+`vpn server` opens an interactive picker showing the same columns. The selected provider is automatically used when restarting the container.
 
 ## Configuration
 
