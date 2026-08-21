@@ -12,6 +12,8 @@ from pathlib import Path
 import click
 import questionary
 from questionary import Separator
+from rich.console import Console
+from rich.table import Table
 
 # ---------------------------------------------------------------------------
 # Config (env vars — override these to customize behavior)
@@ -115,43 +117,6 @@ def compose(*args, env_overrides=None):
 
 def _strip_accents(s):
     return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
-
-
-COUNTRY_CODES = {
-    "Albania": "AL", "Algeria": "DZ", "Argentina": "AR", "Armenia": "AM",
-    "Australia": "AU", "Austria": "AT", "Azerbaijan": "AZ", "Bahamas": "BS",
-    "Bahrain": "BH", "Bangladesh": "BD", "Belarus": "BY", "Belgium": "BE",
-    "Bolivia": "BO", "Bosnia and Herzegovina": "BA", "Brazil": "BR",
-    "Bulgaria": "BG", "Cambodia": "KH", "Canada": "CA", "Chile": "CL",
-    "Colombia": "CO", "Costa Rica": "CR", "Croatia": "HR", "Cyprus": "CY",
-    "Czech Republic": "CZ", "Czechia": "CZ", "Denmark": "DK", "Ecuador": "EC",
-    "Estonia": "EE", "Finland": "FI", "France": "FR", "Georgia": "GE",
-    "Germany": "DE", "Ghana": "GH", "Greece": "GR", "Guatemala": "GT",
-    "Honduras": "HN", "Hong Kong": "HK", "Hungary": "HU", "Iceland": "IS",
-    "India": "IN", "Indonesia": "ID", "Ireland": "IE", "Israel": "IL",
-    "Italy": "IT", "Jamaica": "JM", "Japan": "JP", "Jordan": "JO",
-    "Kazakhstan": "KZ", "Kenya": "KE", "Kuwait": "KW", "Latvia": "LV",
-    "Lithuania": "LT", "Luxembourg": "LU", "Malaysia": "MY", "Malta": "MT",
-    "Mexico": "MX", "Moldova": "MD", "Monaco": "MC", "Mongolia": "MN",
-    "Montenegro": "ME", "Morocco": "MA", "Myanmar": "MM", "Nepal": "NP",
-    "Netherlands": "NL", "New Zealand": "NZ", "Nigeria": "NG",
-    "North Macedonia": "MK", "Norway": "NO", "Pakistan": "PK", "Panama": "PA",
-    "Paraguay": "PY", "Peru": "PE", "Philippines": "PH", "Poland": "PL",
-    "Portugal": "PT", "Romania": "RO", "Russia": "RU", "Saudi Arabia": "SA",
-    "Serbia": "RS", "Singapore": "SG", "Slovakia": "SK", "Slovenia": "SI",
-    "South Africa": "ZA", "South Korea": "KR", "Spain": "ES", "Sri Lanka": "LK",
-    "Sweden": "SE", "Switzerland": "CH", "Taiwan": "TW", "Thailand": "TH",
-    "Turkey": "TR", "UAE": "AE", "United Arab Emirates": "AE",
-    "Ukraine": "UA", "United Kingdom": "GB", "United States": "US",
-    "Uruguay": "UY", "Uzbekistan": "UZ", "Venezuela": "VE", "Vietnam": "VN",
-}
-
-
-def _country_flag(country):
-    code = COUNTRY_CODES.get(country)
-    if not code or len(code) != 2:
-        return ""
-    return chr(0x1F1E6 + ord(code[0]) - ord("A")) + chr(0x1F1E6 + ord(code[1]) - ord("A")) + " "
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +318,43 @@ def get_servers():
 
 
 # ---------------------------------------------------------------------------
+# Server listing
+# ---------------------------------------------------------------------------
+
+
+def _sorted_server_rows(by_provider):
+    """Flatten to (provider, country, city, hostname) rows sorted by country, city, provider."""
+    rows = [
+        (provider, s["country"], s["city"], s.get("hostname", ""))
+        for provider, srvs in by_provider.items()
+        for s in srvs
+    ]
+    return sorted(
+        rows,
+        key=lambda r: (_strip_accents(r[1]).lower(), _strip_accents(r[2]).lower(), r[0]),
+    )
+
+
+def print_servers_table(by_provider):
+    """Print all servers as an aligned table: Provider | Country | City | Server."""
+    rows = _sorted_server_rows(by_provider)
+    console = Console(highlight=False)
+    table = Table(box=None, padding=(0, 2, 0, 0), header_style="bold")
+    table.add_column("Provider", style="cyan", no_wrap=True)
+    table.add_column("Country", no_wrap=True)
+    table.add_column("City", no_wrap=True)
+    table.add_column("Server", style="dim", no_wrap=True)
+    for provider, country, city, hostname in rows:
+        table.add_row(provider, country, city, hostname or "-")
+    console.print(table)
+    providers = len({r[0] for r in rows})
+    console.print(
+        f"[dim]{len(rows)} server{'s' if len(rows) != 1 else ''}"
+        f" · {providers} provider{'s' if providers != 1 else ''}[/dim]"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Interactive selection
 # ---------------------------------------------------------------------------
 
@@ -380,17 +382,20 @@ def select_server(by_provider, prompt="Select server: "):
     InquirerControl.filtered_choices = _filtered_with_separators
 
     choices = []
-    for provider, srvs in by_provider.items():
-        if not srvs:
-            continue
-        choices.append(Separator(f"  {provider.upper()}"))
-        for s in srvs:
-            flag = _country_flag(s["country"])
-            title = f"{flag}{s['country']} / {s['city']}"
-            if s["hostname"]:
-                title += f"  ({s['hostname']})"
-            value = f"[{provider}] {s['country']}{SERVER_SEP}{s['city']}"
-            choices.append(questionary.Choice(title=title, value=value))
+    rows = _sorted_server_rows(by_provider)
+    widths = {
+        key: max(len(r[i]) for r in rows)
+        for i, key in enumerate(("provider", "country", "city"))
+    }
+    for provider, country, city, hostname in rows:
+        title = (
+            f"{provider:<{widths['provider']}}  "
+            f"{country:<{widths['country']}}  "
+            f"{city:<{widths['city']}}  "
+            f"{hostname or '-'}"
+        )
+        value = f"[{provider}] {country}{SERVER_SEP}{city}"
+        choices.append(questionary.Choice(title=title, value=value))
 
     try:
         return questionary.select(
@@ -500,12 +505,7 @@ def servers():
     by_provider = get_servers()
     if not any(by_provider.values()):
         raise SystemExit("No servers found. Is Docker running?")
-    for provider, srvs in by_provider.items():
-        if srvs:
-            click.echo(f"\n--- {provider} ({len(srvs)} servers) ---")
-            for s in srvs:
-                host = f"  ({s['hostname']})" if s.get("hostname") else ""
-                click.echo(f"  {s['country']}{SERVER_SEP}{s['city']}{host}")
+    print_servers_table(by_provider)
 
 
 @cli.command()
