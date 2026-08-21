@@ -1,6 +1,6 @@
 # vpn
 
-Single-file CLI for managing a [Gluetun](https://github.com/qdm12/gluetun) VPN container.
+Small Python CLI for managing a [Gluetun](https://github.com/qdm12/gluetun) VPN container via docker compose.
 
 ## Supported providers
 
@@ -18,14 +18,9 @@ Both providers can be active simultaneously (their servers appear side by side i
 
 ```bash
 pip install .
-chmod +x vpn.py
 ```
 
-Optional — symlink so `vpn` is available everywhere:
-
-```bash
-ln -s $(pwd)/vpn.py /usr/local/bin/vpn
-```
+This installs the `vpn` command (and its dependencies) into your environment.
 
 ## Shell completion
 
@@ -101,5 +96,5 @@ All settings are overridable via environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GLUETUN_CONTAINER` | `gluetun` | Container name |
-| `GLUETUN_COMPOSE_FILE` | `./vpn.yml` | Path to compose file |
+| `GLUETUN_COMPOSE_FILE` | bundled `vpn.yml` | Path to compose file (a `./vpn.yml` in the working directory takes precedence) |
 | `GLUETUN_CACHE_TTL` | `3600` | Server cache TTL (seconds) |
