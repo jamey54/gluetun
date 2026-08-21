@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """vpn — Gluetun CLI manager."""
 
 import json
@@ -7,6 +6,7 @@ import subprocess
 import tempfile
 import time
 import unicodedata
+from importlib.resources import files as resource_files
 from pathlib import Path
 
 import click
@@ -20,10 +20,21 @@ from rich.table import Table
 # ---------------------------------------------------------------------------
 
 CONTAINER = os.getenv("GLUETUN_CONTAINER", "gluetun")
-COMPOSE_FILE = os.getenv(
-    "GLUETUN_COMPOSE_FILE", str(Path(__file__).resolve().parent / "vpn.yml")
-)
 CACHE_TTL = int(os.getenv("GLUETUN_CACHE_TTL", "3600"))
+
+
+def _resolve_compose_file():
+    """Locate vpn.yml: env override, then cwd, then the packaged copy."""
+    override = os.getenv("GLUETUN_COMPOSE_FILE")
+    if override:
+        return override
+    local = Path.cwd() / "vpn.yml"
+    if local.exists():
+        return str(local)
+    return str(resource_files("vpn").joinpath("vpn.yml"))
+
+
+COMPOSE_FILE = _resolve_compose_file()
 
 
 def _load_dotenv():
