@@ -1,6 +1,7 @@
 # AGENTS.md — Gluetun Working Guidelines
 
 ## How to work
+- Create a comprehensive environment for you to be able to develop and fully test your code. Install dependencies, required tools etc.
 - Work in small iterations — one focused step at a time.
 - Commit after each successful step. Small, frequent commits; never one big commit at the end.
 - Re-review the user's prompt before finishing and confirm every request was addressed. If something was deferred, state it clearly in the progress report summary.
