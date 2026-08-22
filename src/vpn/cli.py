@@ -82,20 +82,38 @@ def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_count
 
 
 def print_ip_status(expected_country=None):
-    """Fetch and display IP info. Location is green when the country matches."""
+    """Fetch and display IP info. Location is green when the country matches.
+
+    Returns True only for a verified connection (or successful fetch when
+    no expected country was given).
+    """
     info = fetch_ip_info(expected_country=expected_country)
     if not info:
         click.echo("Could not fetch public IP.")
         return False
     click.echo(f"IP:       {info.get('ip', '?')}")
     location = f"{info.get('city', '?')}, {info.get('country', '?')}"
+    verified = True
     if expected_country:
         actual = info.get("country", "")
-        ok = bool(actual) and _same_country(actual, expected_country)
-        location = click.style(location, fg="green" if ok else "red")
+        verified = bool(actual) and _same_country(actual, expected_country)
+        location = click.style(location, fg="green" if verified else "red")
     click.echo(f"Location: {location}")
     click.echo(f"Org:      {info.get('org', '?')}")
-    return True
+    return verified
+
+
+def finish_connection(expected_country=None, speedtest=True):
+    """Show connection status and optionally run a speed test."""
+    verified = print_ip_status(expected_country=expected_country)
+    if verified and speedtest:
+        click.echo("Running speed test...")
+        result = measure()
+        if result:
+            click.echo(format_result(result))
+        else:
+            click.echo("Speed test failed.")
+    return verified
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +137,8 @@ def cli(debug):
     default=DEFAULT_PROTOCOL,
     help="VPN protocol",
 )
-def up(provider, protocol):
+@click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
+def up(provider, protocol, no_speedtest):
     """Start the VPN container."""
     provider, protocol = validate_provider(provider, protocol)
     overrides = get_provider_env(provider, protocol)
@@ -127,7 +146,7 @@ def up(provider, protocol):
         click.echo(f"Env: {' '.join(f'{k}={v}' for k, v in overrides.items())}")
     compose("up", "-d", env_overrides=overrides)
     click.echo(f"VPN started ({provider}/{protocol}).")
-    print_ip_status()
+    finish_connection(speedtest=not no_speedtest)
 
 
 @cli.command()
@@ -158,7 +177,8 @@ def logs(follow, tail):
 
 
 @cli.command()
-def update():
+@click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
+def update(no_speedtest):
     """Pull latest gluetun image and recreate the container."""
     current = get_current_vpn()
     if not current:
@@ -170,7 +190,7 @@ def update():
         click.echo(f"Env: {' '.join(f'{k}={v}' for k, v in overrides.items())}")
     compose("up", "-d", "--force-recreate", env_overrides=overrides)
     click.echo(f"Updated and restarted ({provider}/{protocol}).")
-    print_ip_status()
+    finish_connection(speedtest=not no_speedtest)
 
 
 @cli.command()
@@ -216,7 +236,8 @@ def servers():
 
 
 @cli.command()
-def server():
+@click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
+def server(no_speedtest):
     """Interactively select a server and restart."""
     by_provider = listable_servers(get_servers())
     if not any(by_provider.values()):
@@ -243,4 +264,4 @@ def server():
     compose("up", "-d", env_overrides=overrides)
 
     click.echo(f"VPN restarted ({provider}/{protocol}) → {country}" + (f" / {city}" if city else ""))
-    print_ip_status(expected_country=country)
+    finish_connection(expected_country=country, speedtest=not no_speedtest)
