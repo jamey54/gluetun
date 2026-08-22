@@ -34,8 +34,12 @@ DEBUG = False
 # ---------------------------------------------------------------------------
 
 
-def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_city=None):
-    """Fetch public IP info with retries. If expected_city is set, retries until it matches."""
+def _same_country(a, b):
+    return strip_accents(a).lower() == strip_accents(b).lower()
+
+
+def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_country=None):
+    """Fetch public IP info with retries. If expected_country is set, retries until it matches."""
     prev_city = None
     for attempt in range(retries):
         result = run(
@@ -45,16 +49,20 @@ def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_city=
         if result.returncode == 0:
             try:
                 info = json.loads(result.stdout)
-                if not expected_city:
+                if not expected_country:
                     return info
-                actual = info.get("city", "")
-                if actual and strip_accents(actual).lower() == strip_accents(expected_city).lower():
+                actual_country = info.get("country", "")
+                city = info.get("city", "")
+                if actual_country and _same_country(actual_country, expected_country):
                     return info
-                if prev_city is not None and actual != prev_city:
-                    click.echo(f"Location changed to {actual}, VPN is connected.")
+                if prev_city is not None and city != prev_city:
+                    click.echo(f"Location changed to {city}, VPN is connected.")
                     return info
-                prev_city = actual
-                click.echo(f"Connected to {actual or '?'}, waiting for {expected_city}... ({attempt + 1}/{retries})")
+                prev_city = city
+                click.echo(
+                    f"Connected to {city or '?'}, waiting for {expected_country}..."
+                    f" ({attempt + 1}/{retries})"
+                )
             except json.JSONDecodeError:
                 pass
         elif attempt < retries - 1:
@@ -64,14 +72,19 @@ def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_city=
     return None
 
 
-def print_ip_status(expected_city=None):
-    """Fetch and display IP info."""
-    info = fetch_ip_info(expected_city=expected_city)
+def print_ip_status(expected_country=None):
+    """Fetch and display IP info. Location is green when the country matches."""
+    info = fetch_ip_info(expected_country=expected_country)
     if not info:
         click.echo("Could not fetch public IP.")
         return False
     click.echo(f"IP:       {info.get('ip', '?')}")
-    click.echo(f"Location: {info.get('city', '?')}, {info.get('country', '?')}")
+    location = f"{info.get('city', '?')}, {info.get('country', '?')}"
+    if expected_country:
+        actual = info.get("country", "")
+        ok = bool(actual) and _same_country(actual, expected_country)
+        location = click.style(location, fg="green" if ok else "red")
+    click.echo(f"Location: {location}")
     click.echo(f"Org:      {info.get('org', '?')}")
     return True
 
@@ -208,4 +221,4 @@ def server():
     compose("up", "-d", env_overrides=overrides)
 
     click.echo(f"VPN restarted ({provider}/{protocol}) → {country}" + (f" / {city}" if city else ""))
-    print_ip_status(expected_city=city)
+    print_ip_status(expected_country=country)
