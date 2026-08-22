@@ -21,6 +21,7 @@ from vpn.servers import (
     print_servers_table,
     strip_accents,
 )
+from vpn.speedtest import DEFAULT_SIZE_MB, format_result, measure
 
 IP_INFO_URL = "https://ipinfo.io"
 IP_FETCH_RETRIES = 15
@@ -36,6 +37,14 @@ DEBUG = False
 
 def _same_country(a, b):
     return strip_accents(a).lower() == strip_accents(b).lower()
+
+
+def container_running():
+    result = run(
+        "docker", "inspect", "--format", "{{.State.Status}}", CONTAINER,
+        capture=True, check=False,
+    )
+    return result.returncode == 0
 
 
 def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_country=None):
@@ -168,6 +177,19 @@ def update():
 def ip():
     """Show the current public VPN IP."""
     print_ip_status()
+
+
+@cli.command()
+@click.option("-s", "--size", type=int, default=DEFAULT_SIZE_MB, show_default=True, help="Download size (MB)")
+def speedtest(size):
+    """Measure download speed through the VPN."""
+    if not container_running():
+        raise SystemExit(f"Container '{CONTAINER}' is not running.")
+    click.echo(f"Downloading {size} MB...")
+    result = measure(size)
+    if not result:
+        raise SystemExit("Speed test failed.")
+    click.echo(format_result(result))
 
 
 @cli.command()
