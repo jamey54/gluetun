@@ -6,10 +6,20 @@ import time
 import click
 
 from vpn.config import CONTAINER
-from vpn.docker import GLUETUN_IMAGE, compose, get_current_provider, run
+from vpn.docker import GLUETUN_IMAGE, compose, get_current_vpn, run
 from vpn.picker import select_server
-from vpn.providers import get_provider_env, validate_provider
-from vpn.servers import get_servers, parse_server_selection, print_servers_table, strip_accents
+from vpn.providers import (
+    DEFAULT_PROTOCOL,
+    PROVIDERS,
+    get_provider_env,
+    validate_provider,
+)
+from vpn.servers import (
+    get_servers,
+    parse_server_selection,
+    print_servers_table,
+    strip_accents,
+)
 
 IP_INFO_URL = "https://ipinfo.io"
 IP_FETCH_RETRIES = 15
@@ -80,14 +90,20 @@ def cli(debug):
 
 @cli.command()
 @click.option("--provider", required=True, help="VPN provider (e.g. surfshark, protonvpn)")
-def up(provider):
+@click.option(
+    "--protocol",
+    type=click.Choice(sorted({p for cfg in PROVIDERS.values() for p in cfg}), case_sensitive=False),
+    default=DEFAULT_PROTOCOL,
+    help="VPN protocol",
+)
+def up(provider, protocol):
     """Start the VPN container."""
-    provider = validate_provider(provider)
-    overrides = get_provider_env(provider)
+    provider, protocol = validate_provider(provider, protocol)
+    overrides = get_provider_env(provider, protocol)
     if DEBUG:
         click.echo(f"Env: {' '.join(f'{k}={v}' for k, v in overrides.items())}")
     compose("up", "-d", env_overrides=overrides)
-    click.echo(f"VPN started ({provider}).")
+    click.echo(f"VPN started ({provider}/{protocol}).")
     print_ip_status()
 
 
@@ -121,15 +137,16 @@ def logs(follow, tail):
 @cli.command()
 def update():
     """Pull latest gluetun image and recreate the container."""
-    provider = get_current_provider()
-    if not provider:
+    current = get_current_vpn()
+    if not current:
         raise SystemExit("No running container. Use 'vpn up --provider <name>' first.")
+    provider, protocol = current
     run("docker", "pull", GLUETUN_IMAGE)
-    overrides = get_provider_env(provider)
+    overrides = get_provider_env(provider, protocol)
     if DEBUG:
         click.echo(f"Env: {' '.join(f'{k}={v}' for k, v in overrides.items())}")
     compose("up", "-d", "--force-recreate", env_overrides=overrides)
-    click.echo(f"Updated and restarted ({provider}).")
+    click.echo(f"Updated and restarted ({provider}/{protocol}).")
     print_ip_status()
 
 
@@ -174,14 +191,14 @@ def server():
         raise SystemExit("No selection.")
 
     provider, country, city = parse_server_selection(selection)
-    provider = validate_provider(provider)
+    provider, protocol = validate_provider(provider)
 
     click.echo(f"Provider: {provider}")
     click.echo(f"Location: {country}" + (f" / {city}" if city else ""))
 
     compose("down")
 
-    overrides = get_provider_env(provider)
+    overrides = get_provider_env(provider, protocol)
     overrides["SERVER_COUNTRIES"] = country
     if city:
         overrides["SERVER_CITIES"] = city

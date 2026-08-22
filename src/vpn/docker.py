@@ -41,8 +41,8 @@ def compose(*args, env_overrides=None):
             os.unlink(f.name)
 
 
-def get_current_provider():
-    """Read VPN_SERVICE_PROVIDER from the running container."""
+def get_current_vpn():
+    """Read (provider, VPN_TYPE) from the running container, or None."""
     result = run(
         "docker", "inspect", "--format",
         "{{range .Config.Env}}{{println .}}{{end}}", CONTAINER,
@@ -50,7 +50,12 @@ def get_current_provider():
     )
     if result.returncode != 0:
         return None
+    provider = protocol = None
     for line in result.stdout.splitlines():
         if line.startswith("VPN_SERVICE_PROVIDER="):
-            return line.split("=", 1)[1]
-    return None
+            provider = line.split("=", 1)[1] or None
+        elif line.startswith("VPN_TYPE="):
+            protocol = line.split("=", 1)[1] or None
+    if not provider:
+        return None
+    return provider, protocol
