@@ -144,7 +144,7 @@ def print_servers_table(by_provider):
     """Print all servers as an aligned table: Provider | Country | City | Server."""
     rows = _sorted_server_rows(by_provider)
     console = Console(highlight=False)
-    table = Table(box=None, padding=(0, 2, 0, 0), header_style="bold")
+    table = Table(box=None, padding=(0, 1, 0, 0), header_style="bold")
     table.add_column("Provider", style="cyan", no_wrap=True)
     table.add_column("Country", no_wrap=True)
     table.add_column("City", no_wrap=True)
