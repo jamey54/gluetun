@@ -66,9 +66,12 @@ class _ServerPicker:
         self.offset = 0
 
     def _move(self, delta):
+        self._select(self.cursor + delta)
+
+    def _select(self, pos):
         if not self.matches:
             return
-        self.cursor = max(0, min(self.cursor + delta, len(self.matches) - 1))
+        self.cursor = max(0, min(pos, len(self.matches) - 1))
         self._clamp_offset()
 
     def _clamp_offset(self):
@@ -142,6 +145,22 @@ class _ServerPicker:
         @kb.add("c-n")
         def _(event):
             self._move(1)
+
+        @kb.add("pageup")
+        def _(event):
+            self._move(-VISIBLE_ROWS)
+
+        @kb.add("pagedown")
+        def _(event):
+            self._move(VISIBLE_ROWS)
+
+        @kb.add("home")
+        def _(event):
+            self._select(0)
+
+        @kb.add("end")
+        def _(event):
+            self._select(len(self.matches) - 1)
 
         @kb.add("backspace")
         def _(event):

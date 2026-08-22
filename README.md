@@ -87,7 +87,7 @@ vpn up --provider protonvpn
 
 `vpn servers` lists all servers in an aligned table (provider, country, city, server) for every provider with valid credentials in `.env`.
 
-`vpn server` opens an interactive picker showing the same columns, with live filtering (accent-insensitive) and keyboard navigation (↑/↓ or Ctrl-N/P to move, type to filter, Enter to select, Ctrl-C/Q to cancel). The selected provider is automatically used when restarting the container.
+`vpn server` opens an interactive picker showing the same columns, with live filtering (accent-insensitive) and keyboard navigation (↑/↓ or Ctrl-N/P to move, PgUp/PgDn for pages, Home/End for first/last, type to filter, Enter to select, Ctrl-C/Q to cancel). The selected provider is automatically used when restarting the container.
 
 ## Configuration
 
