@@ -10,10 +10,10 @@ from rich.table import Table
 
 from vpn.config import CACHE_TTL
 from vpn.docker import GLUETUN_IMAGE, run
-from vpn.providers import get_active_providers
+from vpn.providers import DEFAULT_PROTOCOL, get_active_providers
 
 SERVER_SEP = " - "
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 CACHE_DIR = Path.home() / ".cache" / "gluetun"
 CACHE_FILE = CACHE_DIR / "servers.json"
 
@@ -23,21 +23,66 @@ def strip_accents(s):
 
 
 def parse_server_selection(selection):
-    """Parse '[provider] Country / City' into (provider, country, city)."""
-    provider = None
+    """Parse '[provider/protocol] Country - City' into (provider, protocol, country, city)."""
+    provider = protocol = None
     if selection.startswith("["):
         bracket, rest = selection.split("]", 1)
-        provider = bracket[1:]
+        inner = bracket[1:]
+        if "/" in inner:
+            provider, _, protocol = inner.partition("/")
+        else:
+            provider = inner
         selection = rest.strip()
     parts = selection.split(SERVER_SEP, 1)
     country = parts[0].strip()
     city = parts[1].strip() if len(parts) > 1 else None
-    return provider, country, city
+    return provider, protocol, country, city
 
 
 # ---------------------------------------------------------------------------
 # Server cache
 # ---------------------------------------------------------------------------
+
+
+def _parse_servers_output(lines):
+    """Parse gluetun 'format-servers' markdown output into row dicts."""
+    idx = {}
+    for line in lines:
+        cells = [c.strip() for c in line.split("|")]
+        lowered = [c.lower() for c in cells]
+        if "country" in lowered and "city" in lowered:
+            idx = {
+                name: lowered.index(name)
+                for name in ("country", "city", "hostname", "vpn")
+                if name in lowered
+            }
+            break
+
+    country_idx = idx.get("country")
+    city_idx = idx.get("city")
+    if country_idx is None or city_idx is None:
+        country_idx, city_idx = 1, 2
+
+    servers = []
+    for line in lines:
+        cells = [c.strip() for c in line.split("|")]
+        if len(cells) <= max(country_idx, city_idx):
+            continue
+        inner = [c for c in cells[1:-1]]
+        if not inner or all(c == "" or c.startswith("-") for c in inner):
+            continue
+        country = cells[country_idx]
+        city = cells[city_idx]
+        if not country or not city or country.lower() == "country":
+            continue
+        vpn = cells[idx["vpn"]].lower() if "vpn" in idx and idx["vpn"] < len(cells) else DEFAULT_PROTOCOL
+        hostname = (
+            cells[idx["hostname"]].strip("`")
+            if "hostname" in idx and idx["hostname"] < len(cells)
+            else ""
+        )
+        servers.append({"country": country, "city": city, "hostname": hostname, "vpn": vpn})
+    return servers
 
 
 def _fetch_servers(provider):
@@ -48,45 +93,7 @@ def _fetch_servers(provider):
     )
     if result.returncode != 0:
         return []
-    lines = result.stdout.splitlines()
-
-    country_idx = city_idx = vpn_idx = hostname_idx = None
-    for line in lines:
-        cells = line.split("|")
-        for i, cell in enumerate(cells):
-            text = cell.strip().lower()
-            if text == "country" and country_idx is None:
-                country_idx = i
-            elif text == "city" and city_idx is None:
-                city_idx = i
-            elif text == "vpn" and vpn_idx is None:
-                vpn_idx = i
-            elif text == "hostname" and hostname_idx is None:
-                hostname_idx = i
-        if country_idx is not None and city_idx is not None:
-            break
-
-    if country_idx is None or city_idx is None:
-        country_idx, city_idx = 1, 2
-
-    servers = []
-    for line in lines:
-        cells = line.split("|")
-        if len(cells) <= max(country_idx, city_idx):
-            continue
-        inner = [c.strip() for c in cells[1:-1]]
-        if not inner or all(c == "" or c.startswith("-") for c in inner):
-            continue
-        if vpn_idx is not None and vpn_idx < len(cells):
-            vpn_type = cells[vpn_idx].strip().lower()
-            if vpn_type != "wireguard":
-                continue
-        country = cells[country_idx].strip()
-        city = cells[city_idx].strip()
-        hostname = cells[hostname_idx].strip().strip("`") if hostname_idx is not None and hostname_idx < len(cells) else ""
-        if country and city and country.lower() != "country":
-            servers.append({"country": country, "city": city, "hostname": hostname})
-    return servers
+    return _parse_servers_output(result.stdout.splitlines())
 
 
 def _read_cache():
@@ -109,17 +116,31 @@ def _write_cache(servers):
 
 
 def get_servers():
-    """Fetch servers for all active providers. Returns dict[provider, list[dict]]."""
+    """Fetch servers for all credentialed providers. Returns dict[provider, list[row]]."""
     cached = _read_cache()
     if cached is not None:
         return cached
-    active = get_active_providers()
-    by_provider = {}
-    for provider in active:
-        by_provider[provider] = _fetch_servers(provider)
+    by_provider = {
+        provider: _fetch_servers(provider)
+        for provider in {p for p, _ in get_active_providers()}
+    }
     if any(by_provider.values()):
         _write_cache(by_provider)
     return by_provider
+
+
+def listable_servers(by_provider):
+    """Keep only rows whose (provider, protocol) pair has credentials; drop empty providers."""
+    active = get_active_providers()
+    return {
+        provider: filtered
+        for provider, rows in by_provider.items()
+        if (
+            filtered := [
+                s for s in rows if (provider, s.get("vpn", DEFAULT_PROTOCOL)) in active
+            ]
+        )
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -128,29 +149,30 @@ def get_servers():
 
 
 def _sorted_server_rows(by_provider):
-    """Flatten to (provider, country, city, hostname) rows sorted by provider, country, city, hostname."""
+    """Flatten to (provider, protocol, country, city, hostname) rows sorted by provider, country, city."""
     rows = [
-        (provider, s["country"], s["city"], s.get("hostname", ""))
+        (provider, s.get("vpn", DEFAULT_PROTOCOL), s["country"], s["city"], s.get("hostname", ""))
         for provider, srvs in by_provider.items()
         for s in srvs
     ]
     return sorted(
         rows,
-        key=lambda r: (r[0], strip_accents(r[1]).lower(), strip_accents(r[2]).lower(), r[3]),
+        key=lambda r: (r[0], strip_accents(r[2]).lower(), strip_accents(r[3]).lower(), r[4]),
     )
 
 
 def print_servers_table(by_provider):
-    """Print all servers as an aligned table: Provider | Country | City | Server."""
+    """Print all servers as an aligned table: Provider | Protocol | Country | City | Server."""
     rows = _sorted_server_rows(by_provider)
     console = Console(highlight=False)
     table = Table(box=None, padding=(0, 1, 0, 0), header_style="bold")
     table.add_column("Provider", style="cyan", no_wrap=True)
+    table.add_column("Protocol", style="dim", no_wrap=True)
     table.add_column("Country", no_wrap=True)
     table.add_column("City", no_wrap=True)
     table.add_column("Server", style="dim", no_wrap=True)
-    for provider, country, city, hostname in rows:
-        table.add_row(provider, country, city, hostname or "-")
+    for provider, protocol, country, city, hostname in rows:
+        table.add_row(provider, protocol, country, city, hostname or "-")
     console.print(table)
     providers = len({r[0] for r in rows})
     console.print(

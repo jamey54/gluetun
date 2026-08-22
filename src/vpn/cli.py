@@ -16,6 +16,7 @@ from vpn.providers import (
 )
 from vpn.servers import (
     get_servers,
+    listable_servers,
     parse_server_selection,
     print_servers_table,
     strip_accents,
@@ -173,7 +174,7 @@ def status():
 @cli.command()
 def servers():
     """List available servers for all active providers."""
-    by_provider = get_servers()
+    by_provider = listable_servers(get_servers())
     if not any(by_provider.values()):
         raise SystemExit("No servers found. Is Docker running?")
     print_servers_table(by_provider)
@@ -182,7 +183,7 @@ def servers():
 @cli.command()
 def server():
     """Interactively select a server and restart."""
-    by_provider = get_servers()
+    by_provider = listable_servers(get_servers())
     if not any(by_provider.values()):
         raise SystemExit("No servers found. Is Docker running?")
 
@@ -190,10 +191,10 @@ def server():
     if not selection:
         raise SystemExit("No selection.")
 
-    provider, country, city = parse_server_selection(selection)
-    provider, protocol = validate_provider(provider)
+    provider, protocol, country, city = parse_server_selection(selection)
+    provider, protocol = validate_provider(provider, protocol)
 
-    click.echo(f"Provider: {provider}")
+    click.echo(f"Provider: {provider} ({protocol})")
     click.echo(f"Location: {country}" + (f" / {city}" if city else ""))
 
     compose("down")
@@ -206,5 +207,5 @@ def server():
         click.echo(f"Env: {' '.join(f'{k}={v}' for k, v in overrides.items())}")
     compose("up", "-d", env_overrides=overrides)
 
-    click.echo(f"VPN restarted ({provider}) → {country}" + (f" / {city}" if city else ""))
+    click.echo(f"VPN restarted ({provider}/{protocol}) → {country}" + (f" / {city}" if city else ""))
     print_ip_status(expected_city=city)

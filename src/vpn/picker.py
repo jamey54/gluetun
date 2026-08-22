@@ -36,8 +36,12 @@ def _fold(text):
 class _ServerPicker:
     def __init__(self, rows, prompt):
         self.rows = rows
-        self.values = [f"[{p}] {c}{SERVER_SEP}{ci}" for p, c, ci, _ in rows]
+        self.values = [
+            f"[{p}/{proto}] {c}{SERVER_SEP}{ci}"
+            for p, proto, c, ci, _ in rows
+        ]
         self.width = max(len(p) for p, *_ in rows)
+        self.proto_width = max(len(proto) for _, proto, *_ in rows)
         self.lines = [self._line(row) for row in rows]
         self.folds = [_fold(line) for line in self.lines]
         self.prompt = prompt
@@ -47,9 +51,10 @@ class _ServerPicker:
         self.offset = 0
 
     def _line(self, row):
-        provider, country, city, hostname = row
+        provider, protocol, country, city, hostname = row
         return (
-            f"{provider:<{self.width}} {country} {city} {hostname or '-'}"
+            f"{provider:<{self.width}} {protocol:<{self.proto_width}} "
+            f"{country} {city} {hostname or '-'}"
         )
 
     # -- state -------------------------------------------------------------
