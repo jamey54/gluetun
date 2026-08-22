@@ -40,32 +40,41 @@ class _ServerPicker:
             f"[{p}/{proto}] {c}{SERVER_SEP}{ci}"
             for p, proto, c, ci, _ in rows
         ]
-        self.width = max(len(p) for p, *_ in rows)
-        self.proto_width = max(len(proto) for _, proto, *_ in rows)
+        self.width = {
+            "provider": max(len(p) for p, *_ in rows),
+            "protocol": max(len(proto) for _, proto, *_ in rows),
+            "country": max(len(c) for _, _, c, *_ in rows),
+            "city": max(len(ci) for _, _, _, ci, _ in rows),
+        }
         self.lines = [self._line(row) for row in rows]
         self.folds = [_fold(line) for line in self.lines]
         self.prompt = prompt
         self.query = ""
+        self.tokens = []
         self.matches = list(range(len(rows)))
         self.cursor = 0
         self.offset = 0
 
     def _line(self, row):
+        w = self.width
         provider, protocol, country, city, hostname = row
         return (
-            f"{provider:<{self.width}} {protocol:<{self.proto_width}} "
-            f"{country} {city} {hostname or '-'}"
+            f"{provider:<{w['provider']}} {protocol:<{w['protocol']}} "
+            f"{country:<{w['country']}} {city:<{w['city']}} {hostname or '-'}"
         )
 
     # -- state -------------------------------------------------------------
 
     def _set_query(self, query):
         self.query = query
-        if not query:
+        self.tokens = query.split()
+        if not self.tokens:
             self.matches = list(range(len(self.rows)))
         else:
             self.matches = [
-                i for i, (folded, _) in enumerate(self.folds) if query in folded
+                i
+                for i, (folded, _) in enumerate(self.folds)
+                if all(token in folded for token in self.tokens)
             ]
         self.cursor = 0
         self.offset = 0
@@ -88,22 +97,32 @@ class _ServerPicker:
 
     # -- rendering ---------------------------------------------------------
 
+    def _match_spans(self, folded, origin):
+        """Accent-insensitive match spans (raw-text indices) for all query tokens, merged."""
+        spans = []
+        for token in self.tokens:
+            start = 0
+            while True:
+                hit = folded.find(token, start)
+                if hit < 0:
+                    break
+                spans.append((origin[hit], origin[hit + len(token) - 1] + 1))
+                start = hit + len(token)
+        merged = []
+        for a, b in sorted(spans):
+            if merged and a <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], b)
+            else:
+                merged.append([a, b])
+        return [(a, b) for a, b in merged]
+
     def _segments(self, idx):
         """Split line idx into (is_match, text) fragments for the current query."""
         line, (folded, origin) = self.lines[idx], self.folds[idx]
-        if not self.query:
+        if not self.tokens:
             return [(False, line)]
-        spans, start = [], 0
-        while True:
-            hit = folded.find(self.query, start)
-            if hit < 0:
-                break
-            spans.append((origin[hit], origin[hit + len(self.query) - 1] + 1))
-            start = hit + len(self.query)
         segments, pos = [], 0
-        for a, b in spans:
-            if a < pos:
-                continue
+        for a, b in self._match_spans(folded, origin):
             if a > pos:
                 segments.append((False, line[pos:a]))
             segments.append((True, line[a:b]))
