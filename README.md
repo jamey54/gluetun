@@ -64,6 +64,7 @@ You only need to set credentials for providers you actually use.
 | `vpn status` | Container state + public IP |
 | `vpn logs` | Show container logs (`-f` to follow, `-n` for line count) |
 | `vpn update` | Pull latest gluetun image + recreate |
+| `vpn speedtest` | Measure download speed through the VPN (`--size` MB, default 25) |
 | `vpn server` | Interactive picker — pick location, restart |
 | `vpn servers` | List available servers (all active providers) |
 
@@ -104,6 +105,10 @@ vpn up --provider protonvpn --protocol openvpn
 `vpn servers` lists all servers in an aligned table (provider, protocol, country, city, server) for every provider/protocol pair with valid credentials in `.env`.
 
 `vpn server` opens an interactive picker showing the same columns, with live filtering (accent-insensitive) and keyboard navigation (↑/↓ or Ctrl-N/P to move, PgUp/PgDn for pages, Home/End for first/last, type to filter — the filter matches any column including provider and protocol, Enter to select, Ctrl-C/Q to cancel). The selected row's provider *and* protocol are automatically used when restarting the container.
+
+## Speed test
+
+`up`, `update` and `server` run a download speed test after a verified connection (green `Location:`). It downloads 25 MB from Cloudflare inside the container — all traffic goes through the VPN tunnel. Skip it per invocation with `--no-speedtest`, or change the size with `vpn speedtest --size 100`.
 
 ## Configuration
 
