@@ -4,10 +4,12 @@ Small Python CLI for managing a [Gluetun](https://github.com/qdm12/gluetun) VPN 
 
 ## Supported providers
 
-- **Surfshark** — WireGuard
-- **ProtonVPN** — WireGuard
+| Provider  | WireGuard | OpenVPN |
+|-----------|-----------|---------|
+| Surfshark | ✓         | ✓       |
+| ProtonVPN | ✓         | ✓       |
 
-Both providers can be active simultaneously (their servers appear side by side in `vpn servers`).
+All providers can be active simultaneously — their servers appear side by side in `vpn servers` and the picker, tagged with their protocol. A provider's protocol is listed only when its credentials are present in `.env`.
 
 ## Requirements
 
@@ -75,6 +77,12 @@ WireGuard credentials: Surfshark admin panel → Manual setup → WireGuard.
 vpn up --provider surfshark
 ```
 
+OpenVPN credentials: admin panel → Manual setup → OpenVPN config (service username/password).
+
+```bash
+vpn up --provider surfshark --protocol openvpn
+```
+
 ### ProtonVPN
 
 WireGuard credentials: generate at [account.proton.me/vpn/WireGuard](https://account.proton.me/vpn/WireGuard).
@@ -83,11 +91,19 @@ WireGuard credentials: generate at [account.proton.me/vpn/WireGuard](https://acc
 vpn up --provider protonvpn
 ```
 
+OpenVPN credentials: [account.proton.me/vpn/OpenVPN](https://account.proton.me/vpn/OpenVPN) → OpenVPN username / password.
+
+```bash
+vpn up --provider protonvpn --protocol openvpn
+```
+
+`--protocol` defaults to `wireguard`. `vpn update` preserves the protocol of the running container.
+
 ## Server selection
 
-`vpn servers` lists all servers in an aligned table (provider, country, city, server) for every provider with valid credentials in `.env`.
+`vpn servers` lists all servers in an aligned table (provider, protocol, country, city, server) for every provider/protocol pair with valid credentials in `.env`.
 
-`vpn server` opens an interactive picker showing the same columns, with live filtering (accent-insensitive) and keyboard navigation (↑/↓ or Ctrl-N/P to move, PgUp/PgDn for pages, Home/End for first/last, type to filter, Enter to select, Ctrl-C/Q to cancel). The selected provider is automatically used when restarting the container.
+`vpn server` opens an interactive picker showing the same columns, with live filtering (accent-insensitive) and keyboard navigation (↑/↓ or Ctrl-N/P to move, PgUp/PgDn for pages, Home/End for first/last, type to filter — the filter matches any column including provider and protocol, Enter to select, Ctrl-C/Q to cancel). The selected row's provider *and* protocol are automatically used when restarting the container.
 
 ## Configuration
 
