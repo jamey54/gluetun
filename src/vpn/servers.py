@@ -128,7 +128,7 @@ def get_servers():
 
 
 def _sorted_server_rows(by_provider):
-    """Flatten to (provider, country, city, hostname) rows sorted by country, city, provider."""
+    """Flatten to (provider, country, city, hostname) rows sorted by provider, country, city, hostname."""
     rows = [
         (provider, s["country"], s["city"], s.get("hostname", ""))
         for provider, srvs in by_provider.items()
@@ -136,7 +136,7 @@ def _sorted_server_rows(by_provider):
     ]
     return sorted(
         rows,
-        key=lambda r: (strip_accents(r[1]).lower(), strip_accents(r[2]).lower(), r[0]),
+        key=lambda r: (r[0], strip_accents(r[1]).lower(), strip_accents(r[2]).lower(), r[3]),
     )
 
 
