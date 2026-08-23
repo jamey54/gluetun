@@ -116,10 +116,28 @@ After connecting, the CLI probes the public IP from inside the container (`wget 
 
 ## Configuration
 
-All settings are overridable via environment variables:
+Secrets live in `.env` (copy `.env.sample`; located next to your compose file). Other settings are overridable via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GLUETUN_CONTAINER` | `gluetun` | Container name |
 | `GLUETUN_COMPOSE_FILE` | bundled `vpn.yml` | Path to compose file (a `./vpn.yml` in the working directory takes precedence) |
 | `GLUETUN_CACHE_TTL` | `3600` | Server cache TTL (seconds) |
+| `VPN_DEBUG` | unset | Set to enable debug output (same as `--debug`) |
+
+### Credentials
+
+A provider/protocol pair only appears in listings and can only be started when all of its *required* variables are set.
+
+| Provider | Protocol | Variables | Required |
+|----------|----------|-----------|----------|
+| Surfshark | WireGuard | `SURFSHARK_WIREGUARD_PRIVATE_KEY`, `SURFSHARK_WIREGUARD_ADDRESSES` | private key |
+| Surfshark | OpenVPN | `SURFSHARK_OPENVPN_USER`, `SURFSHARK_OPENVPN_PASSWORD` | both |
+| ProtonVPN | WireGuard | `PROTONVPN_WIREGUARD_PRIVATE_KEY`, `PROTONVPN_WIREGUARD_ADDRESSES` (always `10.2.0.2/32`) | both |
+| ProtonVPN | OpenVPN | `PROTONVPN_OPENVPN_USER`, `PROTONVPN_OPENVPN_PASSWORD` | both |
+
+Additionally, `HTTP_CONTROL_SERVER_API_KEY` (any random string) authenticates gluetun's HTTP control server exposed on port 8000.
+
+### Set automatically
+
+These are managed by the CLI — never define them yourself: `VPN_SERVICE_PROVIDER`, `VPN_TYPE`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `OPENVPN_USER`, `OPENVPN_PASSWORD` (mapped from your provider credentials), and `SERVER_COUNTRIES` / `SERVER_CITIES` (written by `vpn server`; `vpn up` without a selection defaults to United States).
