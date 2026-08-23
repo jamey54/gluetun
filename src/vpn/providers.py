@@ -58,9 +58,7 @@ def active_protocols(provider):
 def get_active_providers():
     """Return {(provider, protocol)} pairs with all required env vars set."""
     return {
-        (provider, protocol)
-        for provider in PROVIDERS
-        for protocol in active_protocols(provider)
+        (provider, protocol) for provider in PROVIDERS for protocol in active_protocols(provider)
     }
 
 
@@ -76,9 +74,7 @@ def validate_provider(name, protocol=DEFAULT_PROTOCOL):
     if protocol not in PROVIDERS[name]:
         protocols = ", ".join(PROVIDERS[name])
         raise SystemExit(f"Unknown protocol '{protocol}' for {name}. Available: {protocols}")
-    missing = [
-        v for v in PROVIDERS[name][protocol]["required_env"] if not os.getenv(v)
-    ]
+    missing = [v for v in PROVIDERS[name][protocol]["required_env"] if not os.getenv(v)]
     if missing:
         others = [p for p in active_protocols(name) if p != protocol]
         hint = f" — or pass --protocol {'/'.join(others)}" if others else ""

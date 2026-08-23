@@ -2,25 +2,27 @@
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout.containers import HSplit, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.layout.layout import Layout
-from prompt_toolkit.keys import Keys
 from prompt_toolkit.styles import Style
 
 from vpn.servers import SERVER_SEP, _sorted_server_rows, strip_accents
 
 VISIBLE_ROWS = 10
 
-_STYLE = Style.from_dict({
-    "dim": "#6c6c6c",
-    "pointer": "bold cyan",
-    "selected": "bold reverse",
-    "match": "bold ansiyellow",
-    "hits": "ansigreen",
-    "none": "ansired",
-})
+_STYLE = Style.from_dict(
+    {
+        "dim": "#6c6c6c",
+        "pointer": "bold cyan",
+        "selected": "bold reverse",
+        "match": "bold ansiyellow",
+        "hits": "ansigreen",
+        "none": "ansired",
+    }
+)
 
 
 def _fold(text):
@@ -36,10 +38,7 @@ def _fold(text):
 class _ServerPicker:
     def __init__(self, rows, prompt):
         self.rows = rows
-        self.values = [
-            f"[{p}/{proto}] {c}{SERVER_SEP}{ci}"
-            for p, proto, c, ci, _ in rows
-        ]
+        self.values = [f"[{p}/{proto}] {c}{SERVER_SEP}{ci}" for p, proto, c, ci, _ in rows]
         self.width = {
             "provider": max(len(p) for p, *_ in rows),
             "protocol": max(len(proto) for _, proto, *_ in rows),
@@ -136,7 +135,7 @@ class _ServerPicker:
         for pos in range(self.offset, min(self.offset + VISIBLE_ROWS, len(self.matches))):
             idx = self.matches[pos]
             selected = pos == self.cursor
-            prefix = ("class:pointer", "❯ ") if selected else ("", "  ")
+            prefix = ("class:pointer", "❯ ") if selected else ("", "  ")  # noqa: RUF001
             frags.append(prefix)
             for is_match, text in self._segments(idx):
                 style = "class:selected" if selected else ""
@@ -206,13 +205,21 @@ class _ServerPicker:
                 self._set_query(self.query + _fold(event.data)[0])
 
         app = Application(
-            layout=Layout(HSplit([
-                Window(FormattedTextControl(lambda: [("class:dim", self.prompt)]),
-                       height=D.exact(1)),
-                Window(FormattedTextControl(self._body, show_cursor=False),
-                       height=D.exact(VISIBLE_ROWS)),
-                Window(FormattedTextControl(self._footer), height=D.exact(1)),
-            ])),
+            layout=Layout(
+                HSplit(
+                    [
+                        Window(
+                            FormattedTextControl(lambda: [("class:dim", self.prompt)]),
+                            height=D.exact(1),
+                        ),
+                        Window(
+                            FormattedTextControl(self._body, show_cursor=False),
+                            height=D.exact(VISIBLE_ROWS),
+                        ),
+                        Window(FormattedTextControl(self._footer), height=D.exact(1)),
+                    ]
+                )
+            ),
             key_bindings=kb,
             style=_STYLE,
             full_screen=False,

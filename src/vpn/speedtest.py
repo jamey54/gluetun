@@ -24,8 +24,14 @@ def measure(size_mb=DEFAULT_SIZE_MB, timeout=DOWNLOAD_TIMEOUT_S):
     nbytes = size_mb * 1_000_000
     start = time.monotonic()
     result = run(
-        "docker", "exec", CONTAINER,
-        "timeout", str(timeout), "wget", "-qO", "/dev/null",
+        "docker",
+        "exec",
+        CONTAINER,
+        "timeout",
+        str(timeout),
+        "wget",
+        "-qO",
+        "/dev/null",
         SPEEDTEST_URL.format(n=nbytes),
         check=False,
     )

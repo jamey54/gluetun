@@ -68,14 +68,18 @@ def _parse_servers_output(lines):
         cells = [c.strip() for c in line.split("|")]
         if len(cells) <= max(country_idx, city_idx):
             continue
-        inner = [c for c in cells[1:-1]]
+        inner = cells[1:-1]
         if not inner or all(c == "" or c.startswith("-") for c in inner):
             continue
         country = cells[country_idx]
         city = cells[city_idx]
         if not country or not city or country.lower() == "country":
             continue
-        vpn = cells[idx["vpn"]].lower() if "vpn" in idx and idx["vpn"] < len(cells) else DEFAULT_PROTOCOL
+        vpn = (
+            cells[idx["vpn"]].lower()
+            if "vpn" in idx and idx["vpn"] < len(cells)
+            else DEFAULT_PROTOCOL
+        )
         hostname = (
             cells[idx["hostname"]].strip("`")
             if "hostname" in idx and idx["hostname"] < len(cells)
@@ -87,9 +91,14 @@ def _parse_servers_output(lines):
 
 def _fetch_servers(provider):
     result = run(
-        "docker", "run", "--rm", GLUETUN_IMAGE,
-        "format-servers", f"-{provider}",
-        capture=True, check=False,
+        "docker",
+        "run",
+        "--rm",
+        GLUETUN_IMAGE,
+        "format-servers",
+        f"-{provider}",
+        capture=True,
+        check=False,
     )
     if result.returncode != 0:
         return []
@@ -121,8 +130,7 @@ def get_servers():
     if cached is not None:
         return cached
     by_provider = {
-        provider: _fetch_servers(provider)
-        for provider in {p for p, _ in get_active_providers()}
+        provider: _fetch_servers(provider) for provider in {p for p, _ in get_active_providers()}
     }
     if any(by_provider.values()):
         _write_cache(by_provider)
@@ -135,11 +143,7 @@ def listable_servers(by_provider):
     return {
         provider: filtered
         for provider, rows in by_provider.items()
-        if (
-            filtered := [
-                s for s in rows if (provider, s.get("vpn", DEFAULT_PROTOCOL)) in active
-            ]
-        )
+        if (filtered := [s for s in rows if (provider, s.get("vpn", DEFAULT_PROTOCOL)) in active])
     }
 
 
@@ -149,7 +153,7 @@ def listable_servers(by_provider):
 
 
 def _sorted_server_rows(by_provider):
-    """Flatten to (provider, protocol, country, city, hostname) rows sorted by provider, country, city."""
+    """Flatten rows to (provider, protocol, country, city, hostname), sorted."""
     rows = [
         (provider, s.get("vpn", DEFAULT_PROTOCOL), s["country"], s["city"], s.get("hostname", ""))
         for provider, srvs in by_provider.items()

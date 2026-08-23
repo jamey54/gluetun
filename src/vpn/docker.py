@@ -44,9 +44,13 @@ def compose(*args, env_overrides=None):
 def get_current_vpn():
     """Read (provider, VPN_TYPE) from the running container, or None."""
     result = run(
-        "docker", "inspect", "--format",
-        "{{range .Config.Env}}{{println .}}{{end}}", CONTAINER,
-        capture=True, check=False,
+        "docker",
+        "inspect",
+        "--format",
+        "{{range .Config.Env}}{{println .}}{{end}}",
+        CONTAINER,
+        capture=True,
+        check=False,
     )
     if result.returncode != 0:
         return None

@@ -43,8 +43,13 @@ def _same_country(a, b):
 
 def container_running():
     result = run(
-        "docker", "inspect", "--format", "{{.State.Status}}", CONTAINER,
-        capture=True, check=False,
+        "docker",
+        "inspect",
+        "--format",
+        "{{.State.Status}}",
+        CONTAINER,
+        capture=True,
+        check=False,
     )
     return result.returncode == 0
 
@@ -54,10 +59,18 @@ def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_count
     prev_city = None
     for attempt in range(retries):
         result = run(
-            "docker", "exec", CONTAINER,
-            "timeout", str(PROBE_TIMEOUT),
-            "wget", "-T", str(PROBE_TIMEOUT), "-qO-", IP_INFO_URL,
-            capture=True, check=False,
+            "docker",
+            "exec",
+            CONTAINER,
+            "timeout",
+            str(PROBE_TIMEOUT),
+            "wget",
+            "-T",
+            str(PROBE_TIMEOUT),
+            "-qO-",
+            IP_INFO_URL,
+            capture=True,
+            check=False,
         )
         if result.returncode == 0:
             try:
@@ -208,7 +221,9 @@ def ip():
 
 
 @cli.command()
-@click.option("-s", "--size", type=int, default=DEFAULT_SIZE_MB, show_default=True, help="Download size (MB)")
+@click.option(
+    "-s", "--size", type=int, default=DEFAULT_SIZE_MB, show_default=True, help="Download size (MB)"
+)
 def speedtest(size):
     """Measure download speed through the VPN."""
     if not container_running():
@@ -225,8 +240,13 @@ def speedtest(size):
 def status(no_speedtest):
     """Show container status, public IP, and speed test."""
     result = run(
-        "docker", "inspect", "--format", "{{.State.Status}}", CONTAINER,
-        capture=True, check=False,
+        "docker",
+        "inspect",
+        "--format",
+        "{{.State.Status}}",
+        CONTAINER,
+        capture=True,
+        check=False,
     )
     if result.returncode != 0:
         click.echo(f"Container '{CONTAINER}' not found.")
@@ -272,5 +292,6 @@ def server(no_speedtest):
         click.echo(f"Env: {' '.join(f'{k}={v}' for k, v in overrides.items())}")
     compose("up", "-d", env_overrides=overrides)
 
-    click.echo(f"VPN restarted ({provider}/{protocol}) → {country}" + (f" / {city}" if city else ""))
+    location = f"{country}" + (f" / {city}" if city else "")
+    click.echo(f"VPN restarted ({provider}/{protocol}) → {location}")
     finish_connection(expected_country=country, speedtest=not no_speedtest)
