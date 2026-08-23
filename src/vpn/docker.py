@@ -10,6 +10,14 @@ from vpn.config import COMPOSE_FILE, CONTAINER, read_env_file
 GLUETUN_IMAGE = "qmcgaw/gluetun:latest"
 
 
+def env_lookup(name: str) -> str | None:
+    """Effective value for compose substitution: process environment wins over .env file."""
+    value = os.environ.get(name)
+    if value is not None:
+        return value
+    return read_env_file(Path(COMPOSE_FILE).parent / ".env").get(name)
+
+
 @dataclass(frozen=True)
 class CurrentVpn:
     """Configuration read back from the running container."""

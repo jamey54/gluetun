@@ -12,6 +12,7 @@ from vpn.docker import (
     compose,
     container_running,
     container_status,
+    env_lookup,
     get_current_vpn,
     run,
 )
@@ -40,6 +41,15 @@ PROBE_TIMEOUT = 8
 DEBUG = False
 
 SENSITIVE_KEY_PARTS = ("KEY", "PASSWORD", "TOKEN", "SECRET")
+
+
+def require_api_key() -> None:
+    """Fail closed: the control server must never run with an empty API key (M2)."""
+    if not env_lookup("HTTP_CONTROL_SERVER_API_KEY"):
+        raise SystemExit(
+            "HTTP_CONTROL_SERVER_API_KEY is not set.\n"
+            "It authenticates gluetun's control server (port 8000) — add any random string to .env."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +175,7 @@ def main(debug: bool) -> None:
 @click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
 def up(provider: str, protocol: str | None, no_speedtest: bool) -> None:
     """Start the VPN container, keeping the running location and protocol."""
+    require_api_key()
     current = get_current_vpn()
     protocol = choose_protocol(provider, protocol, current.protocol if current else None)
     provider, protocol = validate_provider(provider, protocol)
@@ -211,6 +222,7 @@ def logs(follow: bool, tail: str) -> None:
 @click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
 def update(no_speedtest: bool) -> None:
     """Pull latest gluetun image and recreate with the same configuration."""
+    require_api_key()
     current = get_current_vpn()
     if not current:
         raise SystemExit("No running container. Use 'vpn up --provider <name>' first.")
@@ -235,7 +247,12 @@ def ip() -> None:
 
 @main.command()
 @click.option(
-    "-s", "--size", type=int, default=DEFAULT_SIZE_MB, show_default=True, help="Download size (MB)"
+    "-s",
+    "--size",
+    type=click.IntRange(min=1),
+    default=DEFAULT_SIZE_MB,
+    show_default=True,
+    help="Download size (MB)",
 )
 def speedtest(size: int) -> None:
     """Measure download speed through the VPN."""
@@ -273,6 +290,7 @@ def servers() -> None:
 @click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
 def server(no_speedtest: bool) -> None:
     """Interactively select a server and restart."""
+    require_api_key()
     by_provider = listable_servers(get_servers())
     if not any(by_provider.values()):
         raise SystemExit("No servers found. Is Docker running?")

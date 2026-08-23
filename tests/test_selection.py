@@ -14,6 +14,7 @@ def creds(monkeypatch):
     monkeypatch.setenv("SURFSHARK_WIREGUARD_PRIVATE_KEY", "k")
     monkeypatch.setenv("PROTONVPN_WIREGUARD_PRIVATE_KEY", "k")
     monkeypatch.setenv("PROTONVPN_WIREGUARD_ADDRESSES", "10.2.0.2/32")
+    monkeypatch.setenv("HTTP_CONTROL_SERVER_API_KEY", "test-key")
     monkeypatch.setattr("vpn.cli.print_ip_status", lambda expected_country=None: True)
     monkeypatch.setattr("vpn.cli.measure", lambda size=DEFAULT_SIZE_MB: None)
 
@@ -113,3 +114,19 @@ def test_explicit_protocol_requires_its_own_creds(monkeypatch, compose_calls):
     assert result.exit_code != 0
     assert "Missing env vars" in result.output
     assert compose_calls == []  # never started
+
+
+def test_up_fails_closed_without_api_key(monkeypatch, compose_calls):
+    monkeypatch.delenv("HTTP_CONTROL_SERVER_API_KEY")
+    monkeypatch.setattr("vpn.cli.env_lookup", lambda name: None)
+    result = invoke(["up", "--provider", "surfshark"])
+    assert result.exit_code != 0
+    assert "HTTP_CONTROL_SERVER_API_KEY" in result.output
+    assert not compose_calls  # nothing was started
+
+
+def test_server_fails_closed_without_api_key(monkeypatch, compose_calls):
+    monkeypatch.setattr("vpn.cli.env_lookup", lambda name: None)
+    result = invoke(["server"])
+    assert result.exit_code != 0
+    assert not compose_calls
