@@ -5,17 +5,18 @@ import time
 
 import pytest
 
-from vpn import servers
+from vpn import config, servers
+from vpn.providers import DEFAULT_PROTOCOL
 from vpn.servers import (
     _parse_servers_output,
     _read_cache,
-    _sorted_server_rows,
     _write_cache,
     listable_servers,
     parse_server_selection,
     print_servers_table,
-    strip_accents,
+    sorted_server_rows,
 )
+from vpn.textutil import strip_accents
 
 SAMPLE_MD = """\
 ## Surfshark servers
@@ -46,7 +47,7 @@ def test_sorted_rows_accent_insensitive():
             {"country": "Oman", "city": "Muscat", "hostname": "b", "vpn": "openvpn"},
         ]
     }
-    flat = _sorted_server_rows(rows)
+    flat = sorted_server_rows(rows)
     assert [r[2] for r in flat] == ["Oman", "Österreich"]
 
 
@@ -58,7 +59,7 @@ def test_sorted_rows_sort_keys():
             {"country": "Brazil", "city": "Rio", "hostname": "h1", "vpn": "openvpn"},
         ],
     }
-    flat = _sorted_server_rows(by_provider)
+    flat = sorted_server_rows(by_provider)
     assert [(r[0], r[3]) for r in flat] == [
         ("alpha", "Rio"),
         ("alpha", "São Paulo"),
@@ -123,7 +124,7 @@ def test_parse_servers_output_basic():
 def test_parse_servers_output_defaults_vpn():
     parsed = _parse_servers_output(SAMPLE_MD.splitlines())
     row = next(r for r in parsed if r["country"] == "Séoul")
-    assert row["vpn"] == servers.DEFAULT_PROTOCOL
+    assert row["vpn"] == DEFAULT_PROTOCOL
 
 
 def test_parse_servers_output_no_header_fallback():
@@ -172,7 +173,7 @@ def test_cache_roundtrip(cache_path):
 def test_cache_stale_expired(cache_path):
     _write_cache({"s": []})
     data = json.loads(cache_path.read_text())
-    data["ts"] = time.time() - servers.CACHE_TTL - 1
+    data["ts"] = time.time() - config.CACHE_TTL - 1
     cache_path.write_text(json.dumps(data))
     assert _read_cache() is None
 

@@ -107,7 +107,6 @@ def test_registry_shapes_consistent():
     """Every required credential must be mapped to a gluetun variable."""
     for provider, protocols in providers.PROVIDERS.items():
         assert protocols, provider
-        for protocol, cfg in protocols.items():
-            assert set(cfg) == {"required_env", "env_map"}, f"{provider}/{protocol}"
-            unmapped = set(cfg["required_env"]) - set(cfg["env_map"].values())
+        for protocol, config in protocols.items():
+            unmapped = set(config.required_env) - set(config.env_map.values())
             assert not unmapped, f"{provider}/{protocol}: {unmapped}"

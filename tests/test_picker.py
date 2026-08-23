@@ -2,7 +2,8 @@
 
 from itertools import pairwise
 
-from vpn.picker import _fold, _ServerPicker, select_server
+from vpn.picker import _ServerPicker, select_server
+from vpn.textutil import fold_mapped as _fold
 
 ROWS = [
     ("surfshark", "wireguard", "Netherlands", "Amsterdam", "nl-ams-1"),

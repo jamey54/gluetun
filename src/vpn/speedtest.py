@@ -10,16 +10,18 @@ DEFAULT_SIZE_MB = 25
 DOWNLOAD_TIMEOUT_S = 120
 
 
-def mbps(nbytes, seconds):
+def mbps(nbytes: int | float, seconds: float) -> float:
     """Throughput in Mbit/s."""
     return nbytes * 8 / seconds / 1_000_000
 
 
-def format_result(result):
-    return f"↓ {result['mbits']:.1f} Mbit/s ({result['mbytes']} MB in {result['seconds']:.1f}s)"
+def format_result(result: dict[str, float]) -> str:
+    return f"↓ {result['mbits']:.1f} Mbit/s ({result['mbytes']:.0f} MB in {result['seconds']:.1f}s)"
 
 
-def measure(size_mb=DEFAULT_SIZE_MB, timeout=DOWNLOAD_TIMEOUT_S):
+def measure(
+    size_mb: int = DEFAULT_SIZE_MB, timeout: int = DOWNLOAD_TIMEOUT_S
+) -> dict[str, float] | None:
     """Download size_mb through the container. Returns dict or None on failure."""
     nbytes = size_mb * 1_000_000
     start = time.monotonic()
@@ -38,4 +40,4 @@ def measure(size_mb=DEFAULT_SIZE_MB, timeout=DOWNLOAD_TIMEOUT_S):
     seconds = time.monotonic() - start
     if result.returncode != 0:
         return None
-    return {"mbits": mbps(nbytes, seconds), "seconds": seconds, "mbytes": size_mb}
+    return {"mbits": mbps(nbytes, seconds), "seconds": seconds, "mbytes": float(size_mb)}

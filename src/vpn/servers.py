@@ -2,7 +2,6 @@
 
 import json
 import time
-import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from rich.table import Table
 from vpn.config import CACHE_TTL
 from vpn.docker import GLUETUN_IMAGE, run
 from vpn.providers import DEFAULT_PROTOCOL, get_active_providers
+from vpn.textutil import fold
 
 SERVER_SEP = " - "
 CACHE_VERSION = 3
@@ -19,11 +19,7 @@ CACHE_DIR = Path.home() / ".cache" / "gluetun"
 CACHE_FILE = CACHE_DIR / "servers.json"
 
 
-def strip_accents(s):
-    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
-
-
-def parse_server_selection(selection):
+def parse_server_selection(selection: str) -> tuple[str | None, str | None, str, str | None]:
     """Parse '[provider/protocol] Country - City' into (provider, protocol, country, city)."""
     provider = protocol = None
     if selection.startswith("["):
@@ -45,9 +41,12 @@ def parse_server_selection(selection):
 # ---------------------------------------------------------------------------
 
 
-def _parse_servers_output(lines):
+ServerRow = dict[str, str]
+
+
+def _parse_servers_output(lines: list[str]) -> list[ServerRow]:
     """Parse gluetun 'format-servers' markdown output into row dicts."""
-    idx = {}
+    idx: dict[str, int] = {}
     for line in lines:
         cells = [c.strip() for c in line.split("|")]
         lowered = [c.lower() for c in cells]
@@ -64,7 +63,7 @@ def _parse_servers_output(lines):
     if country_idx is None or city_idx is None:
         country_idx, city_idx = 1, 2
 
-    servers = []
+    servers: list[ServerRow] = []
     for line in lines:
         cells = [c.strip() for c in line.split("|")]
         if len(cells) <= max(country_idx, city_idx):
@@ -87,7 +86,7 @@ def _parse_servers_output(lines):
     return servers
 
 
-def _fetch_servers(provider):
+def _fetch_servers(provider: str) -> list[ServerRow]:
     result = run(
         "docker",
         "run",
@@ -103,39 +102,42 @@ def _fetch_servers(provider):
     return _parse_servers_output(result.stdout.splitlines())
 
 
-def _read_cache():
+def _read_cache() -> dict[str, list[ServerRow]] | None:
     if not CACHE_FILE.exists():
         return None
     try:
         data = json.loads(CACHE_FILE.read_text())
         if data.get("v") != CACHE_VERSION:
             return None
-        if time.time() - data.get("ts", 0) < CACHE_TTL:
-            return data["servers"]
-    except (json.JSONDecodeError, KeyError):
+        if time.time() - data["ts"] < CACHE_TTL:
+            servers: dict[str, list[ServerRow]] = data["servers"]
+            return servers
+    except (json.JSONDecodeError, KeyError, TypeError):
         pass
     return None
 
 
-def _write_cache(servers):
+def _write_cache(servers: dict[str, list[ServerRow]]) -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_FILE.write_text(json.dumps({"v": CACHE_VERSION, "ts": time.time(), "servers": servers}))
 
 
-def get_servers():
+def get_servers() -> dict[str, list[ServerRow]]:
     """Fetch servers for all credentialed providers in parallel; dict[provider, rows]."""
     cached = _read_cache()
     if cached is not None:
         return cached
-    providers = sorted({p for p, _ in get_active_providers()})
+    providers = sorted({provider for provider, _ in get_active_providers()})
+    by_provider: dict[str, list[ServerRow]] = {}
     with ThreadPoolExecutor(max_workers=max(len(providers), 1)) as pool:
-        by_provider = dict(zip(providers, pool.map(_fetch_servers, providers), strict=True))
+        for provider, rows in zip(providers, pool.map(_fetch_servers, providers), strict=True):
+            by_provider[provider] = rows
     if any(by_provider.values()):
         _write_cache(by_provider)
     return by_provider
 
 
-def listable_servers(by_provider):
+def listable_servers(by_provider: dict[str, list[ServerRow]]) -> dict[str, list[ServerRow]]:
     """Keep only rows whose (provider, protocol) pair has credentials; drop empty providers."""
     active = get_active_providers()
     return {
@@ -150,22 +152,24 @@ def listable_servers(by_provider):
 # ---------------------------------------------------------------------------
 
 
-def _sorted_server_rows(by_provider):
+def sorted_server_rows(
+    by_provider: dict[str, list[ServerRow]],
+) -> list[tuple[str, str, str, str, str]]:
     """Flatten rows to (provider, protocol, country, city, hostname), sorted."""
-    rows = [
+    rows: list[tuple[str, str, str, str, str]] = [
         (provider, s.get("vpn", DEFAULT_PROTOCOL), s["country"], s["city"], s.get("hostname", ""))
         for provider, srvs in by_provider.items()
         for s in srvs
     ]
     return sorted(
         rows,
-        key=lambda r: (r[0], strip_accents(r[2]).lower(), strip_accents(r[3]).lower(), r[4]),
+        key=lambda r: (r[0], fold(r[2]), fold(r[3]), r[4]),
     )
 
 
-def print_servers_table(by_provider):
+def print_servers_table(by_provider: dict[str, list[ServerRow]]) -> None:
     """Print all servers as an aligned table: Provider | Protocol | Country | City | Server."""
-    rows = _sorted_server_rows(by_provider)
+    rows = sorted_server_rows(by_provider)
     console = Console(highlight=False)
     table = Table(box=None, padding=(0, 1, 0, 0), header_style="bold")
     table.add_column("Provider", style="cyan", no_wrap=True)

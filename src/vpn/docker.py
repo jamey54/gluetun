@@ -2,7 +2,6 @@
 
 import os
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,9 +19,9 @@ class CurrentVpn:
     countries: str | None = None
     cities: str | None = None
 
-    def location_overrides(self):
+    def location_overrides(self) -> dict[str, str]:
         """SERVER_COUNTRIES/SERVER_CITIES overrides, omitting unset ones."""
-        overrides = {}
+        overrides: dict[str, str] = {}
         if self.countries:
             overrides["SERVER_COUNTRIES"] = self.countries
         if self.cities:
@@ -30,12 +29,18 @@ class CurrentVpn:
         return overrides
 
 
-def run(*args, capture=False, check=True):
+def run(
+    *args: str,
+    capture: bool = False,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Run a command with argv-style arguments. Returns CompletedProcess."""
     result = subprocess.run(
         args,
         capture_output=capture,
         text=True,
+        env=env,
     )
     if check and result.returncode != 0:
         msg = (result.stderr or result.stdout or "").strip()
@@ -43,7 +48,7 @@ def run(*args, capture=False, check=True):
     return result
 
 
-def inspect_container(format_string):
+def inspect_container(format_string: str) -> str | None:
     """Inspect the container with a Go template. None if the container doesn't exist."""
     result = run(
         "docker",
@@ -57,49 +62,48 @@ def inspect_container(format_string):
     return result.stdout if result.returncode == 0 else None
 
 
-def container_status():
+def container_status() -> str | None:
     """Return the container's Docker state ('running', 'exited', ...), or None."""
     out = inspect_container("{{.State.Status}}")
     return out.strip() if out else None
 
 
-def container_running():
+def container_running() -> bool:
     """True only when the container exists and is running."""
     return container_status() == "running"
 
 
-def compose(*args, env_overrides=None):
-    """Run docker compose with the vpn.yml file."""
-    env_path = Path(COMPOSE_FILE).parent / ".env"
-    merged = read_env_file(env_path)
-    if env_overrides:
-        merged.update(env_overrides)
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
-        for k, v in merged.items():
-            f.write(f"{k}={v}\n")
-        f.flush()
-        try:
-            cmd = ["docker", "compose", "-f", COMPOSE_FILE, "--env-file", f.name, *args]
-            return run(*cmd)
-        finally:
-            os.unlink(f.name)
+def compose(
+    *args: str, env_overrides: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run docker compose with the vpn.yml file.
+
+    Interpolation values come from the process environment: the project .env
+    file merged with any overrides. Process env beats compose's own .env
+    lookup, so no temporary env file (and no secrets on disk) is needed.
+    """
+    base = read_env_file(Path(COMPOSE_FILE).parent / ".env")
+    merged = {**base, **(env_overrides or {})}
+    cmd = ["docker", "compose", "-f", COMPOSE_FILE, *args]
+    return run(*cmd, env={**os.environ, **merged})
 
 
-def get_current_vpn():
+def get_current_vpn() -> CurrentVpn | None:
     """Read provider, protocol and location from the running container, or None."""
     out = inspect_container("{{range .Config.Env}}{{println .}}{{end}}")
     if not out:
         return None
-    values = {}
+    values: dict[str, str | None] = {}
     wanted = ("VPN_SERVICE_PROVIDER", "VPN_TYPE", "SERVER_COUNTRIES", "SERVER_CITIES")
     for line in out.splitlines():
         key, sep, value = line.partition("=")
         if sep and key in wanted:
             values[key] = value or None
-    if not values.get("VPN_SERVICE_PROVIDER"):
+    provider = values.get("VPN_SERVICE_PROVIDER")
+    if not provider:
         return None
     return CurrentVpn(
-        provider=values["VPN_SERVICE_PROVIDER"],
+        provider=provider,
         protocol=values.get("VPN_TYPE"),
         countries=values.get("SERVER_COUNTRIES"),
         cities=values.get("SERVER_CITIES"),

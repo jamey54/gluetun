@@ -1,8 +1,8 @@
 """ISO 3166-1 alpha-2 codes and country name resolution."""
 
-import unicodedata
+from vpn.textutil import fold
 
-COUNTRY_NAMES = {
+COUNTRY_NAMES: dict[str, str] = {
     "AD": "Andorra",
     "AE": "United Arab Emirates",
     "AF": "Afghanistan",
@@ -281,21 +281,17 @@ _ALIASES = {
 }
 
 
-def _fold(text: str) -> str:
-    folded = unicodedata.normalize("NFKD", text)
-    return "".join(c for c in folded if not unicodedata.combining(c)).strip().lower()
-
-
-_NAME_TO_CODE = {_fold(name): code for code, name in COUNTRY_NAMES.items()}
-_NAME_TO_CODE.update({_fold(alias): code for alias, code in _ALIASES.items()})
+_NAME_TO_CODE = {fold(name): code for code, name in COUNTRY_NAMES.items()}
+_NAME_TO_CODE.update({fold(alias): code for alias, code in _ALIASES.items()})
 
 
 def to_code(value: str) -> str | None:
     """Return the alpha-2 code for a country name or code, None if unknown."""
+    value = value.strip()
     if len(value) == 2 and value.isalpha():
         upper = value.upper()
         return upper if upper in COUNTRY_NAMES else None
-    return _NAME_TO_CODE.get(_fold(value))
+    return _NAME_TO_CODE.get(fold(value))
 
 
 def resolve_country(value: str) -> str:

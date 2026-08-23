@@ -1,68 +1,75 @@
 """VPN provider registry and credential handling."""
 
 import os
+from dataclasses import dataclass
 
-PROVIDERS = {
-    "surfshark": {
-        "wireguard": {
-            "required_env": ["SURFSHARK_WIREGUARD_PRIVATE_KEY"],
-            "env_map": {
-                "WIREGUARD_PRIVATE_KEY": "SURFSHARK_WIREGUARD_PRIVATE_KEY",
-                "WIREGUARD_ADDRESSES": "SURFSHARK_WIREGUARD_ADDRESSES",
-            },
-        },
-        "openvpn": {
-            "required_env": ["SURFSHARK_OPENVPN_USER", "SURFSHARK_OPENVPN_PASSWORD"],
-            "env_map": {
-                "OPENVPN_USER": "SURFSHARK_OPENVPN_USER",
-                "OPENVPN_PASSWORD": "SURFSHARK_OPENVPN_PASSWORD",
-            },
-        },
-    },
-    "protonvpn": {
-        "wireguard": {
-            "required_env": ["PROTONVPN_WIREGUARD_PRIVATE_KEY", "PROTONVPN_WIREGUARD_ADDRESSES"],
-            "env_map": {
-                "WIREGUARD_PRIVATE_KEY": "PROTONVPN_WIREGUARD_PRIVATE_KEY",
-                "WIREGUARD_ADDRESSES": "PROTONVPN_WIREGUARD_ADDRESSES",
-            },
-        },
-        "openvpn": {
-            "required_env": ["PROTONVPN_OPENVPN_USER", "PROTONVPN_OPENVPN_PASSWORD"],
-            "env_map": {
-                "OPENVPN_USER": "PROTONVPN_OPENVPN_USER",
-                "OPENVPN_PASSWORD": "PROTONVPN_OPENVPN_PASSWORD",
-            },
-        },
-    },
+# Surfshark accepts a bare private key, ProtonVPN requires the WireGuard
+# address as well -- hence the require_addresses flag below.
+
+
+@dataclass(frozen=True)
+class ProtocolConfig:
+    """How a provider's credentials map onto Gluetun's generic env vars."""
+
+    required_env: tuple[str, ...]
+    env_map: dict[str, str]
+
+
+def _wireguard(provider: str, *, require_addresses: bool = False) -> ProtocolConfig:
+    prefix = provider.upper()
+    env_map = {
+        "WIREGUARD_PRIVATE_KEY": f"{prefix}_WIREGUARD_PRIVATE_KEY",
+        "WIREGUARD_ADDRESSES": f"{prefix}_WIREGUARD_ADDRESSES",
+    }
+    required = [env_map["WIREGUARD_PRIVATE_KEY"]]
+    if require_addresses:
+        required.append(env_map["WIREGUARD_ADDRESSES"])
+    return ProtocolConfig(required_env=tuple(required), env_map=env_map)
+
+
+def _openvpn(provider: str) -> ProtocolConfig:
+    prefix = provider.upper()
+    env_map = {
+        "OPENVPN_USER": f"{prefix}_OPENVPN_USER",
+        "OPENVPN_PASSWORD": f"{prefix}_OPENVPN_PASSWORD",
+    }
+    return ProtocolConfig(required_env=tuple(env_map.values()), env_map=env_map)
+
+
+PROVIDERS: dict[str, dict[str, ProtocolConfig]] = {
+    provider: {
+        "wireguard": _wireguard(provider, require_addresses=provider == "protonvpn"),
+        "openvpn": _openvpn(provider),
+    }
+    for provider in ("surfshark", "protonvpn")
 }
 
 DEFAULT_PROTOCOL = "wireguard"
 
 
-def get_protocols(provider):
+def get_protocols(provider: str) -> list[str]:
     """Protocols a provider supports."""
     return list(PROVIDERS[provider])
 
 
-def active_protocols(provider):
+def active_protocols(provider: str) -> list[str]:
     """Provider protocols whose required env vars are all set."""
-    cfg = PROVIDERS[provider]
+    config = PROVIDERS[provider]
     return [
         protocol
-        for protocol, pcfg in cfg.items()
-        if all(os.getenv(v) for v in pcfg["required_env"])
+        for protocol, protocol_config in config.items()
+        if all(os.getenv(var) for var in protocol_config.required_env)
     ]
 
 
-def get_active_providers():
+def get_active_providers() -> set[tuple[str, str]]:
     """Return {(provider, protocol)} pairs with all required env vars set."""
     return {
         (provider, protocol) for provider in PROVIDERS for protocol in active_protocols(provider)
     }
 
 
-def choose_protocol(provider, requested=None, current=None):
+def choose_protocol(provider: str, requested: str | None = None, current: str | None = None) -> str:
     """Protocol to use: an explicit request wins, then the running one if still
     credentialed, then the default. The result must still pass validate_provider."""
     active = active_protocols(provider)
@@ -73,7 +80,7 @@ def choose_protocol(provider, requested=None, current=None):
     return next((p for p in (DEFAULT_PROTOCOL, *active) if p in active), DEFAULT_PROTOCOL)
 
 
-def validate_provider(name, protocol=DEFAULT_PROTOCOL):
+def validate_provider(name: str, protocol: str = DEFAULT_PROTOCOL) -> tuple[str, str]:
     """Validate provider/protocol and check required env vars.
 
     Returns (lowercase name, protocol).
@@ -85,7 +92,7 @@ def validate_provider(name, protocol=DEFAULT_PROTOCOL):
     if protocol not in PROVIDERS[name]:
         protocols = ", ".join(PROVIDERS[name])
         raise SystemExit(f"Unknown protocol '{protocol}' for {name}. Available: {protocols}")
-    missing = [v for v in PROVIDERS[name][protocol]["required_env"] if not os.getenv(v)]
+    missing = [var for var in PROVIDERS[name][protocol].required_env if not os.getenv(var)]
     if missing:
         others = [p for p in active_protocols(name) if p != protocol]
         hint = f" — or pass --protocol {'/'.join(others)}" if others else ""
@@ -93,10 +100,10 @@ def validate_provider(name, protocol=DEFAULT_PROTOCOL):
     return name, protocol
 
 
-def get_provider_env(provider, protocol):
+def get_provider_env(provider: str, protocol: str) -> dict[str, str]:
     """Map provider-specific env vars to Gluetun's generic env vars."""
-    overrides = {"VPN_SERVICE_PROVIDER": provider, "VPN_TYPE": protocol}
-    for gluetun_var, provider_var in PROVIDERS[provider][protocol]["env_map"].items():
+    overrides: dict[str, str] = {"VPN_SERVICE_PROVIDER": provider, "VPN_TYPE": protocol}
+    for gluetun_var, provider_var in PROVIDERS[provider][protocol].env_map.items():
         value = os.getenv(provider_var)
         if value:
             overrides[gluetun_var] = value
