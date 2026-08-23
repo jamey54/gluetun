@@ -75,11 +75,8 @@ def _parse_servers_output(lines):
         city = cells[city_idx]
         if not country or not city or country.lower() == "country":
             continue
-        vpn = (
-            cells[idx["vpn"]].lower()
-            if "vpn" in idx and idx["vpn"] < len(cells)
-            else DEFAULT_PROTOCOL
-        )
+        vpn_cell = cells[idx["vpn"]].lower() if "vpn" in idx and idx["vpn"] < len(cells) else ""
+        vpn = vpn_cell or DEFAULT_PROTOCOL
         hostname = (
             cells[idx["hostname"]].strip("`")
             if "hostname" in idx and idx["hostname"] < len(cells)

@@ -38,7 +38,11 @@ DEBUG = False
 
 
 def _same_country(a, b):
-    return strip_accents(resolve_country(a)).lower() == strip_accents(resolve_country(b)).lower()
+    return (
+        bool(a)
+        and bool(b)
+        and (strip_accents(resolve_country(a)).lower() == strip_accents(resolve_country(b)).lower())
+    )
 
 
 def container_running():
