@@ -27,6 +27,7 @@ from vpn.speedtest import DEFAULT_SIZE_MB, format_result, measure
 IP_INFO_URL = "https://ipinfo.io"
 IP_FETCH_RETRIES = 15
 IP_FETCH_DELAY = 2
+PROBE_TIMEOUT = 8
 
 DEBUG = False
 
@@ -53,7 +54,9 @@ def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_count
     prev_city = None
     for attempt in range(retries):
         result = run(
-            "docker", "exec", CONTAINER, "wget", "-qO-", IP_INFO_URL,
+            "docker", "exec", CONTAINER,
+            "timeout", str(PROBE_TIMEOUT),
+            "wget", "-T", str(PROBE_TIMEOUT), "-qO-", IP_INFO_URL,
             capture=True, check=False,
         )
         if result.returncode == 0:
@@ -70,8 +73,8 @@ def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_count
                     return info
                 prev_city = city
                 click.echo(
-                    f"Connected to {city or '?'}, waiting for {expected_country}..."
-                    f" ({attempt + 1}/{retries})"
+                    f"Public IP: {city or '?'}, {resolve_country(actual_country)}"
+                    f" — waiting for {expected_country}... ({attempt + 1}/{retries})"
                 )
             except json.JSONDecodeError:
                 pass
@@ -115,6 +118,8 @@ def finish_connection(expected_country=None, speedtest=True):
             click.echo(format_result(result))
         else:
             click.echo("Speed test failed.")
+    elif speedtest:
+        click.echo("Skipping speed test — connection not verified.")
     return verified
 
 
