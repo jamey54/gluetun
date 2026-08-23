@@ -1,5 +1,5 @@
 """vpn — Gluetun CLI manager."""
 
-from vpn.cli import cli
+from vpn.cli import main
 
-__all__ = ["cli"]
+__all__ = ["main"]

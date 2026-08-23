@@ -7,7 +7,14 @@ import click
 
 from vpn.config import CONTAINER
 from vpn.countries import resolve_country
-from vpn.docker import GLUETUN_IMAGE, compose, get_current_vpn, run
+from vpn.docker import (
+    GLUETUN_IMAGE,
+    compose,
+    container_running,
+    container_status,
+    get_current_vpn,
+    run,
+)
 from vpn.picker import select_server
 from vpn.providers import (
     DEFAULT_PROTOCOL,
@@ -31,6 +38,8 @@ PROBE_TIMEOUT = 8
 
 DEBUG = False
 
+SENSITIVE_KEY_PARTS = ("KEY", "PASSWORD", "TOKEN", "SECRET")
+
 
 # ---------------------------------------------------------------------------
 # IP info
@@ -45,22 +54,19 @@ def _same_country(a, b):
     )
 
 
-def container_running():
-    result = run(
-        "docker",
-        "inspect",
-        "--format",
-        "{{.State.Status}}",
-        CONTAINER,
-        capture=True,
-        check=False,
-    )
-    return result.returncode == 0
+def _log_env(overrides):
+    """Echo compose env overrides when debugging, masking sensitive values."""
+    if not DEBUG:
+        return
+    shown = [
+        f"{k}=***" if any(part in k for part in SENSITIVE_KEY_PARTS) else f"{k}={v}"
+        for k, v in overrides.items()
+    ]
+    click.echo(f"Env: {' '.join(shown)}")
 
 
 def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_country=None):
-    """Fetch public IP info with retries. If expected_country is set, retries until it matches."""
-    prev_city = None
+    """Fetch public IP info with retries. If expected_country is set, retry until it matches."""
     for attempt in range(retries):
         result = run(
             "docker",
@@ -79,22 +85,16 @@ def fetch_ip_info(retries=IP_FETCH_RETRIES, delay=IP_FETCH_DELAY, expected_count
         if result.returncode == 0:
             try:
                 info = json.loads(result.stdout)
-                if not expected_country:
+            except json.JSONDecodeError:
+                info = None
+            if info:
+                actual_country = str(info.get("country", ""))
+                if not expected_country or _same_country(actual_country, expected_country):
                     return info
-                actual_country = info.get("country", "")
-                city = info.get("city", "")
-                if actual_country and _same_country(actual_country, expected_country):
-                    return info
-                if prev_city is not None and city != prev_city:
-                    click.echo(f"Location changed to {city}, VPN is connected.")
-                    return info
-                prev_city = city
                 click.echo(
-                    f"Public IP: {city or '?'}, {resolve_country(actual_country)}"
+                    f"Public IP: {info.get('city') or '?'}, {resolve_country(actual_country)}"
                     f" — waiting for {expected_country}... ({attempt + 1}/{retries})"
                 )
-            except json.JSONDecodeError:
-                pass
         elif attempt < retries - 1:
             click.echo(f"Waiting for VPN connection... ({attempt + 1}/{retries})")
         if attempt < retries - 1:
@@ -117,8 +117,7 @@ def print_ip_status(expected_country=None):
     location = f"{info.get('city', '?')}, {country}"
     verified = True
     if expected_country:
-        actual = info.get("country", "")
-        verified = bool(actual) and _same_country(actual, expected_country)
+        verified = _same_country(str(info.get("country", "")), expected_country)
         location = click.style(location, fg="green" if verified else "red")
     click.echo(f"Location: {location}")
     click.echo(f"Org:      {info.get('org', '?')}")
@@ -147,13 +146,13 @@ def finish_connection(expected_country=None, speedtest=True):
 
 @click.group()
 @click.option("--debug", is_flag=True, envvar="VPN_DEBUG", help="Enable debug output")
-def cli(debug):
+def main(debug):
     """Gluetun VPN manager."""
     global DEBUG
     DEBUG = debug
 
 
-@cli.command()
+@main.command()
 @click.option("--provider", required=True, help="VPN provider (e.g. surfshark, protonvpn)")
 @click.option(
     "--protocol",
@@ -166,21 +165,20 @@ def up(provider, protocol, no_speedtest):
     """Start the VPN container."""
     provider, protocol = validate_provider(provider, protocol)
     overrides = get_provider_env(provider, protocol)
-    if DEBUG:
-        click.echo(f"Env: {' '.join(f'{k}={v}' for k, v in overrides.items())}")
+    _log_env(overrides)
     compose("up", "-d", env_overrides=overrides)
     click.echo(f"VPN started ({provider}/{protocol}).")
     finish_connection(speedtest=not no_speedtest)
 
 
-@cli.command()
+@main.command()
 def down():
     """Stop the VPN container."""
     compose("down")
     click.echo("VPN stopped.")
 
 
-@cli.command()
+@main.command()
 @click.option("--no-speedtest", is_flag=True, help="Skip the speed test")
 def restart(no_speedtest):
     """Restart the VPN container."""
@@ -189,7 +187,7 @@ def restart(no_speedtest):
     finish_connection(speedtest=not no_speedtest)
 
 
-@cli.command()
+@main.command()
 @click.option("-f", "--follow", is_flag=True, help="Follow log output")
 @click.option("-n", "--tail", default="50", help="Number of lines to show")
 def logs(follow, tail):
@@ -201,7 +199,7 @@ def logs(follow, tail):
     compose(*args)
 
 
-@cli.command()
+@main.command()
 @click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
 def update(no_speedtest):
     """Pull latest gluetun image and recreate the container."""
@@ -211,20 +209,19 @@ def update(no_speedtest):
     provider, protocol = current
     run("docker", "pull", GLUETUN_IMAGE)
     overrides = get_provider_env(provider, protocol)
-    if DEBUG:
-        click.echo(f"Env: {' '.join(f'{k}={v}' for k, v in overrides.items())}")
+    _log_env(overrides)
     compose("up", "-d", "--force-recreate", env_overrides=overrides)
     click.echo(f"Updated and restarted ({provider}/{protocol}).")
     finish_connection(speedtest=not no_speedtest)
 
 
-@cli.command()
+@main.command()
 def ip():
     """Show the current public VPN IP."""
     print_ip_status()
 
 
-@cli.command()
+@main.command()
 @click.option(
     "-s", "--size", type=int, default=DEFAULT_SIZE_MB, show_default=True, help="Download size (MB)"
 )
@@ -239,27 +236,19 @@ def speedtest(size):
     click.echo(format_result(result))
 
 
-@cli.command()
+@main.command()
 @click.option("--no-speedtest", is_flag=True, help="Skip the speed test")
 def status(no_speedtest):
     """Show container status, public IP, and speed test."""
-    result = run(
-        "docker",
-        "inspect",
-        "--format",
-        "{{.State.Status}}",
-        CONTAINER,
-        capture=True,
-        check=False,
-    )
-    if result.returncode != 0:
+    state = container_status()
+    if not state:
         click.echo(f"Container '{CONTAINER}' not found.")
         return
-    click.echo(f"Container: {CONTAINER} ({result.stdout.strip()})")
+    click.echo(f"Container: {CONTAINER} ({state})")
     finish_connection(speedtest=not no_speedtest)
 
 
-@cli.command()
+@main.command()
 def servers():
     """List available servers for all active providers."""
     by_provider = listable_servers(get_servers())
@@ -268,7 +257,7 @@ def servers():
     print_servers_table(by_provider)
 
 
-@cli.command()
+@main.command()
 @click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
 def server(no_speedtest):
     """Interactively select a server and restart."""
@@ -292,8 +281,7 @@ def server(no_speedtest):
     overrides["SERVER_COUNTRIES"] = country
     if city:
         overrides["SERVER_CITIES"] = city
-    if DEBUG:
-        click.echo(f"Env: {' '.join(f'{k}={v}' for k, v in overrides.items())}")
+    _log_env(overrides)
     compose("up", "-d", env_overrides=overrides)
 
     location = f"{country}" + (f" / {city}" if city else "")
