@@ -98,7 +98,7 @@ OpenVPN credentials: [account.proton.me/vpn/OpenVPN](https://account.proton.me/v
 vpn up --provider protonvpn --protocol openvpn
 ```
 
-`--protocol` defaults to `wireguard`. `vpn update` preserves the protocol of the running container.
+`--protocol` defaults to the running container's protocol (`wireguard` on a fresh install). `vpn up` and `vpn update` preserve the running container's country/city selection unless you pick a new one via `vpn server`.
 
 ## Server selection
 
@@ -108,7 +108,7 @@ vpn up --provider protonvpn --protocol openvpn
 
 ## Connection verification
 
-After connecting, the CLI probes the public IP from inside the container (`wget https://ipinfo.io`, time-bounded) and compares the reported country with the selected server's country — shown green on match, red on mismatch. IP echo services report ISO 3166-1 alpha-2 codes (`AU`), which are normalized to full names before comparing, so they match gluetun's server lists.
+After connecting, the CLI probes the public IP from inside the container (`wget https://ipinfo.io`, time-bounded) and compares the reported country with the selected server's country — shown green on match, red on mismatch. Only the country is trusted: a changed city alone never counts as connected. IP echo services report ISO 3166-1 alpha-2 codes (`AU`), which are normalized to full names before comparing, so they match gluetun's server lists.
 
 ## Speed test
 
@@ -136,8 +136,8 @@ A provider/protocol pair only appears in listings and can only be started when a
 | ProtonVPN | WireGuard | `PROTONVPN_WIREGUARD_PRIVATE_KEY`, `PROTONVPN_WIREGUARD_ADDRESSES` (always `10.2.0.2/32`) | both |
 | ProtonVPN | OpenVPN | `PROTONVPN_OPENVPN_USER`, `PROTONVPN_OPENVPN_PASSWORD` | both |
 
-Additionally, `HTTP_CONTROL_SERVER_API_KEY` (any random string) authenticates gluetun's HTTP control server exposed on port 8000.
+`HTTP_CONTROL_SERVER_API_KEY` (any random string) is **required** — it authenticates gluetun's HTTP control server, which the CLI exposes on `127.0.0.1:8000` only. `up`, `update` and `server` refuse to run without it.
 
 ### Set automatically
 
-These are managed by the CLI — never define them yourself: `VPN_SERVICE_PROVIDER`, `VPN_TYPE`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `OPENVPN_USER`, `OPENVPN_PASSWORD` (mapped from your provider credentials), and `SERVER_COUNTRIES` / `SERVER_CITIES` (written by `vpn server`; `vpn up` without a selection defaults to United States).
+These are managed by the CLI — never define them yourself: `VPN_SERVICE_PROVIDER`, `VPN_TYPE`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `OPENVPN_USER`, `OPENVPN_PASSWORD` (mapped from your provider credentials), and `SERVER_COUNTRIES` / `SERVER_CITIES` (written by `vpn server`; preserved across `up` and `update`).
