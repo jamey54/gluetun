@@ -3,11 +3,31 @@
 import os
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from vpn.config import COMPOSE_FILE, CONTAINER, read_env_file
 
 GLUETUN_IMAGE = "qmcgaw/gluetun:latest"
+
+
+@dataclass(frozen=True)
+class CurrentVpn:
+    """Configuration read back from the running container."""
+
+    provider: str
+    protocol: str | None = None
+    countries: str | None = None
+    cities: str | None = None
+
+    def location_overrides(self):
+        """SERVER_COUNTRIES/SERVER_CITIES overrides, omitting unset ones."""
+        overrides = {}
+        if self.countries:
+            overrides["SERVER_COUNTRIES"] = self.countries
+        if self.cities:
+            overrides["SERVER_CITIES"] = self.cities
+        return overrides
 
 
 def run(*args, capture=False, check=True):
@@ -66,16 +86,21 @@ def compose(*args, env_overrides=None):
 
 
 def get_current_vpn():
-    """Read (provider, VPN_TYPE) from the running container, or None."""
+    """Read provider, protocol and location from the running container, or None."""
     out = inspect_container("{{range .Config.Env}}{{println .}}{{end}}")
     if not out:
         return None
-    provider = protocol = None
+    values = {}
+    wanted = ("VPN_SERVICE_PROVIDER", "VPN_TYPE", "SERVER_COUNTRIES", "SERVER_CITIES")
     for line in out.splitlines():
-        if line.startswith("VPN_SERVICE_PROVIDER="):
-            provider = line.split("=", 1)[1] or None
-        elif line.startswith("VPN_TYPE="):
-            protocol = line.split("=", 1)[1] or None
-    if not provider:
+        key, sep, value = line.partition("=")
+        if sep and key in wanted:
+            values[key] = value or None
+    if not values.get("VPN_SERVICE_PROVIDER"):
         return None
-    return provider, protocol
+    return CurrentVpn(
+        provider=values["VPN_SERVICE_PROVIDER"],
+        protocol=values.get("VPN_TYPE"),
+        countries=values.get("SERVER_COUNTRIES"),
+        cities=values.get("SERVER_CITIES"),
+    )

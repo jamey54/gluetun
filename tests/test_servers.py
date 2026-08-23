@@ -219,6 +219,27 @@ def test_get_servers_does_not_cache_all_empty(monkeypatch):
     assert written == {}
 
 
+def test_get_servers_fetches_all_providers_in_parallel(cache_path, monkeypatch):
+    monkeypatch.setattr(servers, "_read_cache", lambda: None)
+    seen = []
+
+    def fake_fetch(provider):
+        seen.append(provider)
+        return [{"country": provider.upper(), "city": "X", "hostname": "", "vpn": "wireguard"}]
+
+    monkeypatch.setattr(servers, "_fetch_servers", fake_fetch)
+    monkeypatch.setattr(
+        servers,
+        "get_active_providers",
+        lambda: {("surfshark", "wireguard"), ("protonvpn", "wireguard")},
+    )
+    by_provider = servers.get_servers()
+    assert sorted(seen) == ["protonvpn", "surfshark"]
+    assert set(by_provider) == {"surfshark", "protonvpn"}
+    assert by_provider["surfshark"][0]["country"] == "SURFSHARK"
+    assert cache_path.exists()  # result cached
+
+
 def test_listable_servers_filters_by_active_pair(monkeypatch):
     active = {("surfshark", "wireguard")}
     monkeypatch.setattr(servers, "get_active_providers", lambda: active)

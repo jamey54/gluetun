@@ -17,8 +17,8 @@ from vpn.docker import (
 )
 from vpn.picker import select_server
 from vpn.providers import (
-    DEFAULT_PROTOCOL,
     PROVIDERS,
+    choose_protocol,
     get_provider_env,
     validate_provider,
 )
@@ -157,18 +157,24 @@ def main(debug):
 @click.option(
     "--protocol",
     type=click.Choice(sorted({p for cfg in PROVIDERS.values() for p in cfg}), case_sensitive=False),
-    default=DEFAULT_PROTOCOL,
-    help="VPN protocol",
+    default=None,
+    help="VPN protocol (default: keep the running one, else wireguard)",
 )
 @click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
 def up(provider, protocol, no_speedtest):
-    """Start the VPN container."""
+    """Start the VPN container, keeping the running location and protocol."""
+    current = get_current_vpn()
+    protocol = choose_protocol(provider, protocol, current.protocol if current else None)
     provider, protocol = validate_provider(provider, protocol)
     overrides = get_provider_env(provider, protocol)
+    if current:
+        overrides.update(current.location_overrides())
     _log_env(overrides)
     compose("up", "-d", env_overrides=overrides)
-    click.echo(f"VPN started ({provider}/{protocol}).")
-    finish_connection(speedtest=not no_speedtest)
+    location = overrides.get("SERVER_COUNTRIES", "")
+    suffix = f" → {location}" if location else ""
+    click.echo(f"VPN started ({provider}/{protocol}){suffix}.")
+    finish_connection(expected_country=location or None, speedtest=not no_speedtest)
 
 
 @main.command()
@@ -202,17 +208,19 @@ def logs(follow, tail):
 @main.command()
 @click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
 def update(no_speedtest):
-    """Pull latest gluetun image and recreate the container."""
+    """Pull latest gluetun image and recreate with the same configuration."""
     current = get_current_vpn()
     if not current:
         raise SystemExit("No running container. Use 'vpn up --provider <name>' first.")
-    provider, protocol = current
     run("docker", "pull", GLUETUN_IMAGE)
-    overrides = get_provider_env(provider, protocol)
+    overrides = get_provider_env(current.provider, current.protocol)
+    overrides.update(current.location_overrides())
     _log_env(overrides)
     compose("up", "-d", "--force-recreate", env_overrides=overrides)
-    click.echo(f"Updated and restarted ({provider}/{protocol}).")
-    finish_connection(speedtest=not no_speedtest)
+    location = current.countries or ""
+    suffix = f" → {location}" if location else ""
+    click.echo(f"Updated and restarted ({current.provider}/{current.protocol}){suffix}.")
+    finish_connection(expected_country=location or None, speedtest=not no_speedtest)
 
 
 @main.command()

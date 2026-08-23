@@ -3,6 +3,7 @@
 import json
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from rich.console import Console
@@ -122,13 +123,13 @@ def _write_cache(servers):
 
 
 def get_servers():
-    """Fetch servers for all credentialed providers. Returns dict[provider, list[row]]."""
+    """Fetch servers for all credentialed providers in parallel; dict[provider, rows]."""
     cached = _read_cache()
     if cached is not None:
         return cached
-    by_provider = {
-        provider: _fetch_servers(provider) for provider in {p for p, _ in get_active_providers()}
-    }
+    providers = sorted({p for p, _ in get_active_providers()})
+    with ThreadPoolExecutor(max_workers=max(len(providers), 1)) as pool:
+        by_provider = dict(zip(providers, pool.map(_fetch_servers, providers), strict=True))
     if any(by_provider.values()):
         _write_cache(by_provider)
     return by_provider

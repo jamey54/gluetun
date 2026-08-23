@@ -62,6 +62,17 @@ def get_active_providers():
     }
 
 
+def choose_protocol(provider, requested=None, current=None):
+    """Protocol to use: an explicit request wins, then the running one if still
+    credentialed, then the default. The result must still pass validate_provider."""
+    active = active_protocols(provider)
+    if requested is not None:
+        return requested.lower()
+    if current in active:
+        return current
+    return next((p for p in (DEFAULT_PROTOCOL, *active) if p in active), DEFAULT_PROTOCOL)
+
+
 def validate_provider(name, protocol=DEFAULT_PROTOCOL):
     """Validate provider/protocol and check required env vars.
 
