@@ -6,6 +6,7 @@ import time
 import click
 
 from vpn.config import CONTAINER
+from vpn.countries import resolve_country
 from vpn.docker import GLUETUN_IMAGE, compose, get_current_vpn, run
 from vpn.picker import select_server
 from vpn.providers import (
@@ -36,7 +37,7 @@ DEBUG = False
 
 
 def _same_country(a, b):
-    return strip_accents(a).lower() == strip_accents(b).lower()
+    return strip_accents(resolve_country(a)).lower() == strip_accents(resolve_country(b)).lower()
 
 
 def container_running():
@@ -92,7 +93,8 @@ def print_ip_status(expected_country=None):
         click.echo("Could not fetch public IP.")
         return False
     click.echo(f"IP:       {info.get('ip', '?')}")
-    location = f"{info.get('city', '?')}, {info.get('country', '?')}"
+    country = resolve_country(str(info.get("country", "?")))
+    location = f"{info.get('city', '?')}, {country}"
     verified = True
     if expected_country:
         actual = info.get("country", "")
