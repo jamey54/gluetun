@@ -59,9 +59,9 @@ You only need to set credentials for providers you actually use.
 |---------|-------------|
 | `vpn up --provider <name>` | Start the VPN container |
 | `vpn down` | Stop the VPN container |
-| `vpn restart` | Restart with current config |
-| `vpn ip` | Show public VPN IP |
-| `vpn status` | Container state + public IP |
+| `vpn restart` | Restart with current config (runs speed test) |
+| `vpn ip` | Show public VPN IP (no speed test) |
+| `vpn status` | Container state + public IP + speed test |
 | `vpn logs` | Show container logs (`-f` to follow, `-n` for line count) |
 | `vpn update` | Pull latest gluetun image + recreate |
 | `vpn speedtest` | Measure download speed through the VPN (`--size` MB, default 25) |
@@ -112,7 +112,7 @@ After connecting, the CLI probes the public IP from inside the container (`wget 
 
 ## Speed test
 
-`up`, `update` and `server` run a download speed test after a verified connection (green `Location:`). It downloads 25 MB from Cloudflare inside the container — all traffic goes through the VPN tunnel. Skip it per invocation with `--no-speedtest`, or change the size with `vpn speedtest --size 100`. When the connection isn't verified, the speed test is skipped with a message.
+`up`, `update`, `server`, `status` and `restart` run a download speed test after a verified connection (green `Location:`). It downloads 25 MB from Cloudflare inside the container — all traffic goes through the VPN tunnel. Skip it per invocation with `--no-speedtest`, or change the size with `vpn speedtest --size 100`. When the connection isn't verified, the speed test is skipped with a message.
 
 ## Configuration
 

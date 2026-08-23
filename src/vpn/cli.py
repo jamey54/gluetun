@@ -164,11 +164,12 @@ def down():
 
 
 @cli.command()
-def restart():
+@click.option("--no-speedtest", is_flag=True, help="Skip the speed test")
+def restart(no_speedtest):
     """Restart the VPN container."""
     compose("restart")
     click.echo("VPN restarted.")
-    print_ip_status()
+    finish_connection(speedtest=not no_speedtest)
 
 
 @cli.command()
@@ -220,8 +221,9 @@ def speedtest(size):
 
 
 @cli.command()
-def status():
-    """Show container status and public IP."""
+@click.option("--no-speedtest", is_flag=True, help="Skip the speed test")
+def status(no_speedtest):
+    """Show container status, public IP, and speed test."""
     result = run(
         "docker", "inspect", "--format", "{{.State.Status}}", CONTAINER,
         capture=True, check=False,
@@ -230,7 +232,7 @@ def status():
         click.echo(f"Container '{CONTAINER}' not found.")
         return
     click.echo(f"Container: {CONTAINER} ({result.stdout.strip()})")
-    print_ip_status()
+    finish_connection(speedtest=not no_speedtest)
 
 
 @cli.command()
