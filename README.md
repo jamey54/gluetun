@@ -106,9 +106,13 @@ vpn up --provider protonvpn --protocol openvpn
 
 `vpn server` opens an interactive picker showing the same columns, with live filtering (accent-insensitive) and keyboard navigation (↑/↓ or Ctrl-N/P to move, PgUp/PgDn for pages, Home/End for first/last, type to filter — the filter matches any column including provider and protocol, Enter to select, Ctrl-C/Q to cancel). The selected row's provider *and* protocol are automatically used when restarting the container.
 
+## Connection verification
+
+After connecting, the CLI probes the public IP from inside the container (`wget https://ipinfo.io`, time-bounded) and compares the reported country with the selected server's country — shown green on match, red on mismatch. IP echo services report ISO 3166-1 alpha-2 codes (`AU`), which are normalized to full names before comparing, so they match gluetun's server lists.
+
 ## Speed test
 
-`up`, `update` and `server` run a download speed test after a verified connection (green `Location:`). It downloads 25 MB from Cloudflare inside the container — all traffic goes through the VPN tunnel. Skip it per invocation with `--no-speedtest`, or change the size with `vpn speedtest --size 100`.
+`up`, `update` and `server` run a download speed test after a verified connection (green `Location:`). It downloads 25 MB from Cloudflare inside the container — all traffic goes through the VPN tunnel. Skip it per invocation with `--no-speedtest`, or change the size with `vpn speedtest --size 100`. When the connection isn't verified, the speed test is skipped with a message.
 
 ## Configuration
 
