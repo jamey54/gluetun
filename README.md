@@ -65,6 +65,7 @@ You only need to set credentials for providers you actually use.
 | `vpn logs` | Show container logs (`-f` to follow, `-n` for line count) |
 | `vpn update` | Pull latest gluetun image + recreate |
 | `vpn speedtest` | Measure download speed through the VPN (`--size` MB, default 25) |
+| `vpn bench` | Benchmark locations and connect to the fastest |
 | `vpn server` | Interactive picker — pick location, restart |
 | `vpn servers` | List available servers (all active providers) |
 
@@ -113,6 +114,31 @@ After connecting, the CLI probes the public IP from inside the container (`wget 
 ## Speed test
 
 `up`, `update`, `server`, `status` and `restart` run a download speed test after a verified connection (green `Location:`). It downloads 25 MB from Cloudflare inside the container — all traffic goes through the VPN tunnel. Skip it per invocation with `--no-speedtest`, or change the size with `vpn speedtest --size 100`. When the connection isn't verified, the speed test is skipped with a message.
+
+## Benchmark
+
+`vpn bench` finds and connects to the fastest location:
+
+```bash
+vpn bench                        # running provider/protocol, all its countries
+vpn bench --country Japan        # one country
+vpn bench --all                  # every credentialed provider/protocol
+vpn bench --no-connect           # report results, keep the current location
+```
+
+How it runs:
+
+1. **Latency prescreen** — parallel TCP-connect probes (port 443, host-side) rank every candidate location; unreachable ones sort last.
+2. **Screening** — the top `--top` (default 12) locations each get hot-swapped in place, verified by country match, and tested with a `--scan-size` MB (default 10) download.
+3. **Finals** — the best 3 are re-tested with the full `-s/--size` MB (default 25) download.
+4. **Winner** — connected automatically. With `--no-connect` (or Ctrl-C at any point) the pre-bench settings are restored instead.
+
+Each test hot-swaps through gluetun's control server (`GET/PUT /v1/vpn/settings`) — no container recreation, single-digit-second switches. On older images without that route it falls back to recreating the container per location. Cross-provider benches work because the correct credentials for each candidate pair are injected from `.env` into the settings document.
+
+Notes:
+
+- Candidates default to the running provider/protocol; use `--provider`, `--protocol`, or `--all` to widen.
+- Bench state is applied at runtime only — a later `docker compose up -d --force-recreate` (e.g. `vpn update`) reverts to the env-file selection.
 
 ## Configuration
 

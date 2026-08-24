@@ -2,6 +2,16 @@
 
 import click
 
+from vpn import control
+from vpn.bench import (
+    DEFAULT_FINAL_SIZE_MB,
+    DEFAULT_SCAN_SIZE_MB,
+    DEFAULT_TOP,
+    build_candidates,
+    default_scope,
+    print_report,
+    run_bench,
+)
 from vpn.config import CONTAINER
 from vpn.docker import (
     GLUETUN_IMAGE,
@@ -237,3 +247,100 @@ def server(no_speedtest: bool) -> None:
     location = f"{country}" + (f" / {city}" if city else "")
     click.echo(f"VPN restarted ({provider}/{protocol}) → {location}")
     finish_connection(expected_country=country, speedtest=not no_speedtest)
+
+
+@main.command()
+@click.option("--provider", help="Only bench this provider (default: the running one)")
+@click.option(
+    "--protocol",
+    type=click.Choice(sorted({p for cfg in PROVIDERS.values() for p in cfg}), case_sensitive=False),
+    default=None,
+    help="Only bench this protocol (default: the running one)",
+)
+@click.option("--country", help="Only bench this country")
+@click.option(
+    "-n",
+    "--max-candidates",
+    type=click.IntRange(min=0),
+    default=0,
+    help="Cap on locations entering the latency stage (default: no cap)",
+)
+@click.option(
+    "--top",
+    type=click.IntRange(min=1),
+    default=DEFAULT_TOP,
+    show_default=True,
+    help="Locations that get a screening download after latency ranking",
+)
+@click.option(
+    "--scan-size",
+    type=click.IntRange(min=1),
+    default=DEFAULT_SCAN_SIZE_MB,
+    show_default=True,
+    help="Screening download size (MB)",
+)
+@click.option(
+    "-s",
+    "--size",
+    type=click.IntRange(min=1),
+    default=DEFAULT_FINAL_SIZE_MB,
+    show_default=True,
+    help="Finals download size (MB)",
+)
+@click.option(
+    "--all",
+    "all_providers",
+    is_flag=True,
+    help="Bench every credentialed provider/protocol, not just the running pair",
+)
+@click.option(
+    "--no-connect",
+    is_flag=True,
+    help="Do not connect to the winner; restore pre-bench settings instead",
+)
+def bench(
+    provider: str | None,
+    protocol: str | None,
+    country: str | None,
+    max_candidates: int,
+    top: int,
+    scan_size: int,
+    size: int,
+    all_providers: bool,
+    no_connect: bool,
+) -> None:
+    """Benchmark locations and connect to the fastest."""
+    require_api_key()
+    if not container_running():
+        raise SystemExit(f"Container '{CONTAINER}' is not running.")
+    by_provider = listable_servers(get_servers())
+    if not any(by_provider.values()):
+        raise SystemExit("No servers found. Is Docker running?")
+
+    if not all_providers and not provider and not protocol:
+        provider, protocol = default_scope()
+    candidates = build_candidates(by_provider, provider, protocol, country)
+    if not candidates:
+        raise SystemExit("No matching locations for the given filters.")
+
+    original = get_current_vpn()
+    try:
+        settings_route = control.settings_route_supported()
+        report = run_bench(
+            candidates,
+            top=top,
+            limit=max_candidates,
+            scan_size_mb=scan_size,
+            final_size_mb=size,
+            connect_winner=not no_connect,
+            settings_route=settings_route,
+            original=original,
+        )
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
+    except control.ControlError as exc:
+        raise SystemExit(f"Cannot reach the gluetun control server: {exc}") from None
+
+    print_report(report)
+    if report.action:
+        click.echo(report.action)
