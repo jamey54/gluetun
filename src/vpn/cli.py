@@ -8,7 +8,6 @@ from vpn.bench import (
     DEFAULT_SCAN_SIZE_MB,
     DEFAULT_TOP,
     build_candidates,
-    default_scope,
     print_report,
     run_bench,
 )
@@ -317,13 +316,13 @@ def bench(
     if not any(by_provider.values()):
         raise SystemExit("No servers found. Is Docker running?")
 
-    if not all_providers and not provider and not protocol:
-        provider, protocol = default_scope()
+    original = get_current_vpn()
+    if not all_providers and not provider and not protocol and original:
+        provider, protocol = original.provider, original.protocol
     candidates = build_candidates(by_provider, provider, protocol, country)
     if not candidates:
         raise SystemExit("No matching locations for the given filters.")
 
-    original = get_current_vpn()
     try:
         settings_route = control.settings_route_supported()
         report = run_bench(

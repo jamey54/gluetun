@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.table import Table
 
 from vpn.control import ControlError, get_settings, put_settings, with_location
-from vpn.docker import CurrentVpn, compose, get_current_vpn
+from vpn.docker import CurrentVpn, compose
 from vpn.ipinfo import fetch_ip_info
 from vpn.latency import probe_hosts
 from vpn.providers import DEFAULT_PROTOCOL, get_provider_env
@@ -105,14 +105,6 @@ def build_candidates(
         if hostname and hostname not in seen:
             seen.append(hostname)
     return [replace(c, hostnames=tuple(hosts[c.key])) for c in candidates.values()]
-
-
-def default_scope() -> tuple[str | None, str | None]:
-    """(provider, protocol) a default bench is scoped to — the running pair."""
-    current = get_current_vpn()
-    if not current:
-        return None, None
-    return current.provider, current.protocol
 
 
 # ---------------------------------------------------------------------------
