@@ -4,7 +4,8 @@ from typing import Any
 
 import pytest
 
-from vpn import bench, control
+from vpn import bench, cli, control
+from vpn.docker import CurrentVpn
 
 
 def candidate(provider="surfshark", protocol="wireguard", country="Germany",
@@ -241,8 +242,6 @@ def test_run_bench_old_image_restore_recreates_original(monkeypatch):
     monkeypatch.setattr(bench, "get_settings", Recorder([baseline_doc()]))
     recreates = Recorder()
     monkeypatch.setattr(bench, "compose", recreates)
-    from vpn.docker import CurrentVpn
-
     original = CurrentVpn(provider="protonvpn", protocol="wireguard", countries="Japan")
     report = bench.run_bench(
         [candidate("surfshark", "wireguard", "France", None, "fr")],
@@ -269,8 +268,6 @@ def test_run_bench_old_image_interrupt_recreates_original(monkeypatch):
         raise KeyboardInterrupt()
 
     monkeypatch.setattr(bench, "measure", boom)
-    from vpn.docker import CurrentVpn
-
     original = CurrentVpn(provider="surfshark", protocol="wireguard", countries="Iceland")
     report = bench.run_bench(
         [candidate("surfshark", "wireguard", "France", None, "fr")],
@@ -298,3 +295,51 @@ def test_sorted_results_finalists_first_failures_last():
     dead = bench.BenchResult(loc("D"), error="verification failed")
     ordered = bench.sorted_results([ok, dead, final_slow, final_fast])
     assert [r.candidate.location for r in ordered] == ["C", "B", "A", "D"]
+
+
+# ---------------------------------------------------------------------------
+# CLI wiring
+# ---------------------------------------------------------------------------
+
+
+def test_cli_bench_end_to_end(monkeypatch):
+    from click.testing import CliRunner
+
+    data = rows(
+        ("surfshark", "wireguard", "France", "", "fr1"),
+        ("surfshark", "wireguard", "Japan", "", "jp1"),
+    )
+    monkeypatch.setattr(cli, "require_api_key", lambda: None)
+    monkeypatch.setattr(cli, "container_running", lambda: True)
+    monkeypatch.setattr(cli, "get_servers", lambda: data)
+    monkeypatch.setattr(cli, "listable_servers", lambda d: d)
+    monkeypatch.setattr(cli, "get_current_vpn",
+                        lambda: CurrentVpn(provider="surfshark", protocol="wireguard"))
+    monkeypatch.setattr(control, "settings_route_supported", lambda: True)
+
+    probes = {"fr1": 0.05, "jp1": 0.20}
+    monkeypatch.setattr(bench, "probe_hosts", Recorder([probes]))
+    counter = {"n": 0}
+
+    def fake_measure(size_mb: int, timeout: int = 120) -> dict[str, float]:
+        counter["n"] += 1
+        return {"mbits": 100.0 - counter["n"], "seconds": 1.0, "mbytes": float(size_mb)}
+
+    monkeypatch.setattr(bench, "measure", fake_measure)
+
+    result = CliRunner().invoke(cli.main, ["bench"])
+    assert result.exit_code == 0, result.output
+    # default scope = running pair; latency-ranked screening; winner France connected
+    assert "Benchmarking 2 locations" in result.output
+    assert "Connected to winner: surfshark/wireguard France" in result.output
+    assert "France" in result.output and "Japan" in result.output
+
+
+def test_cli_bench_requires_running_container(monkeypatch):
+    from click.testing import CliRunner
+
+    monkeypatch.setattr(cli, "require_api_key", lambda: None)
+    monkeypatch.setattr(cli, "container_running", lambda: False)
+    result = CliRunner().invoke(cli.main, ["bench"])
+    assert result.exit_code != 0
+    assert "not running" in result.output
