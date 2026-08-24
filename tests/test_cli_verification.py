@@ -104,6 +104,40 @@ def test_fetch_gives_up_after_retries(monkeypatch):
     assert len(sleeps) == 3  # no sleep after the final attempt
 
 
+# ---------------------------------------------------------------------------
+# retry notice (first and final failures stay silent)
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_first_failure_silent(monkeypatch, capsys):
+    payloads = [probe_result(code=1), probe_result(payload='{"ip": "1.2.3.4"}')]
+    monkeypatch.setattr("vpn.cli.run", run_probe(payloads)[0])
+    monkeypatch.setattr(time, "sleep", no_sleep)
+    assert cli.fetch_ip_info(retries=5, delay=0) == {"ip": "1.2.3.4"}
+    assert capsys.readouterr().out == ""
+
+
+def test_fetch_second_failure_prints_waiting_notice(monkeypatch, capsys):
+    payloads = [
+        probe_result(code=1),
+        probe_result(code=1),
+        probe_result(payload='{"ip": "1.2.3.4"}'),
+    ]
+    monkeypatch.setattr("vpn.cli.run", run_probe(payloads)[0])
+    monkeypatch.setattr(time, "sleep", no_sleep)
+    cli.fetch_ip_info(retries=5, delay=0)
+    assert capsys.readouterr().out == "Waiting for public IP... (2/5)\n"
+
+
+def test_fetch_final_failure_silent(monkeypatch, capsys):
+    monkeypatch.setattr("vpn.cli.run", run_probe([])[0])
+    monkeypatch.setattr(time, "sleep", no_sleep)
+    assert cli.fetch_ip_info(retries=4, delay=0) is None
+    assert capsys.readouterr().out == (
+        "Waiting for public IP... (2/4)\nWaiting for public IP... (3/4)\n"
+    )
+
+
 def test_fetch_invalid_json_retried(monkeypatch):
     payloads = [
         probe_result(payload="<html>gateway error</html>"),

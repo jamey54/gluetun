@@ -107,8 +107,8 @@ def fetch_ip_info(
                     f"Public IP: {info.get('city') or '?'}, {resolve_country(actual_country)}"
                     f" — waiting for {expected_country}... ({attempt + 1}/{retries})"
                 )
-        elif attempt < retries - 1:
-            click.echo(f"Waiting for VPN connection... ({attempt + 1}/{retries})")
+        elif 0 < attempt < retries - 1:
+            click.echo(f"Waiting for public IP... ({attempt + 1}/{retries})")
         if attempt < retries - 1:
             time.sleep(delay)
     return None
