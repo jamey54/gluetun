@@ -1,6 +1,6 @@
 """Tests for speed measurement helpers and CLI country comparison."""
 
-from vpn.cli import _same_country
+from vpn.ipinfo import _same_country
 from vpn.speedtest import DEFAULT_SIZE_MB, mbps
 
 
