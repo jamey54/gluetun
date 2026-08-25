@@ -5,6 +5,8 @@ from collections.abc import Callable
 from subprocess import CompletedProcess
 from typing import Any
 
+import pytest
+
 from vpn import cli, ipinfo
 
 PROBE_ARGS = ("docker", "exec")
@@ -29,6 +31,19 @@ def run_probe(
 
 def no_sleep(_seconds: float) -> None:
     pass
+
+
+@pytest.fixture(autouse=True)
+def offline_real_ip(monkeypatch):
+    """Host bare-IP fetch fails fast (offline stub); cache reset between tests."""
+    monkeypatch.delenv("VPN_REAL_IP", raising=False)
+    monkeypatch.setattr(ipinfo, "_real_ip_cache", None)
+
+    def offline(url, timeout=None):
+        raise OSError("offline")
+
+    monkeypatch.setattr(ipinfo, "urlopen", offline)
+    monkeypatch.setattr(time, "sleep", no_sleep)
 
 
 # ---------------------------------------------------------------------------
@@ -58,40 +73,122 @@ def test_log_env_silent_when_debug_off(capsys):
     assert capsys.readouterr().out == ""
 
 
+# ---------------------------------------------------------------------------
+# real_ip
+# ---------------------------------------------------------------------------
+
+
+def test_real_ip_env_override(monkeypatch):
+    monkeypatch.setenv("VPN_REAL_IP", "203.0.113.7")
+    assert ipinfo.real_ip() == "203.0.113.7"
+
+
+def test_real_ip_fetched_from_host_and_cached(monkeypatch):
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return None
+
+        def read(self):
+            return b'{"ip": "198.51.100.9"}'
+
+    calls = []
+
+    def fake_urlopen(url, timeout=None):
+        calls.append((url, timeout))
+        return Resp()
+
+    monkeypatch.setattr(ipinfo, "urlopen", fake_urlopen)
+    monkeypatch.setattr(ipinfo, "_real_ip_cache", None)
+    assert ipinfo.real_ip() == "198.51.100.9"
+    assert ipinfo.real_ip() == "198.51.100.9"
+    assert len(calls) == 1  # cached after first fetch
+    assert calls[0][1] == ipinfo.REAL_IP_TIMEOUT_S
+
+
+def test_real_ip_unreachable_is_none(monkeypatch):
+    def boom(url, timeout=None):
+        raise OSError("no network")
+
+    monkeypatch.setattr(ipinfo, "urlopen", boom)
+    monkeypatch.setattr(ipinfo, "_real_ip_cache", None)
+    assert ipinfo.real_ip() is None
+
+
+# ---------------------------------------------------------------------------
+# fetch: early stop + exclusion semantics
+# ---------------------------------------------------------------------------
+
+
 def test_fetch_returns_first_success_without_expectation(monkeypatch):
     fake_run, calls = run_probe([probe_result(payload='{"ip": "1.2.3.4"}')])
     monkeypatch.setattr("vpn.ipinfo.run", fake_run)
-    monkeypatch.setattr(time, "sleep", no_sleep)
-    info = ipinfo.fetch_ip_info(retries=3, delay=0)
-    assert info == {"ip": "1.2.3.4"}
+    outcome = ipinfo.fetch_ip_info(retries=3, delay=0)
+    assert outcome.result is not None
+    assert outcome.result.info == {"ip": "1.2.3.4"}
+    assert outcome.result.matched is True  # no expectation -> trivially matched
     assert len(calls) == 1
 
 
-def test_fetch_retries_until_country_matches(monkeypatch):
+def test_fetch_stops_at_first_non_excluded_even_if_country_differs(monkeypatch):
+    # The old behavior waited for the expected country; now any non-bare IP wins.
     payloads = [
-        probe_result(payload='{"country": "NL", "city": "Amsterdam"}'),
-        probe_result(payload='{"country": "US", "city": "Boston"}'),
-        probe_result(payload='{"country": "DE", "city": "Berlin"}'),
+        probe_result(payload='{"ip": "9.9.9.9", "country": "NL"}'),
+        probe_result(payload='{"ip": "8.8.8.8", "country": "DE"}'),
     ]
     fake_run, calls = run_probe(payloads)
     monkeypatch.setattr("vpn.ipinfo.run", fake_run)
-    monkeypatch.setattr(time, "sleep", no_sleep)
-    info = ipinfo.fetch_ip_info(retries=5, delay=0, expected_country="Germany")
-    assert info is not None
-    assert info["country"] == "DE"
-    assert len(calls) == 3
+    outcome = ipinfo.fetch_ip_info(retries=5, delay=0, expected_country="Germany")
+    assert outcome.result is not None
+    assert outcome.result.info["country"] == "NL"
+    assert outcome.result.matched is False
+    assert len(calls) == 1  # early stop
 
 
-def test_fetch_city_flip_does_not_count_as_success(monkeypatch):
-    # geoIP city changing must NOT be treated as connected when country mismatches
+def test_fetch_matched_true_when_country_matches(monkeypatch):
+    fake_run, _ = run_probe([probe_result(payload='{"ip": "8.8.8.8", "country": "DE"}')])
+    monkeypatch.setattr("vpn.ipinfo.run", fake_run)
+    outcome = ipinfo.fetch_ip_info(retries=3, delay=0, expected_country="Germany")
+    assert outcome.result is not None and outcome.result.matched is True
+
+
+def test_fetch_leak_notices_printed_each_attempt(monkeypatch, capsys):
+    monkeypatch.setattr(ipinfo, "real_ip", lambda: "203.0.113.7")
     payloads = [
-        probe_result(payload='{"country": "US", "city": ""}'),
-        probe_result(payload='{"country": "US", "city": "Boston"}'),
+        probe_result(payload='{"ip": "203.0.113.7"}'),
+        probe_result(payload='{"ip": "1.2.3.4"}'),
     ]
     fake_run, _ = run_probe(payloads)
     monkeypatch.setattr("vpn.ipinfo.run", fake_run)
-    monkeypatch.setattr(time, "sleep", no_sleep)
-    assert ipinfo.fetch_ip_info(retries=5, delay=0, expected_country="Germany") is None
+    outcome = ipinfo.fetch_ip_info(retries=3, delay=0)
+    assert outcome.result is not None
+    assert capsys.readouterr().out.count("Leak: traffic not going through VPN") == 1
+
+
+def test_fetch_persistent_leak_returns_none_with_last_info(monkeypatch):
+    monkeypatch.setattr(ipinfo, "real_ip", lambda: "203.0.113.7")
+    payloads = [probe_result(payload='{"ip": "203.0.113.7"}') for _ in range(4)]
+    fake_run, calls = run_probe(payloads)
+    monkeypatch.setattr("vpn.ipinfo.run", fake_run)
+    outcome = ipinfo.fetch_ip_info(retries=4, delay=0)
+    assert outcome.result is None
+    assert outcome.last_info == {"ip": "203.0.113.7"}
+    assert len(calls) == 4
+
+
+def test_fetch_extra_exclude_detects_stale_route(monkeypatch, capsys):
+    payloads = [
+        probe_result(payload='{"ip": "9.9.9.9", "country": "JP"}'),
+        probe_result(payload='{"ip": "6.6.6.6", "country": "KR"}'),
+    ]
+    fake_run, _ = run_probe(payloads)
+    monkeypatch.setattr("vpn.ipinfo.run", fake_run)
+    outcome = ipinfo.fetch_ip_info(retries=5, delay=0, exclude_ips={"9.9.9.9"})
+    assert outcome.result is not None
+    assert outcome.result.info["ip"] == "6.6.6.6"
+    assert "Still routed via Japan (1/5)" in capsys.readouterr().out
 
 
 def test_fetch_gives_up_after_retries(monkeypatch):
@@ -99,21 +196,16 @@ def test_fetch_gives_up_after_retries(monkeypatch):
     monkeypatch.setattr("vpn.ipinfo.run", fake_run)
     sleeps: list[float] = []
     monkeypatch.setattr(time, "sleep", sleeps.append)
-    assert ipinfo.fetch_ip_info(retries=4, delay=2) is None
+    outcome = ipinfo.fetch_ip_info(retries=4, delay=2)
+    assert outcome.result is None
     assert len(calls) == 4
     assert len(sleeps) == 3  # no sleep after the final attempt
-
-
-# ---------------------------------------------------------------------------
-# retry notice (first and final failures stay silent)
-# ---------------------------------------------------------------------------
 
 
 def test_fetch_first_failure_silent(monkeypatch, capsys):
     payloads = [probe_result(code=1), probe_result(payload='{"ip": "1.2.3.4"}')]
     monkeypatch.setattr("vpn.ipinfo.run", run_probe(payloads)[0])
-    monkeypatch.setattr(time, "sleep", no_sleep)
-    assert ipinfo.fetch_ip_info(retries=5, delay=0) == {"ip": "1.2.3.4"}
+    assert ipinfo.fetch_ip_info(retries=5, delay=0).result is not None
     assert capsys.readouterr().out == ""
 
 
@@ -124,15 +216,13 @@ def test_fetch_second_failure_prints_waiting_notice(monkeypatch, capsys):
         probe_result(payload='{"ip": "1.2.3.4"}'),
     ]
     monkeypatch.setattr("vpn.ipinfo.run", run_probe(payloads)[0])
-    monkeypatch.setattr(time, "sleep", no_sleep)
     ipinfo.fetch_ip_info(retries=5, delay=0)
     assert capsys.readouterr().out == "Waiting for public IP... (2/5)\n"
 
 
 def test_fetch_final_failure_silent(monkeypatch, capsys):
     monkeypatch.setattr("vpn.ipinfo.run", run_probe([])[0])
-    monkeypatch.setattr(time, "sleep", no_sleep)
-    assert ipinfo.fetch_ip_info(retries=4, delay=0) is None
+    assert ipinfo.fetch_ip_info(retries=4, delay=0).result is None
     assert capsys.readouterr().out == (
         "Waiting for public IP... (2/4)\nWaiting for public IP... (3/4)\n"
     )
@@ -141,13 +231,13 @@ def test_fetch_final_failure_silent(monkeypatch, capsys):
 def test_fetch_invalid_json_retried(monkeypatch):
     payloads = [
         probe_result(payload="<html>gateway error</html>"),
-        probe_result(payload='{"country": "FR"}'),
+        probe_result(payload='{"country": "FR", "ip": "2.2.2.2"}'),
     ]
     fake_run, calls = run_probe(payloads)
     monkeypatch.setattr("vpn.ipinfo.run", fake_run)
-    monkeypatch.setattr(time, "sleep", no_sleep)
-    info = ipinfo.fetch_ip_info(retries=5, delay=0, expected_country="France")
-    assert info == {"country": "FR"}
+    outcome = ipinfo.fetch_ip_info(retries=5, delay=0, expected_country="France")
+    assert outcome.result is not None
+    assert outcome.result.info["country"] == "FR"
     assert len(calls) == 2
 
 

@@ -7,6 +7,10 @@ import pytest
 from vpn import bench, cli, control
 from vpn.docker import CurrentVpn
 
+# The autouse happy_path fixture replaces bench.verify; keep the real one here
+# for its dedicated unit tests.
+real_verify = bench.verify
+
 
 def candidate(provider="surfshark", protocol="wireguard", country="Germany",
               city=None, *hosts: str) -> bench.Candidate:
@@ -57,14 +61,91 @@ class Recorder:
 
 @pytest.fixture(autouse=True)
 def happy_path(monkeypatch):
-    """Defaults: route works, every candidate verifies and downloads at 10 Mbit/s."""
+    """Defaults: route works; every candidate verifies with its own exit IP."""
     monkeypatch.setattr(bench, "get_settings", Recorder([baseline_doc()]))
     puts = Recorder()
     monkeypatch.setattr(bench, "put_settings", puts)
-    monkeypatch.setattr(bench, "fetch_ip_info", Recorder([[{"country": "DE"}]]))
+    monkeypatch.setattr(bench, "current_exit_ip", lambda: None)
+    seen: dict[str, str] = {}
+
+    def fake_verify(cand: bench.Candidate, prev_ip: str | None = None) -> bench.Verification:
+        ip = seen.setdefault(cand.location, f"10.{len(seen)}.0.1")
+        return bench.Verification(ok=True, ip=ip)
+
+    monkeypatch.setattr(bench, "verify", fake_verify)
     monkeypatch.setattr(bench, "measure", speed(10.0))
     monkeypatch.setattr(bench, "probe_hosts", Recorder([{}]))
     return puts
+
+
+# ---------------------------------------------------------------------------
+# verify (IP-delta proof over the leak-first fetcher)
+# ---------------------------------------------------------------------------
+
+
+def ok_fetch(info: dict[str, Any], matched: bool = True):
+    def fake(**_kwargs: Any) -> Any:
+        from vpn.ipinfo import IpOutcome, IpResult
+
+        return IpOutcome(IpResult(info, matched))
+
+    return fake
+
+
+def test_verify_success_without_geo(monkeypatch):
+    monkeypatch.setattr(
+        "vpn.bench.fetch_ip_info",
+        ok_fetch({"ip": "1.1.1.1", "country": "DE"}, matched=True),
+    )
+    verdict = real_verify(candidate())
+    assert verdict.ok is True
+    assert verdict.ip == "1.1.1.1"
+    assert verdict.geo is None  # matched -> no geo flag
+
+
+def test_verify_flags_geo_mismatch(monkeypatch):
+    monkeypatch.setattr(
+        "vpn.bench.fetch_ip_info",
+        ok_fetch({"ip": "1.1.1.1", "country": "DE"}, matched=False),
+    )
+    verdict = real_verify(candidate(country="Germany"))
+    assert verdict.ok is True
+    assert verdict.geo == "Germany"
+
+
+def test_verify_passes_prev_ip_as_exclusion(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    def fake_fetch(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return ok_fetch({"ip": "2.2.2.2"}, True)(**kwargs)
+
+    monkeypatch.setattr("vpn.bench.fetch_ip_info", fake_fetch)
+    real_verify(candidate(), prev_ip="9.9.9.9")
+    assert captured["exclude_ips"] == {"9.9.9.9"}
+    real_verify(candidate())
+    assert captured["exclude_ips"] is None
+
+
+def test_verify_failure_classification(monkeypatch):
+    from vpn.ipinfo import IpOutcome
+
+    bare = candidate()
+    monkeypatch.setattr("vpn.bench.real_ip", lambda: "203.0.113.7")
+    monkeypatch.setattr(
+        "vpn.bench.fetch_ip_info",
+        lambda **_k: IpOutcome(last_info={"ip": "203.0.113.7"}),
+    )
+    assert real_verify(bare).reason == "leak"
+
+    monkeypatch.setattr("vpn.bench.real_ip", lambda: None)
+    monkeypatch.setattr(
+        "vpn.bench.fetch_ip_info", lambda **_k: IpOutcome(last_info={"ip": "5.5.5.5"})
+    )
+    assert real_verify(bare, prev_ip="5.5.5.5").reason == "no reconnect"
+
+    monkeypatch.setattr("vpn.bench.fetch_ip_info", lambda **_k: IpOutcome())
+    assert real_verify(bare).reason == "no public IP"
 
 
 # ---------------------------------------------------------------------------
@@ -203,15 +284,73 @@ def test_run_bench_falls_back_to_recreate_on_404(monkeypatch):
 
 
 def test_run_bench_verification_failure_excluded(monkeypatch):
-    monkeypatch.setattr(bench, "fetch_ip_info", Recorder())
+    monkeypatch.setattr(
+        bench, "verify",
+        lambda cand, prev_ip=None: bench.Verification(ok=False, reason="leak"),
+    )
     monkeypatch.setattr(bench, "measure", lambda size_mb, timeout=120: None)
     report = bench.run_bench(
         [candidate("surfshark", "wireguard", "Atlantis", None, "at")],
         connect_winner=False, say=lambda *_: None,
     )
     assert report.winner is None
-    assert report.results[0].error == "verification failed"
+    assert report.results[0].error == "leak"
     assert "No working location found" in report.action
+
+
+def test_run_bench_geo_mismatch_still_benchmarked(monkeypatch):
+    """Wrong-country exits (virtual locations) are flagged but speed-tested."""
+    def fake_verify(cand: bench.Candidate, prev_ip: str | None = None) -> bench.Verification:
+        return bench.Verification(ok=True, ip="1.2.3.4", geo="Singapore")
+
+    monkeypatch.setattr(bench, "verify", fake_verify)
+    report = bench.run_bench(
+        [candidate("surfshark", "wireguard", "Vietnam", None, "vn")],
+        connect_winner=False, say=lambda *_: None,
+    )
+    result = report.results[0]
+    assert result.scan_mbps == 10.0  # benchmarked despite geo mismatch
+    assert result.actual_geo == "Singapore"
+
+
+def test_run_bench_chains_previous_exit_ip(monkeypatch):
+    seen_prev: list[str | None] = []
+    counter = {"n": 0}
+
+    def fake_verify(cand: bench.Candidate, prev_ip: str | None = None) -> bench.Verification:
+        seen_prev.append(prev_ip)
+        counter["n"] += 1
+        return bench.Verification(ok=True, ip=f"10.77.0.{counter['n']}")
+
+    monkeypatch.setattr(bench, "current_exit_ip", lambda: "9.9.9.9")
+    monkeypatch.setattr(bench, "verify", fake_verify)
+    candidates = [
+        candidate("surfshark", "wireguard", "L1", None, "h1"),
+        candidate("surfshark", "wireguard", "L2", None, "h2"),
+    ]
+    bench.run_bench(candidates, top=2, connect_winner=False, say=lambda *_: None)
+    # baseline snapshot feeds the first verify; each success re-anchors prev_ip
+    assert seen_prev[0] == "9.9.9.9"
+    assert seen_prev[1] == "10.77.0.1"
+    assert seen_prev[2] == "10.77.0.2"
+
+
+def test_run_bench_winner_adoption_reports_failed_recheck(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_verify(cand: bench.Candidate, prev_ip: str | None = None) -> bench.Verification:
+        calls["n"] += 1
+        if calls["n"] < 3:  # screen + final succeed; adoption re-check fails
+            return bench.Verification(ok=True, ip="1.2.3.4")
+        return bench.Verification(ok=False, reason="no reconnect")
+
+    monkeypatch.setattr(bench, "verify", fake_verify)
+    report = bench.run_bench(
+        [candidate("surfshark", "wireguard", "France", None, "fr")],
+        say=lambda *_: None,
+    )
+    assert report.action.startswith("Stayed on")
+    assert "no reconnect" in report.action
 
 
 def test_run_bench_interrupt_restores_partial_results(monkeypatch, happy_path):

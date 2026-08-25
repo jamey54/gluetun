@@ -16,8 +16,9 @@ from rich.console import Console
 from rich.table import Table
 
 from vpn.control import ControlError, get_settings, put_settings, with_location
+from vpn.countries import resolve_country
 from vpn.docker import CurrentVpn, compose
-from vpn.ipinfo import fetch_ip_info
+from vpn.ipinfo import current_exit_ip, fetch_ip_info, real_ip
 from vpn.latency import probe_hosts
 from vpn.providers import DEFAULT_PROTOCOL, get_provider_env
 from vpn.servers import ServerRow, sorted_server_rows
@@ -29,7 +30,7 @@ DEFAULT_SCAN_SIZE_MB = 10
 DEFAULT_FINAL_SIZE_MB = 25
 FINALISTS = 3
 
-VERIFY_RETRIES = 6
+VERIFY_RETRIES = 3
 VERIFY_DELAY_S = 1
 SCAN_TIMEOUT_S = 90
 
@@ -66,6 +67,7 @@ class BenchResult:
     scan_mbps: float | None = None
     final_mbps: float | None = None
     error: str | None = None
+    actual_geo: str | None = None  # exit country when it differs from the request
 
 
 @dataclass
@@ -165,11 +167,46 @@ def swap(doc: dict[str, Any], candidate: Candidate, *, settings_route: bool = Tr
     recreate(candidate)
 
 
-def verify(candidate: Candidate) -> bool:
-    """True once the public IP reports the candidate's country."""
-    return fetch_ip_info(
-        retries=VERIFY_RETRIES, delay=VERIFY_DELAY_S, expected_country=candidate.country
-    ) is not None
+@dataclass
+class Verification:
+    """Outcome of post-swap verification."""
+
+    ok: bool  # exit IP differs from both the bare IP and the previous exit
+    ip: str | None = None  # observed exit IP, when any
+    geo: str | None = None  # actual exit country when it differs from the request
+    reason: str = ""  # failure label: leak / no reconnect / no public IP
+
+
+def verify(candidate: Candidate, prev_ip: str | None = None) -> Verification:
+    """Prove the tunnel moved: new exit IP, different from bare and previous.
+
+    The bare-IP exclusion comes from ipinfo itself; prev_ip is added here so a
+    failed swap that silently keeps routing through the old server is caught.
+    Country never gates success — a geo mismatch is surfaced as `geo`.
+    """
+    outcome = fetch_ip_info(
+        retries=VERIFY_RETRIES,
+        delay=VERIFY_DELAY_S,
+        expected_country=candidate.country,
+        exclude_ips={prev_ip} if prev_ip else None,
+    )
+    if outcome.result is not None:
+        info = outcome.result.info
+        geo = resolve_country(str(info.get("country", "")))
+        return Verification(
+            ok=True,
+            ip=str(info.get("ip") or "") or None,
+            geo=None if outcome.result.matched else (geo or None),
+        )
+
+    last_ip = str((outcome.last_info or {}).get("ip") or "")
+    bare = real_ip()
+    reason = "no public IP"
+    if last_ip and bare and last_ip == bare:
+        reason = "leak"
+    elif last_ip and prev_ip and last_ip == prev_ip:
+        reason = "no reconnect"
+    return Verification(ok=False, ip=last_ip or None, reason=reason)
 
 
 # ---------------------------------------------------------------------------
@@ -205,9 +242,10 @@ def run_bench(
     ranked = rank(results, by_host)
 
     current: Candidate | None = None
+    prev_ip = current_exit_ip()
 
     def test_stage(pool: list[BenchResult], stage: str, size_mb: int, timeout: int) -> None:
-        nonlocal current
+        nonlocal current, prev_ip
         for i, result in enumerate(pool, 1):
             candidate = result.candidate
             say(f"[{i}/{len(pool)}] {candidate.label} ... swapping")
@@ -217,9 +255,14 @@ def run_bench(
                 result.error = f"swap failed: {exc.message}"
                 continue
             current = candidate
-            if not verify(candidate):
-                result.error = "verification failed"
+            verdict = verify(candidate, prev_ip)
+            if not verdict.ok:
+                result.error = verdict.reason
                 continue
+            prev_ip = verdict.ip
+            if verdict.geo:
+                result.actual_geo = verdict.geo
+                say(f"    note: exits via {verdict.geo} (requested {candidate.country})")
             downloaded = measure(size_mb, timeout=timeout)
             if not downloaded:
                 result.error = "download failed"
@@ -282,9 +325,16 @@ def run_bench(
             )
         else:
             winner = report.winner.candidate
+            did_swap = False
             if current != winner:
                 swap(report.baseline, winner, settings_route=settings_route)
-            report.action = f"Connected to winner: {winner.label}"
+                did_swap = True
+            check = verify(winner, prev_ip)
+            verb = "Swapped to" if did_swap else "Stayed on"
+            if check.ok:
+                report.action = f"Connected to winner: {winner.label}"
+            else:
+                report.action = f"{verb} {winner.label}, but re-check failed ({check.reason})"
     except ControlError as exc:
         report.action += f" (restore/connect failed: {exc.message})"
 
@@ -325,6 +375,8 @@ def print_report(report: BenchReport) -> None:
         scan = f"{r.scan_mbps:.1f}" if r.scan_mbps is not None else "-"
         final = f"{r.final_mbps:.1f}" if r.final_mbps is not None else "-"
         status = "final" if r.final_mbps else "ok" if r.scan_mbps else (r.error or "-")
+        if r.scan_mbps and r.actual_geo:
+            status += f" · geo: {r.actual_geo}"
         if r is report.winner:
             style = "green"
         elif r.final_mbps is None and r.scan_mbps is None and r.error:
