@@ -124,8 +124,9 @@ def _apply_request(
     """Resolve the requested target over base and hot-swap; return (target, swapped).
 
     An explicit country replaces the location outright; a lone city keeps the
-    current country; switching provider drops the old location. Returns
-    swapped=False when the target already matches the running state.
+    current country (and fails when there is none); switching provider drops
+    the old location. Returns swapped=False when the target already matches
+    the running state.
     """
     target_provider = provider or base.provider
     target_protocol = protocol or base.protocol or DEFAULT_PROTOCOL
@@ -139,6 +140,12 @@ def _apply_request(
         target_country, target_city = None, None
     else:
         target_country, target_city = base.country, base.city
+
+    if city is not None and not target_country:
+        raise SystemExit(
+            "--city needs a country to search within: pass --country, or connect "
+            "to a country first."
+        )
 
     target_provider, target_protocol = validate_provider(target_provider, target_protocol)
     target = Selection(target_provider, target_protocol, target_country, target_city)
@@ -232,6 +239,9 @@ def up(
         _log_env(overrides)
         compose("up", "-d", *(("--force-recreate",) if recreate else ()), env_overrides=overrides)
         click.echo(f"VPN {'recreated' if recreate else 'started'} ({name}/{proto}).")
+        # Runtime state now equals env config: the fresh container runs the
+        # baked pair with no location, so requests resolve against this.
+        current = Selection(name, proto)
 
     if requested:
         if not created:

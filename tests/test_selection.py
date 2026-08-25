@@ -169,6 +169,26 @@ def test_up_recreate_reverts_to_env_config(monkeypatch, compose_calls, swaps):
     assert swaps == []
 
 
+def test_up_recreate_same_country_still_swaps(monkeypatch, compose_calls, swaps, verified):
+    """Recreate resets runtime state to env config, so an explicit request
+    matching the pre-recreate selection must still be applied."""
+    running(monkeypatch)  # on Germany before the recreate
+    result = invoke(["up", "--recreate", "--country", "Germany"])
+    assert result.exit_code == 0
+    args, _ = compose_calls[0]
+    assert "--force-recreate" in args
+    assert swaps == [Selection("surfshark", "wireguard", "Germany")]
+    assert verified[0]["expected_country"] == "Germany"
+
+
+def test_up_city_without_any_country_fails_clearly(monkeypatch, compose_calls, swaps):
+    running(monkeypatch, Selection("surfshark", "wireguard", None))
+    result = invoke(["up", "--city", "Munich"])
+    assert result.exit_code != 0
+    assert "--country" in result.output
+    assert swaps == [] and compose_calls == []
+
+
 def test_up_running_unreachable_control_server_exits(monkeypatch, compose_calls, swaps):
     running(monkeypatch, None)
     monkeypatch.setattr(cli, "container_running", lambda: True)
@@ -262,6 +282,14 @@ def test_connect_picker_selection(monkeypatch, swaps):
     result = invoke(["connect"])
     assert result.exit_code == 0
     assert swaps == [Selection("surfshark", "wireguard", "Japan", "Tokyo")]
+
+
+def test_connect_city_without_country_fails_clearly(monkeypatch, swaps):
+    running(monkeypatch, Selection("surfshark", "wireguard", None))
+    result = invoke(["connect", "--city", "Tokyo"])
+    assert result.exit_code != 0
+    assert "--country" in result.output
+    assert swaps == []
 
 
 def test_connect_cancelled_picker_exits(monkeypatch, swaps):
