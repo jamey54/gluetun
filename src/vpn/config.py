@@ -45,6 +45,7 @@ IP_FETCH_DELAY = 2
 PROBE_TIMEOUT = 8
 REAL_IP_TIMEOUT_S = 5
 CURRENT_EXIT_IP_RETRIES = 1
+DEFAULT_PROBER = "control"
 
 # --- Speed test ----------------------------------------------------------
 

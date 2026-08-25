@@ -63,6 +63,11 @@ def _request(
         raise ControlError(None, str(exc.reason)) from exc
 
 
+# ---------------------------------------------------------------------------
+# VPN settings
+# ---------------------------------------------------------------------------
+
+
 def get_settings() -> dict[str, Any]:
     """Fetch the full VPN settings document."""
     _, body = _request("GET", SETTINGS_PATH)
@@ -79,6 +84,82 @@ def put_settings(doc: dict[str, Any]) -> str:
     """Apply a settings document (merged server-side); returns the outcome text."""
     _, body = _request("PUT", SETTINGS_PATH, payload=doc, timeout=PUT_TIMEOUT_S)
     return body.strip()
+
+
+# ---------------------------------------------------------------------------
+# VPN status
+# ---------------------------------------------------------------------------
+
+
+def get_vpn_status() -> str:
+    """VPN tunnel status: 'running' or 'stopped'."""
+    _, body = _request("GET", "/v1/vpn/status")
+    return str(json.loads(body).get("status", ""))
+
+
+def set_vpn_status(status: str) -> None:
+    """Start or stop the VPN tunnel ('running' / 'stopped')."""
+    _request("PUT", "/v1/vpn/status", payload={"status": status})
+
+
+# ---------------------------------------------------------------------------
+# Public IP
+# ---------------------------------------------------------------------------
+
+
+def get_public_ip() -> str:
+    """Public IP address as seen from inside the container."""
+    _, body = _request("GET", "/v1/publicip/ip")
+    return str(json.loads(body).get("public_ip", ""))
+
+
+# ---------------------------------------------------------------------------
+# DNS
+# ---------------------------------------------------------------------------
+
+
+def get_dns_status() -> str:
+    """DNS-over-TLS resolver status: 'running' or 'stopped'."""
+    _, body = _request("GET", "/v1/dns/status")
+    return str(json.loads(body).get("status", ""))
+
+
+def set_dns_status(status: str) -> None:
+    """Start or stop the DNS-over-TLS resolver."""
+    _request("PUT", "/v1/dns/status", payload={"status": status})
+
+
+# ---------------------------------------------------------------------------
+# Updater
+# ---------------------------------------------------------------------------
+
+
+def get_updater_status() -> str:
+    """Server list updater status: 'completed', 'running', etc."""
+    _, body = _request("GET", "/v1/updater/status")
+    return str(json.loads(body).get("status", ""))
+
+
+def trigger_updater() -> None:
+    """Trigger a server list update."""
+    _request("PUT", "/v1/updater/status", payload={"status": "running"})
+
+
+# ---------------------------------------------------------------------------
+# Port forwarding
+# ---------------------------------------------------------------------------
+
+
+def get_port_forward() -> int | None:
+    """Currently forwarded port, or None if not forwarding."""
+    _, body = _request("GET", "/v1/portforward")
+    port = json.loads(body).get("port")
+    return int(port) if port else None
+
+
+def set_port_forward(ports: list[int]) -> None:
+    """Override the forwarded port list (empty list clears forwarding)."""
+    _request("PUT", "/v1/portforward", payload={"ports": ports})
 
 
 def with_location(

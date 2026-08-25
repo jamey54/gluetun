@@ -5,6 +5,8 @@ Runtime selection changes hot-swap through gluetun's control server
 stop) and logs.
 """
 
+import contextlib
+
 import click
 
 from vpn import control
@@ -32,7 +34,11 @@ from vpn.docker import (
     env_lookup,
     run,
 )
-from vpn.ipinfo import current_exit_ip, print_ip_status
+from vpn.ipinfo import (
+    current_exit_ip,
+    print_ip_status,
+    set_prober,
+)
 from vpn.picker import select_server
 from vpn.providers import (
     PROVIDERS,
@@ -184,12 +190,25 @@ def _warn_drift(current: Selection) -> None:
 # ---------------------------------------------------------------------------
 
 
+PROBER = click.Choice(["control", "docker"], case_sensitive=False)
+
+
 @click.group()
 @click.option("--debug", is_flag=True, envvar="VPN_DEBUG", help="Enable debug output")
-def main(debug: bool) -> None:
+@click.option(
+    "--prober",
+    type=PROBER,
+    default="control",
+    envvar="VPN_PROBER",
+    show_default=True,
+    help="IP probing strategy: 'control' uses the control server (fast), "
+    "'docker' uses docker exec inside the container",
+)
+def main(debug: bool, prober: str) -> None:
     """Gluetun VPN manager."""
     global DEBUG
     DEBUG = debug
+    set_prober(prober)
 
 
 @main.command()
@@ -324,6 +343,8 @@ def connect(
 @main.command()
 def down() -> None:
     """Stop the VPN container."""
+    with contextlib.suppress(control.ControlError):
+        control.set_vpn_status("stopped")
     compose("down")
     click.echo("VPN stopped.")
 
@@ -357,12 +378,28 @@ def status(size: int, no_speedtest: bool) -> None:
         click.echo(f"Container '{CONTAINER}' not found.")
         return
     click.echo(f"Container: {CONTAINER} ({state})")
+    try:
+        vpn = control.get_vpn_status()
+        click.echo(f"VPN:      {vpn}")
+    except control.ControlError:
+        pass
     current = effective_selection()
     if current and current.provider:
         click.echo(f"Selection: {_print_target(current)}")
         _warn_drift(current)
     else:
         click.echo("Selection: unknown — is gluetun's control server reachable?")
+    try:
+        dns = control.get_dns_status()
+        click.echo(f"DNS:      {dns}")
+    except control.ControlError:
+        pass
+    try:
+        port = control.get_port_forward()
+        if port:
+            click.echo(f"Port fwd: {port}")
+    except control.ControlError:
+        pass
     finish_connection(speedtest=not no_speedtest, size=size)
 
 
@@ -455,3 +492,32 @@ def bench(
     print_report(report)
     if report.action:
         click.echo(report.action)
+
+
+@main.command()
+@click.argument("action", required=False, type=click.Choice(["on", "off"]))
+def dns(action: str | None) -> None:
+    """Show or toggle the DNS-over-TLS resolver."""
+    if action is None:
+        try:
+            status = control.get_dns_status()
+            click.echo(f"DNS: {status}")
+        except control.ControlError as exc:
+            raise SystemExit(f"Cannot reach control server: {exc}") from None
+        return
+    target = "running" if action == "on" else "stopped"
+    try:
+        control.set_dns_status(target)
+    except control.ControlError as exc:
+        raise SystemExit(f"Cannot reach control server: {exc}") from None
+    click.echo(f"DNS {target}.")
+
+
+@main.command()
+def update() -> None:
+    """Trigger a server list update."""
+    try:
+        control.trigger_updater()
+    except control.ControlError as exc:
+        raise SystemExit(f"Cannot reach control server: {exc}") from None
+    click.echo("Server list update triggered.")

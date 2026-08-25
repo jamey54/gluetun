@@ -4,6 +4,10 @@ Verification is leak-first: an observation counts as "connected" only when the
 observed exit IP differs from the host's bare public IP. Country matching is
 advisory — a VPN exit that geolocates elsewhere (virtual locations) is a
 warning, not a failure.
+
+Two probing strategies:
+- control (default): GET /v1/publicip/ip for speed, then ipinfo.io/{ip} for geo.
+- docker: docker exec wget ipinfo.io inside the container (one shot, slower).
 """
 
 import json
@@ -18,6 +22,7 @@ import click
 from vpn.config import (
     CONTAINER,
     CURRENT_EXIT_IP_RETRIES,
+    DEFAULT_PROBER,
     IP_FETCH_DELAY,
     IP_FETCH_RETRIES,
     IP_INFO_URL,
@@ -29,6 +34,7 @@ from vpn.docker import run
 from vpn.textutil import fold
 
 _real_ip_cache: str | None = None
+_prober: str = DEFAULT_PROBER
 
 
 @dataclass
@@ -70,8 +76,41 @@ def _same_country(a: str, b: str) -> bool:
     return bool(a) and bool(b) and fold(resolve_country(a)) == fold(resolve_country(b))
 
 
-def _probe() -> dict[str, object] | None:
-    """One public-IP probe from inside the container. None on failure."""
+def set_prober(value: str) -> None:
+    """Override the probing strategy ('control' or 'docker')."""
+    global _prober
+    _prober = value
+
+
+def _fetch_geo_for_ip(ip: str) -> dict[str, object] | None:
+    """Query ipinfo.io from the host for geolocation of a known IP."""
+    try:
+        with urlopen(f"{IP_INFO_URL}/{ip}/json", timeout=PROBE_TIMEOUT) as response:
+            data = json.loads(response.read().decode(errors="replace"))
+        return data if isinstance(data, dict) and data else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _probe_control() -> dict[str, object] | None:
+    """Fast probe via the control server for IP, then ipinfo.io for geo."""
+    from vpn.control import ControlError, get_public_ip
+
+    try:
+        ip = get_public_ip()
+    except ControlError:
+        return None
+    if not ip:
+        return None
+    info = _fetch_geo_for_ip(ip)
+    if info is None:
+        # IP-only fallback — no country/city available.
+        return {"ip": ip}
+    return info
+
+
+def _probe_docker() -> dict[str, object] | None:
+    """One public-IP probe via docker exec inside the container."""
     result = run(
         "docker",
         "exec",
@@ -93,6 +132,13 @@ def _probe() -> dict[str, object] | None:
     except json.JSONDecodeError:
         return None
     return info if isinstance(info, dict) and info else None
+
+
+def _probe() -> dict[str, object] | None:
+    """One public-IP probe. Dispatches to the configured strategy."""
+    if _prober == "docker":
+        return _probe_docker()
+    return _probe_control()
 
 
 def fetch_ip_info(

@@ -209,3 +209,94 @@ def test_with_location_injects_openvpn_credentials(monkeypatch):
     ovpn = out["openvpn"]
     assert ovpn["user"] == "u123"
     assert ovpn["password"] == "p456"
+
+
+# ---------------------------------------------------------------------------
+# VPN status
+# ---------------------------------------------------------------------------
+
+
+def test_get_vpn_status(monkeypatch):
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"status":"running"}')))
+    assert control.get_vpn_status() == "running"
+
+
+def test_set_vpn_status_sends_put(monkeypatch):
+    calls: list[Any] = []
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, ""), calls))
+    control.set_vpn_status("stopped")
+    method, url, data, _ = calls[0]
+    assert (method, url) == ("PUT", "http://127.0.0.1:8000/v1/vpn/status")
+    assert json.loads(data) == {"status": "stopped"}
+
+
+# ---------------------------------------------------------------------------
+# Public IP
+# ---------------------------------------------------------------------------
+
+
+def test_get_public_ip(monkeypatch):
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"public_ip":"1.2.3.4"}')))
+    assert control.get_public_ip() == "1.2.3.4"
+
+
+# ---------------------------------------------------------------------------
+# DNS
+# ---------------------------------------------------------------------------
+
+
+def test_get_dns_status(monkeypatch):
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"status":"running"}')))
+    assert control.get_dns_status() == "running"
+
+
+def test_set_dns_status_sends_put(monkeypatch):
+    calls: list[Any] = []
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, ""), calls))
+    control.set_dns_status("stopped")
+    method, url, data, _ = calls[0]
+    assert (method, url) == ("PUT", "http://127.0.0.1:8000/v1/dns/status")
+    assert json.loads(data) == {"status": "stopped"}
+
+
+# ---------------------------------------------------------------------------
+# Updater
+# ---------------------------------------------------------------------------
+
+
+def test_get_updater_status(monkeypatch):
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"status":"completed"}')))
+    assert control.get_updater_status() == "completed"
+
+
+def test_trigger_updater_sends_put(monkeypatch):
+    calls: list[Any] = []
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, ""), calls))
+    control.trigger_updater()
+    method, url, data, _ = calls[0]
+    assert (method, url) == ("PUT", "http://127.0.0.1:8000/v1/updater/status")
+    assert json.loads(data) == {"status": "running"}
+
+
+# ---------------------------------------------------------------------------
+# Port forwarding
+# ---------------------------------------------------------------------------
+
+
+def test_get_port_forward_returns_port(monkeypatch):
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"port":5914}')))
+    assert control.get_port_forward() == 5914
+
+
+def test_get_port_forward_returns_none_when_empty(monkeypatch):
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, "{}")))
+    assert control.get_port_forward() is None
+
+
+def test_set_port_forward_sends_put(monkeypatch):
+    calls: list[Any] = []
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, ""), calls))
+    control.set_port_forward([5914, 5915])
+    method, url, data, _ = calls[0]
+    assert (method, url) == ("PUT", "http://127.0.0.1:8000/v1/portforward")
+    assert json.loads(data) == {"ports": [5914, 5915]}

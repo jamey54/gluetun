@@ -367,3 +367,155 @@ def test_status_missing_container(monkeypatch):
     result = invoke(["status"])
     assert result.exit_code == 0
     assert "not found" in result.output
+
+
+def test_status_shows_vpn_and_dns(monkeypatch):
+    monkeypatch.setattr(cli, "container_status", lambda: "running")
+    monkeypatch.setattr(cli, "effective_selection", lambda: RUNNING)
+    monkeypatch.setattr(cli, "container_env", lambda: {})
+    monkeypatch.setattr("vpn.control.get_vpn_status", lambda: "running")
+    monkeypatch.setattr("vpn.control.get_dns_status", lambda: "running")
+    monkeypatch.setattr("vpn.control.get_port_forward", lambda: 5914)
+    result = invoke(["status", "--no-speedtest"])
+    assert result.exit_code == 0
+    assert "VPN:      running" in result.output
+    assert "DNS:      running" in result.output
+    assert "Port fwd: 5914" in result.output
+
+
+def test_status_hides_dns_and_port_when_unreachable(monkeypatch):
+    from vpn.control import ControlError
+
+    def _control_error_noarg():
+        raise ControlError(None, "no")
+
+    monkeypatch.setattr(cli, "container_status", lambda: "running")
+    monkeypatch.setattr(cli, "effective_selection", lambda: RUNNING)
+    monkeypatch.setattr(cli, "container_env", lambda: {})
+    monkeypatch.setattr("vpn.control.get_vpn_status", _control_error_noarg)
+    monkeypatch.setattr("vpn.control.get_dns_status", _control_error_noarg)
+    monkeypatch.setattr("vpn.control.get_port_forward", _control_error_noarg)
+    result = invoke(["status", "--no-speedtest"])
+    assert result.exit_code == 0
+    assert "VPN:" not in result.output
+    assert "DNS:" not in result.output
+    assert "Port fwd:" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# down
+# ---------------------------------------------------------------------------
+
+
+def test_down_stops_vpn_before_compose(monkeypatch, compose_calls):
+    stopped: list[str] = []
+    monkeypatch.setattr("vpn.control.set_vpn_status", lambda s: stopped.append(s))
+    result = invoke(["down"])
+    assert result.exit_code == 0
+    assert stopped == ["stopped"]
+    assert compose_calls[0][0] == ("down",)
+    assert "VPN stopped." in result.output
+
+
+def test_down_succeeds_when_control_server_unreachable(monkeypatch, compose_calls):
+    from vpn.control import ControlError
+
+    def boom(s):
+        raise ControlError(None, "no")
+
+    monkeypatch.setattr("vpn.control.set_vpn_status", boom)
+    result = invoke(["down"])
+    assert result.exit_code == 0
+    assert compose_calls[0][0] == ("down",)
+    assert "VPN stopped." in result.output
+
+
+# ---------------------------------------------------------------------------
+# dns
+# ---------------------------------------------------------------------------
+
+
+def test_dns_no_action_shows_status(monkeypatch):
+    monkeypatch.setattr("vpn.control.get_dns_status", lambda: "running")
+    result = invoke(["dns"])
+    assert result.exit_code == 0
+    assert "DNS: running" in result.output
+
+
+def test_dns_on_starts_resolver(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr("vpn.control.set_dns_status", lambda s: calls.append(s))
+    result = invoke(["dns", "on"])
+    assert result.exit_code == 0
+    assert calls == ["running"]
+    assert "DNS running." in result.output
+
+
+def test_dns_off_stops_resolver(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr("vpn.control.set_dns_status", lambda s: calls.append(s))
+    result = invoke(["dns", "off"])
+    assert result.exit_code == 0
+    assert calls == ["stopped"]
+    assert "DNS stopped." in result.output
+
+
+def test_dns_command_fails_without_control_server(monkeypatch):
+    from vpn.control import ControlError
+
+    monkeypatch.setattr(
+        "vpn.control.get_dns_status",
+        lambda: (_ for _ in ()).throw(ControlError(None, "no")),
+    )
+    result = invoke(["dns"])
+    assert result.exit_code != 0
+    assert "Cannot reach control server" in result.output
+
+
+# ---------------------------------------------------------------------------
+# update
+# ---------------------------------------------------------------------------
+
+
+def test_update_triggers_updater(monkeypatch):
+    called = []
+    monkeypatch.setattr("vpn.control.trigger_updater", lambda: called.append(True))
+    result = invoke(["update"])
+    assert result.exit_code == 0
+    assert called == [True]
+    assert "triggered" in result.output
+
+
+def test_update_fails_without_control_server(monkeypatch):
+    from vpn.control import ControlError
+
+    def boom():
+        raise ControlError(None, "no")
+
+    monkeypatch.setattr("vpn.control.trigger_updater", boom)
+    result = invoke(["update"])
+    assert result.exit_code != 0
+    assert "Cannot reach control server" in result.output
+
+
+# ---------------------------------------------------------------------------
+# --prober flag
+# ---------------------------------------------------------------------------
+
+
+def test_prober_flag_sets_ipinfo_prober(monkeypatch):
+    from vpn import ipinfo
+
+    monkeypatch.setattr(cli, "container_status", lambda: None)
+    result = invoke(["--prober", "docker", "status"])
+    assert result.exit_code == 0
+    assert ipinfo._prober == "docker"
+
+
+def test_prober_default_is_control(monkeypatch):
+    from vpn import ipinfo
+
+    monkeypatch.setattr(cli, "container_status", lambda: None)
+    result = invoke(["status"])
+    assert result.exit_code == 0
+    assert ipinfo._prober == "control"
