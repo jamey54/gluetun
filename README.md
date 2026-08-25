@@ -109,11 +109,19 @@ vpn up --provider protonvpn --protocol openvpn
 
 ## Connection verification
 
-After connecting, the CLI probes the public IP from inside the container (`wget https://ipinfo.io`, time-bounded) and compares the reported country with the selected server's country — shown green on match, red on mismatch. Only the country is trusted: a changed city alone never counts as connected. IP echo services report ISO 3166-1 alpha-2 codes (`AU`), which are normalized to full names before comparing, so they match gluetun's server lists.
+Verification is **leak-first**: a connection counts as up only when the exit IP observed from inside the container differs from the host's bare public IP. The bare IP is fetched host-side once per run (overridable with `VPN_REAL_IP` for testing; when unavailable, leak detection degrades to country heuristics only).
+
+After connecting, the CLI probes the public IP from inside the container (`wget https://ipinfo.io`, time-bounded) and reports one of three verdicts:
+
+- **Green** — real VPN exit in the requested country.
+- **Yellow warning** — real VPN exit, but it geolocates elsewhere than requested (common with provider "virtual locations"). You stay connected and the speed test still runs.
+- **Red / leak** — traffic still exits via your bare connection (or no IP could be read); the speed test is skipped.
+
+IP echo services report ISO 3166-1 alpha-2 codes (`AU`), which are normalized to full names before comparing, so they match gluetun's server lists. Country is advisory only: it never gates success — the IP change does.
 
 ## Speed test
 
-`up`, `update`, `server`, `status` and `restart` run a download speed test after a verified connection (green `Location:`). It downloads 25 MB from Cloudflare inside the container — all traffic goes through the VPN tunnel. Skip it per invocation with `--no-speedtest`, or change the size with `vpn speedtest --size 100`. When the connection isn't verified, the speed test is skipped with a message.
+`up`, `update`, `server`, `status` and `restart` run a download speed test after a verified connection (green or yellow `Location:`). It downloads 25 MB from Cloudflare inside the container — all traffic goes through the VPN tunnel. Skip it per invocation with `--no-speedtest`, or change the size with `vpn speedtest --size 100`. On a leak or unreadable IP, the speed test is skipped with a message.
 
 ## Benchmark
 
@@ -129,9 +137,9 @@ vpn bench --no-connect           # report results, keep the current location
 How it runs:
 
 1. **Latency prescreen** — parallel TCP-connect probes (port 443, host-side) rank every candidate location; unreachable ones sort last.
-2. **Screening** — the top `--top` (default 12) locations each get hot-swapped in place, verified by country match, and tested with a `--scan-size` MB (default 10) download.
+2. **Screening** — the top `--top` (default 12) locations each get hot-swapped in place, proven by IP change (exit IP must differ from your bare IP *and* the previous exit — leaks and failed swaps are marked `leak` / `no reconnect`), then tested with a `--scan-size` MB (default 10) download. Exits that geolocate outside the requested country are flagged `geo: <country>` but still tested.
 3. **Finals** — the best 3 are re-tested with the full `-s/--size` MB (default 25) download.
-4. **Winner** — connected automatically. With `--no-connect` (or Ctrl-C at any point) the pre-bench settings are restored instead.
+4. **Winner** — connected automatically after a final re-check of the exit IP. With `--no-connect` (or Ctrl-C at any point) the pre-bench settings are restored instead.
 
 Each test hot-swaps through gluetun's control server (`GET/PUT /v1/vpn/settings`) — no container recreation, single-digit-second switches. On older images without that route it falls back to recreating the container per location. Cross-provider benches work because the correct credentials for each candidate pair are injected from `.env` into the settings document.
 

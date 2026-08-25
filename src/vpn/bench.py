@@ -2,9 +2,10 @@
 
 Candidates are unique (provider, protocol, country, city) locations from the
 server cache. Each test hot-swaps via the control server's settings route
-(fallback: compose recreate on old images), verifies the exit country, then
-downloads through the tunnel. The winner is connected by default; Ctrl-C or
---no-connect restores the pre-bench settings document instead.
+(fallback: compose recreate on old images), proves the exit IP actually moved
+(leak-first verification), then downloads through the tunnel. The winner is
+connected by default; Ctrl-C or --no-connect restores the pre-bench settings
+document instead.
 """
 
 from collections.abc import Callable
