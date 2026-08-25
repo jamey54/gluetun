@@ -10,11 +10,8 @@ GLUETUN_IMAGE = "qmcgaw/gluetun:latest"
 
 
 def env_lookup(name: str) -> str | None:
-    """Effective value for compose substitution: process environment wins over .env file."""
-    value = os.environ.get(name)
-    if value is not None:
-        return value
-    return read_env_file(Path(COMPOSE_FILE).parent / ".env").get(name)
+    """Effective value for compose substitution (.env loaded into os.environ at startup)."""
+    return os.environ.get(name)
 
 
 def run(

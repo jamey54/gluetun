@@ -13,14 +13,11 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from vpn.config import DEFAULT_BASE_URL, GET_TIMEOUT_S, PUT_TIMEOUT_S
 from vpn.docker import env_lookup
 from vpn.providers import get_provider_env
 
-DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 SETTINGS_PATH = "/v1/vpn/settings"
-
-GET_TIMEOUT_S = 10
-PUT_TIMEOUT_S = 60
 
 # Location filter lists cleared between candidates so no stale value survives.
 _LOCATION_FILTERS = ("regions", "categories", "isps", "hostnames", "names", "numbers")
@@ -106,8 +103,8 @@ def with_location(
     selection["vpn"] = protocol
     selection["countries"] = [country] if country else []
     selection["cities"] = [city] if city else []
-    for field in _LOCATION_FILTERS:
-        selection[field] = []
+    for filter_name in _LOCATION_FILTERS:
+        selection[filter_name] = []
 
     env = get_provider_env(provider, protocol)
     wireguard = result.setdefault("wireguard", {})

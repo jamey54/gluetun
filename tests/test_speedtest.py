@@ -3,8 +3,9 @@
 from subprocess import CompletedProcess
 
 from vpn import speedtest
+from vpn.config import DEFAULT_SIZE_MB
 from vpn.ipinfo import _same_country
-from vpn.speedtest import DEFAULT_SIZE_MB, mbps
+from vpn.speedtest import mbps
 
 
 def test_mbps():

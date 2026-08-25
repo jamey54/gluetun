@@ -258,9 +258,7 @@ def test_up_running_swap_excludes_previous_exit(monkeypatch, compose_calls, swap
     assert verified[0]["exclude_ips"] == {"8.8.8.8"}
 
 
-def test_up_cold_start_has_no_previous_exit_to_exclude(
-    monkeypatch, compose_calls, swaps, verified
-):
+def test_up_cold_start_has_no_previous_exit_to_exclude(monkeypatch, compose_calls, swaps, verified):
     calls: list[str] = []
 
     def probe() -> str | None:

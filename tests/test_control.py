@@ -45,7 +45,11 @@ def fake_urllib(status_body: tuple[int, str], calls: list[Any] | None = None):
 
 def url_error(code: int, body: str = "") -> urllib.error.HTTPError:
     return urllib.error.HTTPError(
-        "http://x", code, "err", {}, io.BytesIO(body.encode())  # type: ignore[arg-type]
+        "http://x",
+        code,
+        "err",
+        {},  # type: ignore[arg-type]
+        io.BytesIO(body.encode()),
     )
 
 
@@ -89,9 +93,7 @@ def test_base_url_env_override(monkeypatch):
 def test_get_settings_sends_auth_header_and_parses(monkeypatch):
     calls: list[Any] = []
     doc = sample_doc()
-    monkeypatch.setattr(
-        control, "urlopen", fake_urllib((200, json.dumps(doc)), calls)
-    )
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, json.dumps(doc)), calls))
     assert control.get_settings() == doc
     method, url, _, headers = calls[0]
     assert (method, url) == ("GET", "http://127.0.0.1:8000/v1/vpn/settings")

@@ -47,9 +47,7 @@ def test_probe_hosts_maps_results_and_dedupes(monkeypatch):
         return FakeSocket()
 
     monkeypatch.setattr("vpn.latency.socket.create_connection", connect)
-    result = latency.probe_hosts(
-        ["b.example.com", "a.example.com", "a.example.com"], timeout=1.5
-    )
+    result = latency.probe_hosts(["b.example.com", "a.example.com", "a.example.com"], timeout=1.5)
     assert sorted(seen) == ["a.example.com", "b.example.com"]  # probed once each
     assert set(result) == {"a.example.com", "b.example.com"}
     assert result["b.example.com"] is None

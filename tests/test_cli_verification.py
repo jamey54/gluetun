@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from vpn import cli, ipinfo
+from vpn.config import REAL_IP_TIMEOUT_S
 
 PROBE_ARGS = ("docker", "exec")
 
@@ -105,7 +106,7 @@ def test_real_ip_fetched_from_host_and_cached(monkeypatch):
     assert ipinfo.real_ip() == "198.51.100.9"
     assert ipinfo.real_ip() == "198.51.100.9"
     assert len(calls) == 1  # cached after first fetch
-    assert calls[0][1] == ipinfo.REAL_IP_TIMEOUT_S
+    assert calls[0][1] == REAL_IP_TIMEOUT_S
 
 
 def test_real_ip_unreachable_is_none(monkeypatch):

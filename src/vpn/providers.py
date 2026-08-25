@@ -3,6 +3,8 @@
 import os
 from dataclasses import dataclass
 
+from vpn.config import DEFAULT_PROTOCOL
+
 # Surfshark accepts a bare private key, ProtonVPN requires the WireGuard
 # address as well -- hence the require_addresses flag below.
 
@@ -44,8 +46,6 @@ PROVIDERS: dict[str, dict[str, ProtocolConfig]] = {
     for provider in ("surfshark", "protonvpn")
 }
 
-DEFAULT_PROTOCOL = "wireguard"
-
 
 def get_protocols(provider: str) -> list[str]:
     """Protocols a provider supports."""
@@ -58,7 +58,7 @@ def active_protocols(provider: str) -> list[str]:
     return [
         protocol
         for protocol, protocol_config in config.items()
-        if all(os.getenv(var) for var in protocol_config.required_env)
+        if all(os.environ.get(var) for var in protocol_config.required_env)
     ]
 
 
@@ -92,7 +92,7 @@ def validate_provider(name: str, protocol: str = DEFAULT_PROTOCOL) -> tuple[str,
     if protocol not in PROVIDERS[name]:
         protocols = ", ".join(PROVIDERS[name])
         raise SystemExit(f"Unknown protocol '{protocol}' for {name}. Available: {protocols}")
-    missing = [var for var in PROVIDERS[name][protocol].required_env if not os.getenv(var)]
+    missing = [var for var in PROVIDERS[name][protocol].required_env if not os.environ.get(var)]
     if missing:
         others = [p for p in active_protocols(name) if p != protocol]
         hint = f" — or pass --protocol {'/'.join(others)}" if others else ""

@@ -11,13 +11,18 @@ from vpn import control
 from vpn.apply import Selection, apply_location
 from vpn.bench import (
     DEFAULT_FINAL_SIZE_MB,
-    DEFAULT_SCAN_SIZE_MB,
     DEFAULT_TOP,
     build_candidates,
     print_report,
     run_bench,
 )
-from vpn.config import CONTAINER
+from vpn.config import (
+    CONTAINER,
+    CONTROL_SERVER_PORT,
+    DEFAULT_PROTOCOL,
+    DEFAULT_SCAN_SIZE_MB,
+    DEFAULT_SIZE_MB,
+)
 from vpn.docker import (
     GLUETUN_IMAGE,
     compose,
@@ -30,7 +35,6 @@ from vpn.docker import (
 from vpn.ipinfo import current_exit_ip, print_ip_status
 from vpn.picker import select_server
 from vpn.providers import (
-    DEFAULT_PROTOCOL,
     PROVIDERS,
     choose_protocol,
     get_provider_env,
@@ -42,7 +46,7 @@ from vpn.servers import (
     parse_server_selection,
     print_servers_table,
 )
-from vpn.speedtest import DEFAULT_SIZE_MB, format_result, measure
+from vpn.speedtest import format_result, measure
 from vpn.textutil import fold
 
 DEBUG = False
@@ -59,7 +63,8 @@ def require_api_key() -> None:
     if not env_lookup("HTTP_CONTROL_SERVER_API_KEY"):
         raise SystemExit(
             "HTTP_CONTROL_SERVER_API_KEY is not set.\n"
-            "It authenticates gluetun's control server (port 8000) — add any random string to .env."
+            f"It authenticates gluetun's control server (port {CONTROL_SERVER_PORT}) "
+            "— add any random string to .env."
         )
 
 
@@ -165,11 +170,13 @@ def _warn_drift(current: Selection) -> None:
         env.get("SERVER_CITIES") or None,
     )
     if configured.provider and configured.key != current.key:
-        click.echo(click.style(
-            "Drift: runtime selection differs from the compose/.env config — "
-            "recreating the container reverts it.",
-            fg="yellow",
-        ))
+        click.echo(
+            click.style(
+                "Drift: runtime selection differs from the compose/.env config — "
+                "recreating the container reverts it.",
+                fg="yellow",
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +194,12 @@ def main(debug: bool) -> None:
 
 @main.command()
 @click.option("--provider", help="VPN provider (required to start a stopped container)")
-@click.option("--protocol", type=PROTOCOL, default=None,
-              help="VPN protocol (default: the running one, else wireguard)")
+@click.option(
+    "--protocol",
+    type=PROTOCOL,
+    default=None,
+    help="VPN protocol (default: the running one, else wireguard)",
+)
 @click.option("--country", help="Country to connect to")
 @click.option("--city", help="City within the country")
 @click.option("--pull", is_flag=True, help="Pull the latest gluetun image first")
@@ -330,8 +341,14 @@ def logs(follow: bool, tail: str) -> None:
 
 
 @main.command()
-@click.option("-s", "--size", type=click.IntRange(min=1), default=DEFAULT_SIZE_MB,
-              show_default=True, help="Speed test download size (MB)")
+@click.option(
+    "-s",
+    "--size",
+    type=click.IntRange(min=1),
+    default=DEFAULT_SIZE_MB,
+    show_default=True,
+    help="Speed test download size (MB)",
+)
 @click.option("--no-speedtest", is_flag=True, help="Skip the speed test")
 def status(size: int, no_speedtest: bool) -> None:
     """Show container state, effective selection, public IP, and speed test."""

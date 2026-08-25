@@ -7,13 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 from rich.console import Console
 from rich.table import Table
 
-from vpn.config import CACHE_DIR, CACHE_FILE, CACHE_TTL
+from vpn.config import CACHE_DIR, CACHE_FILE, CACHE_TTL, CACHE_VERSION, DEFAULT_PROTOCOL
 from vpn.docker import GLUETUN_IMAGE, run
-from vpn.providers import DEFAULT_PROTOCOL, get_active_providers
+from vpn.providers import get_active_providers
 from vpn.textutil import fold
 
 SERVER_SEP = " - "
-CACHE_VERSION = 3
 
 
 def parse_server_selection(selection: str) -> tuple[str | None, str | None, str, str | None]:

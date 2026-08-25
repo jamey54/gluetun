@@ -15,17 +15,18 @@ from urllib.request import urlopen
 
 import click
 
-from vpn.config import CONTAINER
+from vpn.config import (
+    CONTAINER,
+    CURRENT_EXIT_IP_RETRIES,
+    IP_FETCH_DELAY,
+    IP_FETCH_RETRIES,
+    IP_INFO_URL,
+    PROBE_TIMEOUT,
+    REAL_IP_TIMEOUT_S,
+)
 from vpn.countries import resolve_country
 from vpn.docker import run
 from vpn.textutil import fold
-
-IP_INFO_URL = "https://ipinfo.io"
-IP_FETCH_RETRIES = 15
-IP_FETCH_DELAY = 2
-PROBE_TIMEOUT = 8
-
-REAL_IP_TIMEOUT_S = 5
 
 _real_ip_cache: str | None = None
 
@@ -149,9 +150,13 @@ def print_ip_status(
     outcome = fetch_ip_info(expected_country=expected_country, exclude_ips=exclude_ips)
     if outcome.result is None:
         last = outcome.last_info or {}
-        if real_ip() and str(last.get("ip") or "") == real_ip():
-            click.echo(click.style("LEAK: traffic exits via your bare connection — "
-                                   "the VPN is not up.", fg="red"))
+        bare = real_ip()
+        if bare and str(last.get("ip") or "") == bare:
+            click.echo(
+                click.style(
+                    "LEAK: traffic exits via your bare connection — the VPN is not up.", fg="red"
+                )
+            )
         else:
             click.echo("Could not fetch public IP.")
         return False
@@ -171,7 +176,7 @@ def print_ip_status(
     return True
 
 
-def current_exit_ip(retries: int = 1) -> str | None:
+def current_exit_ip(retries: int = CURRENT_EXIT_IP_RETRIES) -> str | None:
     """Best-effort single-shot read of the container's current exit IP."""
     outcome = fetch_ip_info(retries=retries)
     info = (outcome.result.info if outcome.result else None) or outcome.last_info

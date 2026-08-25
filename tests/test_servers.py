@@ -6,7 +6,7 @@ import time
 import pytest
 
 from vpn import config, servers
-from vpn.providers import DEFAULT_PROTOCOL
+from vpn.config import DEFAULT_PROTOCOL
 from vpn.servers import (
     _parse_servers_output,
     _read_cache,
@@ -181,7 +181,7 @@ def test_cache_stale_expired(cache_path):
 def test_cache_version_mismatch(cache_path):
     _write_cache({"s": []})
     data = json.loads(cache_path.read_text())
-    data["v"] = servers.CACHE_VERSION + 1
+    data["v"] = config.CACHE_VERSION + 1
     cache_path.write_text(json.dumps(data))
     assert _read_cache() is None
 

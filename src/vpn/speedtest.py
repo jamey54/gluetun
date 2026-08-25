@@ -2,12 +2,8 @@
 
 import time
 
-from vpn.config import CONTAINER
+from vpn.config import CONTAINER, DEFAULT_SIZE_MB, DOWNLOAD_TIMEOUT_S, SPEEDTEST_URL
 from vpn.docker import run
-
-SPEEDTEST_URL = "https://speed.cloudflare.com/__down?bytes={n}"
-DEFAULT_SIZE_MB = 25
-DOWNLOAD_TIMEOUT_S = 120
 
 
 def mbps(nbytes: int | float, seconds: float) -> float:

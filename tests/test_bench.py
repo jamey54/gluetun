@@ -14,8 +14,9 @@ from vpn.apply import Verification
 # ---------------------------------------------------------------------------
 
 
-def candidate(provider="surfshark", protocol="wireguard", country="Germany",
-              city=None, *hosts: str) -> bench.Candidate:
+def candidate(
+    provider="surfshark", protocol="wireguard", country="Germany", city=None, *hosts: str
+) -> bench.Candidate:
     return bench.Candidate(provider, protocol, country, city, hosts)
 
 
@@ -24,9 +25,7 @@ def rows(*entries: tuple[str, str, str, str, str]) -> dict[str, list[Any]]:
     for provider, _protocol, _country, _city, _host in entries:
         out.setdefault(provider, [])
     for provider, protocol, country, city, host in entries:
-        out[provider].append(
-            {"country": country, "city": city, "hostname": host, "vpn": protocol}
-        )
+        out[provider].append({"country": country, "city": city, "hostname": host, "vpn": protocol})
     return out
 
 
@@ -163,8 +162,11 @@ def test_run_bench_connects_winner_by_default(monkeypatch):
     def fake_measure(size_mb: int, timeout: int = 120) -> dict[str, float]:
         counter["n"] += 1
         # screening runs latency-ranked (fast, mid, slow), speeds descending
-        return {"mbits": 30.0 - 10.0 * (counter["n"] - 1 % 3), "seconds": 1.0,
-                "mbytes": float(size_mb)}
+        return {
+            "mbits": 30.0 - 10.0 * ((counter["n"] - 1) % 3),
+            "seconds": 1.0,
+            "mbytes": float(size_mb),
+        }
 
     monkeypatch.setattr(bench, "measure", fake_measure)
 
@@ -186,7 +188,8 @@ def test_run_bench_no_connect_restores_baseline(monkeypatch, happy_path):
     monkeypatch.setattr(bench, "get_settings", Recorder([base]))
     report = bench.run_bench(
         [candidate("surfshark", "wireguard", "France", None, "fr")],
-        connect_winner=False, say=lambda *_: None,
+        connect_winner=False,
+        say=lambda *_: None,
     )
     assert report.winner is not None
     assert report.action.startswith("Kept previous settings")
@@ -201,7 +204,8 @@ def test_run_bench_swap_failure_recorded(monkeypatch):
     monkeypatch.setattr(apply_module, "get_settings", lambda: baseline_doc())
     report = bench.run_bench(
         [candidate("surfshark", "openvpn", "Poland", "Warsaw", "pl1")],
-        connect_winner=False, say=lambda *_: None,
+        connect_winner=False,
+        say=lambda *_: None,
     )
     assert report.winner is None
     assert report.results[0].error == "swap failed: tunnel restart timed out"
@@ -210,13 +214,15 @@ def test_run_bench_swap_failure_recorded(monkeypatch):
 
 def test_run_bench_verification_failure_excluded(monkeypatch):
     monkeypatch.setattr(
-        bench, "verify",
+        bench,
+        "verify",
         lambda cand, prev_ip=None: Verification(ok=False, reason="leak"),
     )
     monkeypatch.setattr(bench, "measure", lambda size_mb, timeout=120: None)
     report = bench.run_bench(
         [candidate("surfshark", "wireguard", "Atlantis", None, "at")],
-        connect_winner=False, say=lambda *_: None,
+        connect_winner=False,
+        say=lambda *_: None,
     )
     assert report.winner is None
     assert report.results[0].error == "leak"
@@ -225,13 +231,15 @@ def test_run_bench_verification_failure_excluded(monkeypatch):
 
 def test_run_bench_geo_mismatch_still_benchmarked(monkeypatch):
     """Wrong-country exits (virtual locations) are flagged but speed-tested."""
+
     def fake_verify(sel: Any, prev_ip: str | None = None) -> Verification:
         return Verification(ok=True, ip="1.2.3.4", geo="Singapore")
 
     monkeypatch.setattr(bench, "verify", fake_verify)
     report = bench.run_bench(
         [candidate("surfshark", "wireguard", "Vietnam", None, "vn")],
-        connect_winner=False, say=lambda *_: None,
+        connect_winner=False,
+        say=lambda *_: None,
     )
     result = report.results[0]
     assert result.scan_mbps == 10.0  # benchmarked despite geo mismatch
@@ -284,9 +292,9 @@ def test_run_bench_winner_adoption_after_swap_excludes_prev_exit(monkeypatch, ha
     probes = {"fr": 0.05, "es": 0.10}
     monkeypatch.setattr(bench, "probe_hosts", Recorder([probes]))
     monkeypatch.setattr(  # scans tie so finals keep input order (Spain, France);
-        bench, "measure",  # Spain 45 beats France 30 -> winner differs from last tested
-        Recorder([{"mbits": m, "seconds": 1.0, "mbytes": 10.0}
-                  for m in (10.0, 10.0, 45.0, 30.0)]),
+        bench,
+        "measure",  # Spain 45 beats France 30 -> winner differs from last tested
+        Recorder([{"mbits": m, "seconds": 1.0, "mbytes": 10.0} for m in (10.0, 10.0, 45.0, 30.0)]),
     )
     seen: list[tuple[str | None, str | None]] = []
 
@@ -358,7 +366,8 @@ def test_run_bench_reads_baseline_under_lock(monkeypatch, happy_path):
     monkeypatch.setattr(bench, "get_settings", fake_settings)
     bench.run_bench(
         [candidate("surfshark", "wireguard", "France", None, "fr")],
-        connect_winner=False, say=lambda *_: None,
+        connect_winner=False,
+        say=lambda *_: None,
     )
     assert events == ["lock", "read", "unlock"]
 
@@ -425,7 +434,8 @@ def test_cli_bench_end_to_end(monkeypatch):
     monkeypatch.setattr(cli, "get_servers", lambda: data)
     monkeypatch.setattr(cli, "listable_servers", lambda d: d)
     monkeypatch.setattr(
-        control, "get_settings",
+        control,
+        "get_settings",
         lambda: {"type": "wireguard", "provider": {"name": "surfshark"}},
     )
 

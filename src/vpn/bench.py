@@ -16,19 +16,17 @@ from rich.console import Console
 from rich.table import Table
 
 from vpn.apply import Selection, apply_location, restore_settings, swap_lock, verify
+from vpn.config import DEFAULT_SCAN_SIZE_MB, DOWNLOAD_TIMEOUT_S, SCAN_TIMEOUT_S
 from vpn.control import ControlError, get_settings
 from vpn.ipinfo import current_exit_ip
 from vpn.latency import probe_hosts
 from vpn.servers import ServerRow, sorted_server_rows
-from vpn.speedtest import DOWNLOAD_TIMEOUT_S, measure
+from vpn.speedtest import measure
 from vpn.textutil import fold
 
 DEFAULT_TOP = 12
-DEFAULT_SCAN_SIZE_MB = 10
 DEFAULT_FINAL_SIZE_MB = 25
 FINALISTS = 3
-
-SCAN_TIMEOUT_S = 90
 
 
 @dataclass(frozen=True)
@@ -116,11 +114,7 @@ def build_candidates(
 
 def best_latency(candidate: Candidate, by_host: dict[str, float | None]) -> float | None:
     """Fastest probe among the location's hostnames; None when all unreachable."""
-    reachable = [
-        latency
-        for h in candidate.hostnames
-        if (latency := by_host.get(h)) is not None
-    ]
+    reachable = [latency for h in candidate.hostnames if (latency := by_host.get(h)) is not None]
     return min(reachable) if reachable else None
 
 
@@ -155,8 +149,10 @@ def run_bench(
         baseline = get_settings()
     report = BenchReport(baseline=baseline)
     tested = candidates[:limit] if limit > 0 else candidates
-    say(f"Benchmarking {len(tested)} locations "
-        f"(screening top {min(top, len(tested))}, finals {FINALISTS}).")
+    say(
+        f"Benchmarking {len(tested)} locations "
+        f"(screening top {min(top, len(tested))}, finals {FINALISTS})."
+    )
 
     hosts = sorted({h for c in tested for h in c.hostnames})
     say(f"Probing {len(hosts)} hostnames...")
@@ -211,15 +207,16 @@ def run_bench(
             reverse=True,
         )[:FINALISTS]
         if finalists:
-            say(f"Finals ({final_size_mb} MB each): "
-                + ", ".join(r.candidate.location for r in finalists))
+            say(
+                f"Finals ({final_size_mb} MB each): "
+                + ", ".join(r.candidate.location for r in finalists)
+            )
             test_stage(finalists, "final", final_size_mb, DOWNLOAD_TIMEOUT_S)
 
         screened = [r for r in results if r.scan_mbps is not None]
         finished = [r for r in results if r.final_mbps is not None]
-        report.winner = (
-            max(finished, key=lambda r: r.final_mbps or 0.0, default=None)
-            or max(screened, key=lambda r: r.scan_mbps or 0.0, default=None)
+        report.winner = max(finished, key=lambda r: r.final_mbps or 0.0, default=None) or max(
+            screened, key=lambda r: r.scan_mbps or 0.0, default=None
         )
     except KeyboardInterrupt:
         report.interrupted = True
@@ -229,7 +226,8 @@ def run_bench(
         if report.interrupted or not connect_winner or not report.winner:
             restore_settings(report.baseline)
             report.action = (
-                "Restored previous settings." if report.interrupted
+                "Restored previous settings."
+                if report.interrupted
                 else "No working location found; restored previous settings."
                 if not report.winner
                 else f"Kept previous settings — winner was {report.winner.candidate.label}."
@@ -305,7 +303,14 @@ def print_report(report: BenchReport) -> None:
         else:
             style = ""
         table.add_row(
-            str(i), r.candidate.provider, r.candidate.protocol, r.candidate.location,
-            latency, scan, final, status, style=style,
+            str(i),
+            r.candidate.provider,
+            r.candidate.protocol,
+            r.candidate.location,
+            latency,
+            scan,
+            final,
+            status,
+            style=style,
         )
     Console(highlight=False).print(table)

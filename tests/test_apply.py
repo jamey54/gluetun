@@ -15,8 +15,9 @@ def _lock(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "LOCK_FILE", tmp_path / "settings.lock")
 
 
-def selection(provider="surfshark", protocol="wireguard",
-              country=None, city=None) -> apply.Selection:
+def selection(
+    provider="surfshark", protocol="wireguard", country=None, city=None
+) -> apply.Selection:
     return apply.Selection(provider, protocol, country, city)
 
 
@@ -105,7 +106,8 @@ def test_apply_location_puts_mutated_document(monkeypatch):
 def test_apply_location_translates_404_to_upgrade_hint(monkeypatch):
     monkeypatch.setattr(apply, "get_settings", lambda: full_doc())
     monkeypatch.setattr(
-        apply, "put_settings",
+        apply,
+        "put_settings",
         lambda doc: (_ for _ in ()).throw(control.ControlError(404, "404 page not found")),
     )
     with pytest.raises(control.ControlError) as excinfo:
@@ -203,9 +205,7 @@ def test_verify_failure_classification(monkeypatch):
     assert apply.verify(bare).reason == "leak"
 
     monkeypatch.setattr(apply, "real_ip", lambda: None)
-    monkeypatch.setattr(
-        apply, "fetch_ip_info", lambda **_k: IpOutcome(last_info={"ip": "5.5.5.5"})
-    )
+    monkeypatch.setattr(apply, "fetch_ip_info", lambda **_k: IpOutcome(last_info={"ip": "5.5.5.5"}))
     assert apply.verify(bare, prev_ip="5.5.5.5").reason == "no reconnect"
 
     monkeypatch.setattr(apply, "fetch_ip_info", lambda **_k: IpOutcome())

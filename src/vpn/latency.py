@@ -5,8 +5,8 @@ import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 
-LATENCY_PORT = 443
-LATENCY_TIMEOUT_S = 2.0
+from vpn.config import LATENCY_PORT, LATENCY_TIMEOUT_S
+
 MAX_WORKERS = 32
 
 

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from vpn import config
+from vpn.config import HTTP_NOT_FOUND, LOCK_FILE_PERMS
 from vpn.control import ControlError, get_settings, put_settings, with_location
 from vpn.countries import resolve_country
 from vpn.ipinfo import fetch_ip_info, real_ip
@@ -66,7 +67,7 @@ def swap_lock() -> Iterator[None]:
     """Advisory cross-process lock held across each settings mutation."""
     lock_file = config.LOCK_FILE  # read dynamically so tests can redirect it
     lock_file.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o600)
+    fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, LOCK_FILE_PERMS)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield
@@ -77,8 +78,8 @@ def swap_lock() -> Iterator[None]:
 
 def _translate(exc: ControlError) -> ControlError:
     """Replace a bare 404 with an actionable upgrade hint; pass others through."""
-    if exc.status == 404:
-        return ControlError(404, _UPGRADE_HINT)
+    if exc.status == HTTP_NOT_FOUND:
+        return ControlError(HTTP_NOT_FOUND, _UPGRADE_HINT)
     return exc
 
 

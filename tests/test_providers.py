@@ -3,8 +3,8 @@
 import pytest
 
 from vpn import providers
+from vpn.config import DEFAULT_PROTOCOL
 from vpn.providers import (
-    DEFAULT_PROTOCOL,
     active_protocols,
     get_active_providers,
     get_provider_env,
