@@ -43,7 +43,7 @@ class Candidate:
 
     @property
     def key(self) -> tuple[str, str, str, str]:
-        return (self.provider, self.protocol, fold(self.country), fold(self.city or ""))
+        return self.selection.key
 
     @property
     def location(self) -> str:

@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from vpn.config import LOCK_FILE as LOCK_FILE  # explicit re-export for tests
+from vpn import config
 from vpn.control import ControlError, get_settings, put_settings, with_location
 from vpn.countries import resolve_country
 from vpn.ipinfo import fetch_ip_info, real_ip
@@ -64,8 +64,9 @@ class Selection:
 @contextmanager
 def swap_lock() -> Iterator[None]:
     """Advisory cross-process lock held across each settings mutation."""
-    LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(LOCK_FILE, os.O_CREAT | os.O_RDWR, 0o600)
+    lock_file = config.LOCK_FILE  # read dynamically so tests can redirect it
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield

@@ -57,9 +57,6 @@ class Recorder:
             return item
         return None
 
-    def argss(self) -> list[tuple[Any, ...]]:
-        return [args for args, _ in self.calls]
-
 
 @pytest.fixture(autouse=True)
 def happy_path(monkeypatch):
