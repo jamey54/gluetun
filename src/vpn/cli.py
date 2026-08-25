@@ -3,6 +3,7 @@
 import click
 
 from vpn import control
+from vpn.apply import Selection
 from vpn.bench import (
     DEFAULT_FINAL_SIZE_MB,
     DEFAULT_SCAN_SIZE_MB,
@@ -316,15 +317,18 @@ def bench(
     if not any(by_provider.values()):
         raise SystemExit("No servers found. Is Docker running?")
 
-    original = get_current_vpn()
-    if not all_providers and not provider and not protocol and original:
-        provider, protocol = original.provider, original.protocol
+    try:
+        running = Selection.from_doc(control.get_settings())
+    except control.ControlError as exc:
+        raise SystemExit(f"Cannot reach the gluetun control server: {exc}") from None
+
+    if not all_providers and not provider and not protocol and running.provider:
+        provider, protocol = running.provider, running.protocol
     candidates = build_candidates(by_provider, provider, protocol, country)
     if not candidates:
         raise SystemExit("No matching locations for the given filters.")
 
     try:
-        settings_route = control.settings_route_supported()
         report = run_bench(
             candidates,
             top=top,
@@ -332,13 +336,9 @@ def bench(
             scan_size_mb=scan_size,
             final_size_mb=size,
             connect_winner=not no_connect,
-            settings_route=settings_route,
-            original=original,
         )
     except KeyboardInterrupt:
         raise SystemExit(130) from None
-    except control.ControlError as exc:
-        raise SystemExit(f"Cannot reach the gluetun control server: {exc}") from None
 
     print_report(report)
     if report.action:

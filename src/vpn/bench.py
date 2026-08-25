@@ -1,11 +1,10 @@
 """Location benchmarking: latency prescreen, screened and final speed stages.
 
 Candidates are unique (provider, protocol, country, city) locations from the
-server cache. Each test hot-swaps via the control server's settings route
-(fallback: compose recreate on old images), proves the exit IP actually moved
-(leak-first verification), then downloads through the tunnel. The winner is
-connected by default; Ctrl-C or --no-connect restores the pre-bench settings
-document instead.
+server cache. Each test hot-swaps through the runtime config engine
+(vpn.apply), proves the exit IP actually moved (leak-first verification),
+then downloads through the tunnel. The winner is connected by default;
+Ctrl-C or --no-connect restores the pre-bench settings document instead.
 """
 
 from collections.abc import Callable
@@ -16,12 +15,10 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from vpn.control import ControlError, get_settings, put_settings, with_location
-from vpn.countries import resolve_country
-from vpn.docker import CurrentVpn, compose
-from vpn.ipinfo import current_exit_ip, fetch_ip_info, real_ip
+from vpn.apply import Selection, apply_location, restore_settings, verify
+from vpn.control import ControlError, get_settings
+from vpn.ipinfo import current_exit_ip
 from vpn.latency import probe_hosts
-from vpn.providers import DEFAULT_PROTOCOL, get_provider_env
 from vpn.servers import ServerRow, sorted_server_rows
 from vpn.speedtest import DOWNLOAD_TIMEOUT_S, measure
 from vpn.textutil import fold
@@ -31,8 +28,6 @@ DEFAULT_SCAN_SIZE_MB = 10
 DEFAULT_FINAL_SIZE_MB = 25
 FINALISTS = 3
 
-VERIFY_RETRIES = 3
-VERIFY_DELAY_S = 1
 SCAN_TIMEOUT_S = 90
 
 
@@ -58,6 +53,11 @@ class Candidate:
     def label(self) -> str:
         return f"{self.provider}/{self.protocol} {self.location}"
 
+    @property
+    def selection(self) -> Selection:
+        """The equivalent runtime Selection for this location."""
+        return Selection(self.provider, self.protocol, self.country, self.city)
+
 
 @dataclass
 class BenchResult:
@@ -75,7 +75,6 @@ class BenchResult:
 class BenchReport:
     results: list[BenchResult] = field(default_factory=list)
     baseline: dict[str, Any] = field(default_factory=dict)
-    original: CurrentVpn | None = None
     winner: BenchResult | None = None
     interrupted: bool = False
     action: str = ""
@@ -136,81 +135,6 @@ def rank(results: list[BenchResult], by_host: dict[str, float | None]) -> list[B
 
 
 # ---------------------------------------------------------------------------
-# Swapping
-# ---------------------------------------------------------------------------
-
-
-def recreate(candidate: Candidate) -> None:
-    """Old-image fallback: recreate the container with the candidate's env."""
-    overrides = get_provider_env(candidate.provider, candidate.protocol)
-    if candidate.country:
-        overrides["SERVER_COUNTRIES"] = candidate.country
-    if candidate.city:
-        overrides["SERVER_CITIES"] = candidate.city
-    compose("up", "-d", "--force-recreate", env_overrides=overrides)
-
-
-def swap(doc: dict[str, Any], candidate: Candidate, *, settings_route: bool = True) -> None:
-    """Move the tunnel to the candidate. Raises ControlError on failure.
-
-    With settings_route=False (or a 404 from an old image) recreates instead.
-    """
-    if settings_route:
-        try:
-            put_settings(
-                with_location(doc, candidate.provider, candidate.protocol,
-                              candidate.country, candidate.city)
-            )
-            return
-        except ControlError as exc:
-            if exc.status != 404:
-                raise
-    recreate(candidate)
-
-
-@dataclass
-class Verification:
-    """Outcome of post-swap verification."""
-
-    ok: bool  # exit IP differs from both the bare IP and the previous exit
-    ip: str | None = None  # observed exit IP, when any
-    geo: str | None = None  # actual exit country when it differs from the request
-    reason: str = ""  # failure label: leak / no reconnect / no public IP
-
-
-def verify(candidate: Candidate, prev_ip: str | None = None) -> Verification:
-    """Prove the tunnel moved: new exit IP, different from bare and previous.
-
-    The bare-IP exclusion comes from ipinfo itself; prev_ip is added here so a
-    failed swap that silently keeps routing through the old server is caught.
-    Country never gates success — a geo mismatch is surfaced as `geo`.
-    """
-    outcome = fetch_ip_info(
-        retries=VERIFY_RETRIES,
-        delay=VERIFY_DELAY_S,
-        expected_country=candidate.country,
-        exclude_ips={prev_ip} if prev_ip else None,
-    )
-    if outcome.result is not None:
-        info = outcome.result.info
-        geo = resolve_country(str(info.get("country", "")))
-        return Verification(
-            ok=True,
-            ip=str(info.get("ip") or "") or None,
-            geo=None if outcome.result.matched else (geo or None),
-        )
-
-    last_ip = str((outcome.last_info or {}).get("ip") or "")
-    bare = real_ip()
-    reason = "no public IP"
-    if last_ip and bare and last_ip == bare:
-        reason = "leak"
-    elif last_ip and prev_ip and last_ip == prev_ip:
-        reason = "no reconnect"
-    return Verification(ok=False, ip=last_ip or None, reason=reason)
-
-
-# ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
 
@@ -223,12 +147,10 @@ def run_bench(
     scan_size_mb: int = DEFAULT_SCAN_SIZE_MB,
     final_size_mb: int = DEFAULT_FINAL_SIZE_MB,
     connect_winner: bool = True,
-    settings_route: bool = True,
-    original: CurrentVpn | None = None,
     say: Callable[[str], None] = click.echo,
 ) -> BenchReport:
     """Run all bench stages; connect the winner unless asked otherwise."""
-    report = BenchReport(baseline=get_settings(), original=original)
+    report = BenchReport(baseline=get_settings())
     tested = candidates[:limit] if limit > 0 else candidates
     say(f"Benchmarking {len(tested)} locations "
         f"(screening top {min(top, len(tested))}, finals {FINALISTS}).")
@@ -251,12 +173,12 @@ def run_bench(
             candidate = result.candidate
             say(f"[{i}/{len(pool)}] {candidate.label} ... swapping")
             try:
-                swap(report.baseline, candidate, settings_route=settings_route)
+                apply_location(candidate.selection)
             except ControlError as exc:
                 result.error = f"swap failed: {exc.message}"
                 continue
             current = candidate
-            verdict = verify(candidate, prev_ip)
+            verdict = verify(candidate.selection, prev_ip)
             if not verdict.ok:
                 result.error = verdict.reason
                 continue
@@ -300,24 +222,9 @@ def run_bench(
         report.interrupted = True
         say("Interrupted.")
 
-    def do_restore() -> None:
-        """Put the pre-bench settings back (hot-swap, or recreate on old images)."""
-        if settings_route:
-            put_settings(report.baseline)
-            return
-        if report.original:
-            recreate(
-                Candidate(
-                    report.original.provider,
-                    report.original.protocol or DEFAULT_PROTOCOL,
-                    report.original.countries or "",
-                    report.original.cities or None,
-                )
-            )
-
     try:
         if report.interrupted or not connect_winner or not report.winner:
-            do_restore()
+            restore_settings(report.baseline)
             report.action = (
                 "Restored previous settings." if report.interrupted
                 else "No working location found; restored previous settings."
@@ -328,9 +235,9 @@ def run_bench(
             winner = report.winner.candidate
             did_swap = False
             if current != winner:
-                swap(report.baseline, winner, settings_route=settings_route)
+                apply_location(winner.selection)
                 did_swap = True
-            check = verify(winner, prev_ip)
+            check = verify(winner.selection, prev_ip)
             verb = "Swapped to" if did_swap else "Stayed on"
             if check.ok:
                 report.action = f"Connected to winner: {winner.label}"
