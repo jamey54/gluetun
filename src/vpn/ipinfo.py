@@ -134,7 +134,10 @@ def fetch_ip_info(
     return IpOutcome(last_info=last_info)
 
 
-def print_ip_status(expected_country: str | None = None) -> bool:
+def print_ip_status(
+    expected_country: str | None = None,
+    exclude_ips: Iterable[str] | None = None,
+) -> bool:
     """Fetch and display IP info with a tri-state verdict.
 
     Green: VPN exit in the requested country. Yellow: real VPN exit but wrong
@@ -143,7 +146,7 @@ def print_ip_status(expected_country: str | None = None) -> bool:
 
     Returns True only when traffic verifiably exits through the VPN.
     """
-    outcome = fetch_ip_info(expected_country=expected_country)
+    outcome = fetch_ip_info(expected_country=expected_country, exclude_ips=exclude_ips)
     if outcome.result is None:
         last = outcome.last_info or {}
         if real_ip() and str(last.get("ip") or "") == real_ip():

@@ -84,20 +84,6 @@ def put_settings(doc: dict[str, Any]) -> str:
     return body.strip()
 
 
-def settings_route_supported() -> bool:
-    """True when the image has /v1/vpn/settings; False on 404 (old images).
-
-    Other errors (server down, auth failed) propagate — bench cannot proceed.
-    """
-    try:
-        get_settings()
-    except ControlError as exc:
-        if exc.status == 404:
-            return False
-        raise
-    return True
-
-
 def with_location(
     doc: dict[str, Any],
     provider: str,

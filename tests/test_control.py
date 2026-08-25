@@ -139,30 +139,6 @@ def test_get_settings_invalid_json_raises(monkeypatch):
         control.get_settings()
 
 
-def test_route_supported_true(monkeypatch):
-    monkeypatch.setattr(
-        control, "urlopen", fake_urllib((200, json.dumps(sample_doc())))
-    )
-    assert control.settings_route_supported() is True
-
-
-def test_route_supported_false_on_404(monkeypatch):
-    def boom(request: Any, timeout: float = 10) -> None:
-        raise url_error(404, "404 page not found")
-
-    monkeypatch.setattr(control, "urlopen", boom)
-    assert control.settings_route_supported() is False
-
-
-def test_route_supported_propagates_other_errors(monkeypatch):
-    def boom(request: Any, timeout: float = 10) -> None:
-        raise urllib.error.URLError("connection refused")
-
-    monkeypatch.setattr(control, "urlopen", boom)
-    with pytest.raises(control.ControlError):
-        control.settings_route_supported()
-
-
 # ---------------------------------------------------------------------------
 # with_location document building
 # ---------------------------------------------------------------------------

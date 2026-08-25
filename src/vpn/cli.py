@@ -1,9 +1,14 @@
-"""CLI commands for the vpn package."""
+"""CLI commands for the vpn package.
+
+Runtime selection changes hot-swap through gluetun's control server
+(vpn.apply); compose is only used for container lifecycle (create, recreate,
+stop) and logs.
+"""
 
 import click
 
 from vpn import control
-from vpn.apply import Selection
+from vpn.apply import Selection, apply_location
 from vpn.bench import (
     DEFAULT_FINAL_SIZE_MB,
     DEFAULT_SCAN_SIZE_MB,
@@ -16,13 +21,13 @@ from vpn.config import CONTAINER
 from vpn.docker import (
     GLUETUN_IMAGE,
     compose,
+    container_env,
     container_running,
     container_status,
     env_lookup,
-    get_current_vpn,
     run,
 )
-from vpn.ipinfo import print_ip_status
+from vpn.ipinfo import current_exit_ip, print_ip_status
 from vpn.picker import select_server
 from vpn.providers import (
     DEFAULT_PROTOCOL,
@@ -38,10 +43,15 @@ from vpn.servers import (
     print_servers_table,
 )
 from vpn.speedtest import DEFAULT_SIZE_MB, format_result, measure
+from vpn.textutil import fold
 
 DEBUG = False
 
 SENSITIVE_KEY_PARTS = ("KEY", "PASSWORD", "TOKEN", "SECRET")
+
+PROTOCOL = click.Choice(
+    sorted({p for cfg in PROVIDERS.values() for p in cfg}), case_sensitive=False
+)
 
 
 def require_api_key() -> None:
@@ -64,12 +74,17 @@ def _log_env(overrides: dict[str, str]) -> None:
     click.echo(f"Env: {' '.join(shown)}")
 
 
-def finish_connection(expected_country: str | None = None, speedtest: bool = True) -> bool:
+def finish_connection(
+    expected_country: str | None = None,
+    speedtest: bool = True,
+    size: int = DEFAULT_SIZE_MB,
+    exclude_ips: set[str] | None = None,
+) -> bool:
     """Show connection status and optionally run a speed test."""
-    verified = print_ip_status(expected_country=expected_country)
+    verified = print_ip_status(expected_country=expected_country, exclude_ips=exclude_ips)
     if verified and speedtest:
         click.echo("Running speed test...")
-        result = measure()
+        result = measure(size)
         if result:
             click.echo(format_result(result))
         else:
@@ -77,6 +92,77 @@ def finish_connection(expected_country: str | None = None, speedtest: bool = Tru
     elif speedtest:
         click.echo("Skipping speed test — connection not verified.")
     return verified
+
+
+def effective_selection() -> Selection | None:
+    """Runtime selection from the control server; None when unreachable or blank."""
+    try:
+        return Selection.from_doc(control.get_settings())
+    except control.ControlError:
+        return None
+
+
+def _require_selection() -> Selection:
+    sel = effective_selection()
+    if sel is None or not sel.provider:
+        raise SystemExit("Cannot read runtime settings — is gluetun's control server reachable?")
+    return sel
+
+
+def _print_target(sel: Selection) -> str:
+    location = (sel.country or "") + (f" / {sel.city}" if sel.city else "")
+    return f"{sel.provider}/{sel.protocol}" + (f" → {location}" if location else "")
+
+
+def _apply_request(
+    provider: str | None,
+    protocol: str | None,
+    country: str | None,
+    city: str | None,
+    base: Selection,
+) -> tuple[Selection, bool]:
+    """Resolve the requested target over base and hot-swap; return (target, swapped).
+
+    An explicit country replaces the location outright; a lone city keeps the
+    current country; switching provider drops the old location. Returns
+    swapped=False when the target already matches the running state.
+    """
+    target_provider = provider or base.provider
+    target_protocol = protocol or base.protocol or DEFAULT_PROTOCOL
+    target_country: str | None
+    target_city: str | None
+    if country is not None:
+        target_country, target_city = country, city
+    elif city is not None:
+        target_country, target_city = base.country, city
+    elif fold(target_provider) != fold(base.provider):
+        target_country, target_city = None, None
+    else:
+        target_country, target_city = base.country, base.city
+
+    target_provider, target_protocol = validate_provider(target_provider, target_protocol)
+    target = Selection(target_provider, target_protocol, target_country, target_city)
+    if target.key == base.key:
+        return target, False
+    apply_location(target)
+    return target, True
+
+
+def _warn_drift(current: Selection) -> None:
+    """Warn when the runtime selection diverges from the compose/.env config."""
+    env = container_env()
+    configured = Selection(
+        env.get("VPN_SERVICE_PROVIDER", ""),
+        env.get("VPN_TYPE", ""),
+        env.get("SERVER_COUNTRIES") or None,
+        env.get("SERVER_CITIES") or None,
+    )
+    if configured.provider and configured.key != current.key:
+        click.echo(click.style(
+            "Drift: runtime selection differs from the compose/.env config — "
+            "recreating the container reverts it.",
+            fg="yellow",
+        ))
 
 
 # ---------------------------------------------------------------------------
@@ -93,29 +179,118 @@ def main(debug: bool) -> None:
 
 
 @main.command()
-@click.option("--provider", required=True, help="VPN provider (e.g. surfshark, protonvpn)")
-@click.option(
-    "--protocol",
-    type=click.Choice(sorted({p for cfg in PROVIDERS.values() for p in cfg}), case_sensitive=False),
-    default=None,
-    help="VPN protocol (default: keep the running one, else wireguard)",
-)
+@click.option("--provider", help="VPN provider (required to start a stopped container)")
+@click.option("--protocol", type=PROTOCOL, default=None,
+              help="VPN protocol (default: the running one, else wireguard)")
+@click.option("--country", help="Country to connect to")
+@click.option("--city", help="City within the country")
+@click.option("--pull", is_flag=True, help="Pull the latest gluetun image first")
+@click.option("--recreate", is_flag=True, help="Recreate the container from compose/.env config")
 @click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
-def up(provider: str, protocol: str | None, no_speedtest: bool) -> None:
-    """Start the VPN container, keeping the running location and protocol."""
+def up(
+    provider: str | None,
+    protocol: str | None,
+    country: str | None,
+    city: str | None,
+    pull: bool,
+    recreate: bool,
+    no_speedtest: bool,
+) -> None:
+    """Start the VPN; apply any requested location via hot-swap.
+
+    With no arguments on a running container this only verifies the tunnel.
+    Selections are runtime-only: --pull/--recreate revert to compose/.env config.
+    """
     require_api_key()
-    current = get_current_vpn()
-    protocol = choose_protocol(provider, protocol, current.protocol if current else None)
-    provider, protocol = validate_provider(provider, protocol)
-    overrides = get_provider_env(provider, protocol)
-    if current:
-        overrides.update(current.location_overrides())
-    _log_env(overrides)
-    compose("up", "-d", env_overrides=overrides)
-    location = overrides.get("SERVER_COUNTRIES", "")
-    suffix = f" → {location}" if location else ""
-    click.echo(f"VPN started ({provider}/{protocol}){suffix}.")
-    finish_connection(expected_country=location or None, speedtest=not no_speedtest)
+    requested = any(v is not None for v in (provider, protocol, country, city))
+    was_running = container_running()
+    current = effective_selection() if was_running else None
+    created = not was_running
+    if pull:
+        run("docker", "pull", GLUETUN_IMAGE)
+        recreate = True
+    if recreate:
+        created = True
+
+    # On a create/recreate path compose already applies provider/protocol;
+    # only an explicit location constitutes a further hot-swap request there.
+    if created:
+        requested = country is not None or city is not None
+    if was_running and requested and current is None:
+        raise SystemExit("Cannot read runtime settings — is gluetun's control server reachable?")
+
+    swapped = False
+    target = Selection("", "")
+    if created:
+        name = provider or (current.provider if current else None)
+        if not name:
+            raise SystemExit("--provider is required to start the container.")
+        proto = choose_protocol(name, protocol, current.protocol if current else None)
+        name, proto = validate_provider(name, proto)
+        overrides = get_provider_env(name, proto)
+        _log_env(overrides)
+        compose("up", "-d", *(("--force-recreate",) if recreate else ()), env_overrides=overrides)
+        click.echo(f"VPN {'recreated' if recreate else 'started'} ({name}/{proto}).")
+
+    if requested:
+        base = current or Selection("", "")
+        target, swapped = _apply_request(provider, protocol, country, city, base)
+        click.echo(f"{'Swapped to' if swapped else 'Already on'} {_print_target(target)}.")
+    elif current is not None and not recreate:
+        target = current
+
+    finish_connection(
+        expected_country=target.country if (swapped or (requested and not recreate)) else None,
+        speedtest=not no_speedtest,
+    )
+
+
+@main.command()
+@click.option("--provider", help="VPN provider")
+@click.option("--protocol", type=PROTOCOL, default=None, help="VPN protocol")
+@click.option("--country", help="Country to connect to")
+@click.option("--city", help="City within the country")
+@click.option("--list", "list_servers", is_flag=True, help="List available servers and exit")
+@click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
+def connect(
+    provider: str | None,
+    protocol: str | None,
+    country: str | None,
+    city: str | None,
+    list_servers: bool,
+    no_speedtest: bool,
+) -> None:
+    """Hot-swap to another server without restarting; no arguments opens the picker."""
+    if list_servers:
+        by_provider = listable_servers(get_servers())
+        if not any(by_provider.values()):
+            raise SystemExit("No servers found. Is Docker running?")
+        print_servers_table(by_provider)
+        return
+
+    require_api_key()
+    if not container_running():
+        raise SystemExit(f"Container '{CONTAINER}' is not running. Use 'vpn up' first.")
+    current = _require_selection()
+
+    if not any(v is not None for v in (provider, protocol, country, city)):
+        by_provider = listable_servers(get_servers())
+        if not any(by_provider.values()):
+            raise SystemExit("No servers found. Is Docker running?")
+        selection = select_server(by_provider)
+        if not selection:
+            raise SystemExit("No selection.")
+        picked_provider, picked_protocol, country, city = parse_server_selection(selection)
+        provider, protocol = picked_provider, picked_protocol
+
+    prev_ip = current_exit_ip()
+    target, swapped = _apply_request(provider, protocol, country, city, current)
+    click.echo(f"{'Swapped to' if swapped else 'Already on'} {_print_target(target)}.")
+    finish_connection(
+        expected_country=target.country,
+        speedtest=not no_speedtest,
+        exclude_ips={prev_ip} if prev_ip else None,
+    )
 
 
 @main.command()
@@ -123,15 +298,6 @@ def down() -> None:
     """Stop the VPN container."""
     compose("down")
     click.echo("VPN stopped.")
-
-
-@main.command()
-@click.option("--no-speedtest", is_flag=True, help="Skip the speed test")
-def restart(no_speedtest: bool) -> None:
-    """Restart the VPN container."""
-    compose("restart")
-    click.echo("VPN restarted.")
-    finish_connection(speedtest=not no_speedtest)
 
 
 @main.command()
@@ -147,116 +313,28 @@ def logs(follow: bool, tail: str) -> None:
 
 
 @main.command()
-@click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
-def update(no_speedtest: bool) -> None:
-    """Pull latest gluetun image and recreate with the same configuration."""
-    require_api_key()
-    current = get_current_vpn()
-    if not current:
-        raise SystemExit("No running container. Use 'vpn up --provider <name>' first.")
-    protocol = choose_protocol(current.provider, requested=None, current=current.protocol)
-    _, protocol = validate_provider(current.provider, protocol)
-    run("docker", "pull", GLUETUN_IMAGE)
-    overrides = get_provider_env(current.provider, protocol)
-    overrides.update(current.location_overrides())
-    _log_env(overrides)
-    compose("up", "-d", "--force-recreate", env_overrides=overrides)
-    location = current.countries or ""
-    suffix = f" → {location}" if location else ""
-    click.echo(f"Updated and restarted ({current.provider}/{protocol}){suffix}.")
-    finish_connection(expected_country=location or None, speedtest=not no_speedtest)
-
-
-@main.command()
-def ip() -> None:
-    """Show the current public VPN IP."""
-    print_ip_status()
-
-
-@main.command()
-@click.option(
-    "-s",
-    "--size",
-    type=click.IntRange(min=1),
-    default=DEFAULT_SIZE_MB,
-    show_default=True,
-    help="Download size (MB)",
-)
-def speedtest(size: int) -> None:
-    """Measure download speed through the VPN."""
-    if not container_running():
-        raise SystemExit(f"Container '{CONTAINER}' is not running.")
-    click.echo(f"Downloading {size} MB...")
-    result = measure(size)
-    if not result:
-        raise SystemExit("Speed test failed.")
-    click.echo(format_result(result))
-
-
-@main.command()
+@click.option("-s", "--size", type=click.IntRange(min=1), default=DEFAULT_SIZE_MB,
+              show_default=True, help="Speed test download size (MB)")
 @click.option("--no-speedtest", is_flag=True, help="Skip the speed test")
-def status(no_speedtest: bool) -> None:
-    """Show container status, public IP, and speed test."""
+def status(size: int, no_speedtest: bool) -> None:
+    """Show container state, effective selection, public IP, and speed test."""
     state = container_status()
     if not state:
         click.echo(f"Container '{CONTAINER}' not found.")
         return
     click.echo(f"Container: {CONTAINER} ({state})")
-    finish_connection(speedtest=not no_speedtest)
-
-
-@main.command()
-def servers() -> None:
-    """List available servers for all active providers."""
-    by_provider = listable_servers(get_servers())
-    if not any(by_provider.values()):
-        raise SystemExit("No servers found. Is Docker running?")
-    print_servers_table(by_provider)
-
-
-@main.command()
-@click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
-def server(no_speedtest: bool) -> None:
-    """Interactively select a server and restart."""
-    require_api_key()
-    by_provider = listable_servers(get_servers())
-    if not any(by_provider.values()):
-        raise SystemExit("No servers found. Is Docker running?")
-
-    selection = select_server(by_provider)
-    if not selection:
-        raise SystemExit("No selection.")
-
-    picked_provider, picked_protocol, country, city = parse_server_selection(selection)
-    provider, protocol = validate_provider(
-        picked_provider or "", picked_protocol or DEFAULT_PROTOCOL
-    )
-
-    click.echo(f"Provider: {provider} ({protocol})")
-    click.echo(f"Location: {country}" + (f" / {city}" if city else ""))
-
-    compose("down")
-
-    overrides = get_provider_env(provider, protocol)
-    overrides["SERVER_COUNTRIES"] = country
-    if city:
-        overrides["SERVER_CITIES"] = city
-    _log_env(overrides)
-    compose("up", "-d", env_overrides=overrides)
-
-    location = f"{country}" + (f" / {city}" if city else "")
-    click.echo(f"VPN restarted ({provider}/{protocol}) → {location}")
-    finish_connection(expected_country=country, speedtest=not no_speedtest)
+    current = effective_selection()
+    if current and current.provider:
+        click.echo(f"Selection: {_print_target(current)}")
+        _warn_drift(current)
+    else:
+        click.echo("Selection: unknown — is gluetun's control server reachable?")
+    finish_connection(speedtest=not no_speedtest, size=size)
 
 
 @main.command()
 @click.option("--provider", help="Only bench this provider (default: the running one)")
-@click.option(
-    "--protocol",
-    type=click.Choice(sorted({p for cfg in PROVIDERS.values() for p in cfg}), case_sensitive=False),
-    default=None,
-    help="Only bench this protocol (default: the running one)",
-)
+@click.option("--protocol", type=PROTOCOL, default=None, help="Only bench this protocol")
 @click.option("--country", help="Only bench this country")
 @click.option(
     "-n",

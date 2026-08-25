@@ -2,7 +2,6 @@
 
 import os
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 
 from vpn.config import COMPOSE_FILE, CONTAINER, read_env_file
@@ -16,25 +15,6 @@ def env_lookup(name: str) -> str | None:
     if value is not None:
         return value
     return read_env_file(Path(COMPOSE_FILE).parent / ".env").get(name)
-
-
-@dataclass(frozen=True)
-class CurrentVpn:
-    """Configuration read back from the running container."""
-
-    provider: str
-    protocol: str | None = None
-    countries: str | None = None
-    cities: str | None = None
-
-    def location_overrides(self) -> dict[str, str]:
-        """SERVER_COUNTRIES/SERVER_CITIES overrides, omitting unset ones."""
-        overrides: dict[str, str] = {}
-        if self.countries:
-            overrides["SERVER_COUNTRIES"] = self.countries
-        if self.cities:
-            overrides["SERVER_CITIES"] = self.cities
-        return overrides
 
 
 def run(
@@ -81,6 +61,17 @@ def container_running() -> bool:
     return container_status() == "running"
 
 
+def container_env() -> dict[str, str]:
+    """The container's configured environment variables (its compose-time config)."""
+    out = inspect_container("{{range .Config.Env}}{{println .}}{{end}}")
+    env: dict[str, str] = {}
+    for line in (out or "").splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            env[key] = value
+    return env
+
+
 def compose(
     *args: str, env_overrides: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -94,25 +85,3 @@ def compose(
     merged = {**base, **(env_overrides or {})}
     cmd = ["docker", "compose", "-f", COMPOSE_FILE, *args]
     return run(*cmd, env={**os.environ, **merged})
-
-
-def get_current_vpn() -> CurrentVpn | None:
-    """Read provider, protocol and location from the running container, or None."""
-    out = inspect_container("{{range .Config.Env}}{{println .}}{{end}}")
-    if not out:
-        return None
-    values: dict[str, str | None] = {}
-    wanted = ("VPN_SERVICE_PROVIDER", "VPN_TYPE", "SERVER_COUNTRIES", "SERVER_CITIES")
-    for line in out.splitlines():
-        key, sep, value = line.partition("=")
-        if sep and key in wanted:
-            values[key] = value or None
-    provider = values.get("VPN_SERVICE_PROVIDER")
-    if not provider:
-        return None
-    return CurrentVpn(
-        provider=provider,
-        protocol=values.get("VPN_TYPE"),
-        countries=values.get("SERVER_COUNTRIES"),
-        cities=values.get("SERVER_CITIES"),
-    )

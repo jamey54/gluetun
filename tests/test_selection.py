@@ -1,12 +1,13 @@
-"""Tests for up/update preserving the running container's selection (H1)."""
+"""Tests for the consolidated CLI surface: up/connect hot-swaps, status drift."""
 
 from subprocess import CompletedProcess
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
 
-from vpn import cli, docker
-from vpn.speedtest import DEFAULT_SIZE_MB
+from vpn import cli
+from vpn.apply import Selection
 
 
 @pytest.fixture(autouse=True)
@@ -15,15 +16,50 @@ def creds(monkeypatch):
     monkeypatch.setenv("PROTONVPN_WIREGUARD_PRIVATE_KEY", "k")
     monkeypatch.setenv("PROTONVPN_WIREGUARD_ADDRESSES", "10.2.0.2/32")
     monkeypatch.setenv("HTTP_CONTROL_SERVER_API_KEY", "test-key")
-    monkeypatch.setattr("vpn.cli.print_ip_status", lambda expected_country=None: True)
-    monkeypatch.setattr("vpn.cli.measure", lambda size=DEFAULT_SIZE_MB: None)
+    monkeypatch.setattr("vpn.cli.print_ip_status", lambda **kwargs: True)
+    monkeypatch.setattr("vpn.cli.measure", lambda size=25: None)
+    monkeypatch.setattr("vpn.cli.current_exit_ip", lambda: None)
+
+
+@pytest.fixture()
+def verified(monkeypatch):
+    """Capture print_ip_status kwargs (stacks over the autouse stub)."""
+    seen: list[dict[str, Any]] = []
+
+    def record(**kwargs: Any) -> bool:
+        seen.append(kwargs)
+        return True
+
+    monkeypatch.setattr("vpn.cli.print_ip_status", record)
+    return seen
+
+
+RUNNING = Selection("surfshark", "wireguard", "Germany")
+
+
+def running(monkeypatch, sel: Selection | None = RUNNING):
+    monkeypatch.setattr(cli, "container_running", lambda: sel is not None)
+    monkeypatch.setattr(cli, "effective_selection", lambda: sel)
+
+
+@pytest.fixture()
+def swaps(monkeypatch):
+    seen: list[Selection] = []
+
+    def record(sel: Selection) -> None:
+        seen.append(sel)
+
+    monkeypatch.setattr("vpn.cli.apply_location", record)
+    return seen
 
 
 @pytest.fixture()
 def compose_calls(monkeypatch):
-    calls = []
+    calls: list[tuple[tuple[str, ...], dict[str, str] | None]] = []
 
-    def fake_compose(*args, env_overrides=None):
+    def fake_compose(
+        *args: str, env_overrides: dict[str, str] | None = None
+    ) -> CompletedProcess[str]:
         calls.append((args, env_overrides))
         return CompletedProcess((), 0)
 
@@ -31,102 +67,247 @@ def compose_calls(monkeypatch):
     return calls
 
 
-def invoke(args):
+def invoke(args: list[str]):
     return CliRunner().invoke(cli.main, args, catch_exceptions=False)
 
 
-def test_up_carries_location_and_protocol(monkeypatch, compose_calls):
-    monkeypatch.setenv("SURFSHARK_OPENVPN_USER", "u")
-    monkeypatch.setenv("SURFSHARK_OPENVPN_PASSWORD", "p")
-    current = docker.CurrentVpn(
-        provider="surfshark", protocol="openvpn", countries="Germany", cities="Berlin"
-    )
-    monkeypatch.setattr("vpn.cli.get_current_vpn", lambda: current)
+# ---------------------------------------------------------------------------
+# up
+# ---------------------------------------------------------------------------
+
+
+def test_up_cold_start_bakes_provider_env(monkeypatch, compose_calls, swaps):
+    running(monkeypatch, None)
     result = invoke(["up", "--provider", "surfshark"])
     assert result.exit_code == 0
-    _, overrides = compose_calls[0]
-    assert overrides["SERVER_COUNTRIES"] == "Germany"
-    assert overrides["SERVER_CITIES"] == "Berlin"
-    assert overrides["VPN_TYPE"] == "openvpn"
-
-
-def test_up_protocol_defaults_to_running_not_wireguard(monkeypatch, compose_calls):
-    monkeypatch.setenv("SURFSHARK_OPENVPN_USER", "u")
-    monkeypatch.setenv("SURFSHARK_OPENVPN_PASSWORD", "p")
-    current = docker.CurrentVpn(provider="surfshark", protocol="openvpn")
-    monkeypatch.setattr("vpn.cli.get_current_vpn", lambda: current)
-    invoke(["up", "--provider", "surfshark"])
-    _, overrides = compose_calls[0]
-    assert overrides["VPN_TYPE"] == "openvpn"
-    assert "SERVER_COUNTRIES" not in overrides  # nothing to preserve
-
-
-def test_up_fresh_install_no_location_no_container(monkeypatch, compose_calls):
-    monkeypatch.setattr("vpn.cli.get_current_vpn", lambda: None)
-    invoke(["up", "--provider", "surfshark"])
-    _, overrides = compose_calls[0]
-    assert overrides["VPN_TYPE"] == "wireguard"  # DEFAULT_PROTOCOL fallback
+    args, overrides = compose_calls[0]
+    assert "--force-recreate" not in args
+    assert overrides["VPN_SERVICE_PROVIDER"] == "surfshark"
+    assert overrides["VPN_TYPE"] == "wireguard"
     assert "SERVER_COUNTRIES" not in overrides
-    assert "SERVER_CITIES" not in overrides
+    assert swaps == []  # no location request -> no swap
 
 
-def test_update_recreates_with_full_selection(monkeypatch, compose_calls):
-    current = docker.CurrentVpn(provider="protonvpn", protocol="wireguard", countries="Netherlands")
-    monkeypatch.setattr("vpn.cli.get_current_vpn", lambda: current)
+def test_up_cold_start_requires_provider(monkeypatch, compose_calls, swaps):
+    running(monkeypatch, None)
+    result = invoke(["up"])
+    assert result.exit_code != 0
+    assert "--provider" in result.output
+    assert compose_calls == [] and swaps == []
+
+
+def test_up_cold_start_with_country_swaps_after_start(monkeypatch, compose_calls, swaps, verified):
+    running(monkeypatch, None)
+    result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
+    assert result.exit_code == 0
+    _, overrides = compose_calls[0]
+    assert "SERVER_COUNTRIES" not in overrides  # location applied at runtime instead
+    assert swaps == [Selection("protonvpn", "wireguard", "Japan")]
+    assert verified[0]["expected_country"] == "Japan"
+
+
+def test_up_running_no_flags_only_verifies(monkeypatch, compose_calls, swaps):
+    running(monkeypatch)
+    result = invoke(["up"])
+    assert result.exit_code == 0
+    assert compose_calls == [] and swaps == []
+
+
+def test_up_running_country_hot_swaps(monkeypatch, compose_calls, swaps, verified):
+    running(monkeypatch)
+    result = invoke(["up", "--country", "Japan"])
+    assert result.exit_code == 0
+    assert compose_calls == []
+    assert swaps == [Selection("surfshark", "wireguard", "Japan")]
+    assert "Swapped to" in result.output
+
+
+def test_up_running_same_target_short_circuits(monkeypatch, compose_calls, swaps):
+    running(monkeypatch)
+    result = invoke(["up", "--country", "Germany"])
+    assert result.exit_code == 0
+    assert swaps == []
+    assert "Already on" in result.output
+
+
+def test_up_provider_switch_resets_location(monkeypatch, compose_calls, swaps):
+    running(monkeypatch)
+    result = invoke(["up", "--provider", "protonvpn"])
+    assert result.exit_code == 0
+    assert swaps == [Selection("protonvpn", "wireguard", None)]
+
+
+def test_up_city_only_keeps_country(monkeypatch, compose_calls, swaps):
+    running(monkeypatch)
+    result = invoke(["up", "--city", "Munich"])
+    assert result.exit_code == 0
+    assert swaps == [Selection("surfshark", "wireguard", "Germany", "Munich")]
+
+
+def test_up_pull_pulls_image_and_recreates(monkeypatch, compose_calls, swaps):
+    running(monkeypatch)
     pulls: list[tuple[str, ...]] = []
 
-    def fake_pull(*a, **kw):
-        pulls.append(a)
+    def fake_pull(*args: str) -> CompletedProcess[str]:
+        pulls.append(args)
         return CompletedProcess((), 0)
 
     monkeypatch.setattr("vpn.cli.run", fake_pull)
-    result = invoke(["update"])
+    result = invoke(["up", "--pull"])
     assert result.exit_code == 0
-    args, overrides = compose_calls[0]
+    assert any("pull" in c for c in pulls[0])
+    args, _ = compose_calls[0]
     assert "--force-recreate" in args
-    assert overrides["SERVER_COUNTRIES"] == "Netherlands"
-    assert overrides["WIREGUARD_PRIVATE_KEY"] == "k"
-    assert any("pull" in c for c in pulls)
 
 
-def test_update_without_container_exits(monkeypatch, compose_calls):
-    monkeypatch.setattr("vpn.cli.get_current_vpn", lambda: None)
-    result = invoke(["update"])
-    assert result.exit_code != 0
-    assert "No running container" in result.output
-    assert compose_calls == []
-
-
-def test_up_preserved_protocol_without_creds_falls_back(monkeypatch, compose_calls):
-    # container runs openvpn but OpenVPN creds are gone -> fall back to wireguard
-    current = docker.CurrentVpn(provider="surfshark", protocol="openvpn")
-    monkeypatch.setattr("vpn.cli.get_current_vpn", lambda: current)
-    result = invoke(["up", "--provider", "surfshark"])
+def test_up_recreate_reverts_to_env_config(monkeypatch, compose_calls, swaps):
+    running(monkeypatch)
+    result = invoke(["up", "--recreate"])
     assert result.exit_code == 0
-    _, overrides = compose_calls[0]
-    assert overrides["VPN_TYPE"] == "wireguard"
+    args, _ = compose_calls[0]
+    assert "--force-recreate" in args
+    assert swaps == []
 
 
-def test_explicit_protocol_requires_its_own_creds(monkeypatch, compose_calls):
-    current = docker.CurrentVpn(provider="surfshark", protocol="wireguard")
-    monkeypatch.setattr("vpn.cli.get_current_vpn", lambda: current)
-    result = invoke(["up", "--provider", "surfshark", "--protocol", "openvpn"])
+def test_up_running_unreachable_control_server_exits(monkeypatch, compose_calls, swaps):
+    running(monkeypatch, None)
+    monkeypatch.setattr(cli, "container_running", lambda: True)
+    result = invoke(["up", "--country", "Japan"])
+    assert result.exit_code != 0
+    assert "control server" in result.output
+    assert swaps == [] and compose_calls == []
+
+
+def test_up_explicit_protocol_requires_its_own_creds(monkeypatch, compose_calls, swaps):
+    running(monkeypatch)
+    result = invoke(["up", "--protocol", "openvpn"])
     assert result.exit_code != 0
     assert "Missing env vars" in result.output
-    assert compose_calls == []  # never started
+    assert swaps == [] and compose_calls == []
 
 
-def test_up_fails_closed_without_api_key(monkeypatch, compose_calls):
+def test_up_fails_closed_without_api_key(monkeypatch, compose_calls, swaps):
+    running(monkeypatch, None)
     monkeypatch.delenv("HTTP_CONTROL_SERVER_API_KEY")
     monkeypatch.setattr("vpn.cli.env_lookup", lambda name: None)
     result = invoke(["up", "--provider", "surfshark"])
     assert result.exit_code != 0
     assert "HTTP_CONTROL_SERVER_API_KEY" in result.output
-    assert not compose_calls  # nothing was started
+    assert compose_calls == [] and swaps == []
 
 
-def test_server_fails_closed_without_api_key(monkeypatch, compose_calls):
-    monkeypatch.setattr("vpn.cli.env_lookup", lambda name: None)
-    result = invoke(["server"])
+# ---------------------------------------------------------------------------
+# connect
+# ---------------------------------------------------------------------------
+
+
+def test_connect_requires_running_container(monkeypatch):
+    running(monkeypatch, None)
+    result = invoke(["connect", "--country", "Japan"])
     assert result.exit_code != 0
-    assert not compose_calls
+    assert "not running" in result.output
+
+
+def test_connect_flags_swap(monkeypatch, swaps, verified):
+    running(monkeypatch)
+    result = invoke(["connect", "--country", "Japan", "--city", "Tokyo"])
+    assert result.exit_code == 0
+    assert swaps == [Selection("surfshark", "wireguard", "Japan", "Tokyo")]
+    assert "Swapped to" in result.output
+    assert verified[0]["exclude_ips"] is not None or verified[0]["expected_country"] == "Japan"
+
+
+def test_connect_already_on(monkeypatch, swaps):
+    running(monkeypatch)
+    result = invoke(["connect", "--country", "Germany"])
+    assert result.exit_code == 0
+    assert swaps == []
+    assert "Already on" in result.output
+
+
+def test_connect_picker_selection(monkeypatch, swaps):
+    running(monkeypatch)
+    _stub_server_rows(monkeypatch)
+    monkeypatch.setattr(cli, "select_server", lambda rows: "[surfshark/wireguard] Japan - Tokyo")
+    result = invoke(["connect"])
+    assert result.exit_code == 0
+    assert swaps == [Selection("surfshark", "wireguard", "Japan", "Tokyo")]
+
+
+def test_connect_cancelled_picker_exits(monkeypatch, swaps):
+    running(monkeypatch)
+    _stub_server_rows(monkeypatch)
+    monkeypatch.setattr(cli, "select_server", lambda rows: None)
+    result = invoke(["connect"])
+    assert result.exit_code != 0
+    assert "No selection." in result.output
+    assert swaps == []
+
+
+def test_connect_list_prints_table(monkeypatch, swaps):
+    _stub_server_rows(monkeypatch)
+    printed: list[Any] = []
+    monkeypatch.setattr("vpn.cli.print_servers_table", printed.append)
+    result = invoke(["connect", "--list"])
+    assert result.exit_code == 0
+    assert printed and printed[0]["surfshark"]
+    assert swaps == []
+
+
+def _stub_server_rows(monkeypatch) -> None:
+    data = {"surfshark": [{"country": "Japan", "city": "", "hostname": "jp1", "vpn": "wireguard"}]}
+    monkeypatch.setattr(cli, "get_servers", lambda: data)
+    monkeypatch.setattr(cli, "listable_servers", lambda d: d)
+
+
+# ---------------------------------------------------------------------------
+# status
+# ---------------------------------------------------------------------------
+
+
+def test_status_warns_on_drift(monkeypatch):
+    monkeypatch.setattr(cli, "container_status", lambda: "running")
+    monkeypatch.setattr(cli, "effective_selection", lambda: RUNNING)
+    monkeypatch.setattr(
+        "vpn.cli.container_env",
+        lambda: {
+            "VPN_SERVICE_PROVIDER": "surfshark",
+            "VPN_TYPE": "wireguard",
+            "SERVER_COUNTRIES": "France",
+        },
+    )
+    result = invoke(["status", "--no-speedtest"])
+    assert result.exit_code == 0
+    assert "surfshark/wireguard" in result.output and "Germany" in result.output
+    assert "Drift:" in result.output
+
+
+def test_status_no_drift_when_equal(monkeypatch):
+    monkeypatch.setattr(cli, "container_status", lambda: "running")
+    monkeypatch.setattr(cli, "effective_selection", lambda: RUNNING)
+    monkeypatch.setattr(
+        "vpn.cli.container_env",
+        lambda: {
+            "VPN_SERVICE_PROVIDER": "surfshark",
+            "VPN_TYPE": "wireguard",
+            "SERVER_COUNTRIES": "Germany",
+        },
+    )
+    result = invoke(["status", "--no-speedtest"])
+    assert result.exit_code == 0
+    assert "Drift:" not in result.output
+
+
+def test_status_unknown_when_control_server_down(monkeypatch):
+    monkeypatch.setattr(cli, "container_status", lambda: "running")
+    monkeypatch.setattr(cli, "effective_selection", lambda: None)
+    result = invoke(["status", "--no-speedtest"])
+    assert result.exit_code == 0
+    assert "unknown" in result.output
+
+
+def test_status_missing_container(monkeypatch):
+    monkeypatch.setattr(cli, "container_status", lambda: None)
+    result = invoke(["status"])
+    assert result.exit_code == 0
+    assert "not found" in result.output
