@@ -1,5 +1,6 @@
 """Tests for the benchmark engine: candidates, ranking, orchestration."""
 
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -340,6 +341,51 @@ def test_run_bench_interrupt_restores_partial_results(monkeypatch, happy_path):
     assert report.winner is None
     assert report.action == "Restored previous settings."
     assert any(args and args[0] is base for args, _ in happy_path.calls)
+
+
+def test_run_bench_reads_baseline_under_lock(monkeypatch, happy_path):
+    events: list[str] = []
+
+    @contextmanager
+    def track_lock():
+        events.append("lock")
+        yield
+        events.append("unlock")
+
+    monkeypatch.setattr(bench, "swap_lock", track_lock)
+
+    def fake_settings() -> dict[str, Any]:
+        events.append("read")
+        return baseline_doc()
+
+    monkeypatch.setattr(bench, "get_settings", fake_settings)
+    bench.run_bench(
+        [candidate("surfshark", "wireguard", "France", None, "fr")],
+        connect_winner=False, say=lambda *_: None,
+    )
+    assert events == ["lock", "read", "unlock"]
+
+
+def test_run_bench_interrupt_during_adoption_restores(monkeypatch, happy_path):
+    """Ctrl-C during the winner re-check must still restore the baseline."""
+    base = baseline_doc()
+    monkeypatch.setattr(bench, "get_settings", Recorder([base]))
+    calls = {"n": 0}
+
+    def fake_verify(sel: Any, prev_ip: str | None = None) -> Verification:
+        calls["n"] += 1
+        if calls["n"] < 3:  # screen + final succeed
+            return Verification(ok=True, ip="10.8.8.8")
+        raise KeyboardInterrupt()  # user aborts during the slow re-check
+
+    monkeypatch.setattr(bench, "verify", fake_verify)
+    report = bench.run_bench(
+        [candidate("surfshark", "wireguard", "France", None, "fr")],
+        say=lambda *_: None,
+    )
+    assert report.winner is not None
+    assert any(args and args[0] is base for args, _ in happy_path.calls)
+    assert "Interrupted" in report.action
 
 
 def test_run_bench_limit_caps_candidates(monkeypatch):

@@ -15,7 +15,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from vpn.apply import Selection, apply_location, restore_settings, verify
+from vpn.apply import Selection, apply_location, restore_settings, swap_lock, verify
 from vpn.control import ControlError, get_settings
 from vpn.ipinfo import current_exit_ip
 from vpn.latency import probe_hosts
@@ -150,7 +150,10 @@ def run_bench(
     say: Callable[[str], None] = click.echo,
 ) -> BenchReport:
     """Run all bench stages; connect the winner unless asked otherwise."""
-    report = BenchReport(baseline=get_settings())
+    # Baseline snapshot must be atomic with the swaps it will undo.
+    with swap_lock():
+        baseline = get_settings()
+    report = BenchReport(baseline=baseline)
     tested = candidates[:limit] if limit > 0 else candidates
     say(f"Benchmarking {len(tested)} locations "
         f"(screening top {min(top, len(tested))}, finals {FINALISTS}).")
@@ -247,6 +250,14 @@ def run_bench(
                 report.action = f"{verb} {winner.label}, but re-check failed ({check.reason})"
     except ControlError as exc:
         report.action += f" (restore/connect failed: {exc.message})"
+    except KeyboardInterrupt:
+        # Aborting mid re-check must still undo whatever the bench changed.
+        say("Interrupted.")
+        try:
+            restore_settings(report.baseline)
+            report.action = "Interrupted; restored previous settings."
+        except ControlError as exc:
+            report.action = f"Interrupted; restore failed ({exc.message})"
 
     report.results = results
     return report
