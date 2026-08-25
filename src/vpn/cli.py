@@ -34,11 +34,7 @@ from vpn.docker import (
     env_lookup,
     run,
 )
-from vpn.ipinfo import (
-    current_exit_ip,
-    print_ip_status,
-    set_prober,
-)
+from vpn.ipinfo import current_exit_ip, print_ip_status
 from vpn.picker import select_server
 from vpn.providers import (
     PROVIDERS,
@@ -190,25 +186,12 @@ def _warn_drift(current: Selection) -> None:
 # ---------------------------------------------------------------------------
 
 
-PROBER = click.Choice(["control", "docker"], case_sensitive=False)
-
-
 @click.group()
 @click.option("--debug", is_flag=True, envvar="VPN_DEBUG", help="Enable debug output")
-@click.option(
-    "--prober",
-    type=PROBER,
-    default="control",
-    envvar="VPN_PROBER",
-    show_default=True,
-    help="IP probing strategy: 'control' uses the control server (fast), "
-    "'docker' uses docker exec inside the container",
-)
-def main(debug: bool, prober: str) -> None:
+def main(debug: bool) -> None:
     """Gluetun VPN manager."""
     global DEBUG
     DEBUG = debug
-    set_prober(prober)
 
 
 @main.command()

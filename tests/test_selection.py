@@ -496,26 +496,3 @@ def test_update_fails_without_control_server(monkeypatch):
     result = invoke(["update"])
     assert result.exit_code != 0
     assert "Cannot reach control server" in result.output
-
-
-# ---------------------------------------------------------------------------
-# --prober flag
-# ---------------------------------------------------------------------------
-
-
-def test_prober_flag_sets_ipinfo_prober(monkeypatch):
-    from vpn import ipinfo
-
-    monkeypatch.setattr(cli, "container_status", lambda: None)
-    result = invoke(["--prober", "docker", "status"])
-    assert result.exit_code == 0
-    assert ipinfo._prober == "docker"
-
-
-def test_prober_default_is_control(monkeypatch):
-    from vpn import ipinfo
-
-    monkeypatch.setattr(cli, "container_status", lambda: None)
-    result = invoke(["status"])
-    assert result.exit_code == 0
-    assert ipinfo._prober == "control"

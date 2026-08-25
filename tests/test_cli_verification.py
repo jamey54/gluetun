@@ -39,7 +39,6 @@ def offline_real_ip(monkeypatch):
     """Host bare-IP fetch fails fast (offline stub); cache reset between tests."""
     monkeypatch.delenv("VPN_REAL_IP", raising=False)
     monkeypatch.setattr(ipinfo, "_real_ip_cache", None)
-    monkeypatch.setattr(ipinfo, "_prober", "docker")
 
     def offline(url, timeout=None):
         raise OSError("offline")
