@@ -262,14 +262,59 @@ def test_run_bench_chains_previous_exit_ip(monkeypatch):
     assert seen_prev[2] == "10.77.0.2"
 
 
-def test_run_bench_winner_adoption_reports_failed_recheck(monkeypatch):
+def test_run_bench_winner_adoption_stayed_passes_no_prev_ip(monkeypatch, happy_path):
+    """Re-checking the just-tested winner must not exclude its own exit IP."""
+    seen: list[tuple[str | None, str | None]] = []  # (requested country, prev_ip)
+
+    def fake_verify(sel: Any, prev_ip: str | None = None) -> Verification:
+        seen.append((sel.country, prev_ip))
+        return Verification(ok=True, ip=f"10.{len(seen)}.0.1")
+
+    monkeypatch.setattr(bench, "verify", fake_verify)
+    report = bench.run_bench(
+        [candidate("surfshark", "wireguard", "France", None, "fr")],
+        say=lambda *_: None,
+    )
+    assert report.action.startswith("Connected to winner")
+    # screen + final chain prev IPs; the stayed-on adoption call must not
+    assert [prev for _, prev in seen] == [None, "10.1.0.1", None]
+    assert seen[-1][0] == "France"
+
+
+def test_run_bench_winner_adoption_after_swap_excludes_prev_exit(monkeypatch, happy_path):
+    """When adoption hot-swaps back to the winner, its old exit stays excluded."""
+    probes = {"fr": 0.05, "es": 0.10}
+    monkeypatch.setattr(bench, "probe_hosts", Recorder([probes]))
+    monkeypatch.setattr(  # scans tie so finals keep input order (Spain, France);
+        bench, "measure",  # Spain 45 beats France 30 -> winner differs from last tested
+        Recorder([{"mbits": m, "seconds": 1.0, "mbytes": 10.0}
+                  for m in (10.0, 10.0, 45.0, 30.0)]),
+    )
+    seen: list[tuple[str | None, str | None]] = []
+
+    def fake_verify(sel: Any, prev_ip: str | None = None) -> Verification:
+        seen.append((sel.country, prev_ip))
+        return Verification(ok=True, ip=f"10.{len(seen)}.0.1")
+
+    monkeypatch.setattr(bench, "verify", fake_verify)
+    candidates = [
+        candidate("surfshark", "wireguard", "Spain", None, "es"),
+        candidate("surfshark", "wireguard", "France", None, "fr"),
+    ]
+    report = bench.run_bench(candidates, say=lambda *_: None)
+    assert report.action.startswith("Connected to winner")
+    # France's final ran last, so prev_ip is France's exit when swapping to Spain
+    assert seen[-1] == ("Spain", "10.4.0.1")
+
+
+def test_run_bench_winner_adoption_reports_failed_recheck(monkeypatch, happy_path):
     calls = {"n": 0}
 
     def fake_verify(sel: Any, prev_ip: str | None = None) -> Verification:
         calls["n"] += 1
         if calls["n"] < 3:  # screen + final succeed; adoption re-check fails
-            return Verification(ok=True, ip="1.2.3.4")
-        return Verification(ok=False, reason="no reconnect")
+            return Verification(ok=True, ip="10.9.9.9")
+        return Verification(ok=False, reason="no public IP")
 
     monkeypatch.setattr(bench, "verify", fake_verify)
     report = bench.run_bench(
@@ -277,7 +322,7 @@ def test_run_bench_winner_adoption_reports_failed_recheck(monkeypatch):
         say=lambda *_: None,
     )
     assert report.action.startswith("Stayed on")
-    assert "no reconnect" in report.action
+    assert "no public IP" in report.action
 
 
 def test_run_bench_interrupt_restores_partial_results(monkeypatch, happy_path):

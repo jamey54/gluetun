@@ -208,21 +208,51 @@ def test_connect_requires_running_container(monkeypatch):
     assert "not running" in result.output
 
 
-def test_connect_flags_swap(monkeypatch, swaps, verified):
+def test_connect_swap_excludes_previous_exit(monkeypatch, swaps, verified):
     running(monkeypatch)
-    result = invoke(["connect", "--country", "Japan", "--city", "Tokyo"])
+    monkeypatch.setattr(cli, "current_exit_ip", lambda: "9.9.9.9")
+    result = invoke(["connect", "--country", "Japan"])
     assert result.exit_code == 0
-    assert swaps == [Selection("surfshark", "wireguard", "Japan", "Tokyo")]
-    assert "Swapped to" in result.output
-    assert verified[0]["exclude_ips"] is not None or verified[0]["expected_country"] == "Japan"
+    assert swaps == [Selection("surfshark", "wireguard", "Japan")]
+    assert verified[0]["expected_country"] == "Japan"
+    assert verified[0]["exclude_ips"] == {"9.9.9.9"}
 
 
-def test_connect_already_on(monkeypatch, swaps):
+def test_connect_already_on_keeps_current_exit_valid(monkeypatch, swaps, verified):
+    """No swap happened: the tunnel's current IP must not be excluded."""
     running(monkeypatch)
+    monkeypatch.setattr(cli, "current_exit_ip", lambda: "1.1.1.1")
     result = invoke(["connect", "--country", "Germany"])
     assert result.exit_code == 0
     assert swaps == []
     assert "Already on" in result.output
+    assert verified[0]["exclude_ips"] is None
+
+
+def test_up_running_swap_excludes_previous_exit(monkeypatch, compose_calls, swaps, verified):
+    running(monkeypatch)
+    monkeypatch.setattr(cli, "current_exit_ip", lambda: "8.8.8.8")
+    result = invoke(["up", "--country", "Japan"])
+    assert result.exit_code == 0
+    assert swaps == [Selection("surfshark", "wireguard", "Japan")]
+    assert verified[0]["exclude_ips"] == {"8.8.8.8"}
+
+
+def test_up_cold_start_has_no_previous_exit_to_exclude(
+    monkeypatch, compose_calls, swaps, verified
+):
+    calls: list[str] = []
+
+    def probe() -> str | None:
+        calls.append("probe")
+        return "7.7.7.7"
+
+    monkeypatch.setattr(cli, "current_exit_ip", probe)
+    running(monkeypatch, None)
+    result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
+    assert result.exit_code == 0
+    assert calls == []  # nothing to exclude before a fresh start
+    assert verified[0]["exclude_ips"] is None
 
 
 def test_connect_picker_selection(monkeypatch, swaps):

@@ -221,6 +221,7 @@ def up(
 
     swapped = False
     target = Selection("", "")
+    prev_ip: str | None = None
     if created:
         name = provider or (current.provider if current else None)
         if not name:
@@ -233,6 +234,9 @@ def up(
         click.echo(f"VPN {'recreated' if recreate else 'started'} ({name}/{proto}).")
 
     if requested:
+        if not created:
+            # A hot-swap on a live tunnel must move the exit off this IP.
+            prev_ip = current_exit_ip()
         base = current or Selection("", "")
         target, swapped = _apply_request(provider, protocol, country, city, base)
         click.echo(f"{'Swapped to' if swapped else 'Already on'} {_print_target(target)}.")
@@ -242,6 +246,7 @@ def up(
     finish_connection(
         expected_country=target.country if (swapped or (requested and not recreate)) else None,
         speedtest=not no_speedtest,
+        exclude_ips={prev_ip} if (prev_ip and swapped) else None,
     )
 
 
@@ -289,7 +294,9 @@ def connect(
     finish_connection(
         expected_country=target.country,
         speedtest=not no_speedtest,
-        exclude_ips={prev_ip} if prev_ip else None,
+        # Only exclude when we actually moved; when already on target the
+        # tunnel still exits via prev_ip itself, which must count as success.
+        exclude_ips={prev_ip} if (prev_ip and swapped) else None,
     )
 
 

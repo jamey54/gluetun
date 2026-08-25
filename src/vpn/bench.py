@@ -237,7 +237,9 @@ def run_bench(
             if current != winner:
                 apply_location(winner.selection)
                 did_swap = True
-            check = verify(winner.selection, prev_ip)
+            # Exclude the pre-swap exit only when we actually moved; otherwise
+            # the tunnel still exits via the winner itself, which must count.
+            check = verify(winner.selection, prev_ip if did_swap else None)
             verb = "Swapped to" if did_swap else "Stayed on"
             if check.ok:
                 report.action = f"Connected to winner: {winner.label}"
