@@ -3,20 +3,17 @@
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
 
-from vpn.config import CACHE_TTL
+from vpn.config import CACHE_DIR, CACHE_FILE, CACHE_TTL
 from vpn.docker import GLUETUN_IMAGE, run
 from vpn.providers import DEFAULT_PROTOCOL, get_active_providers
 from vpn.textutil import fold
 
 SERVER_SEP = " - "
 CACHE_VERSION = 3
-CACHE_DIR = Path.home() / ".cache" / "gluetun"
-CACHE_FILE = CACHE_DIR / "servers.json"
 
 
 def parse_server_selection(selection: str) -> tuple[str | None, str | None, str, str | None]:

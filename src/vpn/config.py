@@ -7,6 +7,10 @@ from pathlib import Path
 CONTAINER: str = os.getenv("GLUETUN_CONTAINER", "gluetun")
 CACHE_TTL: int = int(os.getenv("GLUETUN_CACHE_TTL", "3600"))
 
+CACHE_DIR = Path.home() / ".cache" / "gluetun"
+CACHE_FILE = CACHE_DIR / "servers.json"
+LOCK_FILE = CACHE_DIR / "settings.lock"
+
 
 def _resolve_compose_file() -> str:
     """Locate vpn.yml: env override, then cwd, then the packaged copy."""
