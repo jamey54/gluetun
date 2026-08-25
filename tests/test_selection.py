@@ -321,39 +321,6 @@ def _stub_server_rows(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_status_warns_on_drift(monkeypatch):
-    monkeypatch.setattr(cli, "container_status", lambda: "running")
-    monkeypatch.setattr(cli, "effective_selection", lambda: RUNNING)
-    monkeypatch.setattr(
-        "vpn.cli.container_env",
-        lambda: {
-            "VPN_SERVICE_PROVIDER": "surfshark",
-            "VPN_TYPE": "wireguard",
-            "SERVER_COUNTRIES": "France",
-        },
-    )
-    result = invoke(["status", "--no-speedtest"])
-    assert result.exit_code == 0
-    assert "surfshark/wireguard" in result.output and "Germany" in result.output
-    assert "Drift:" in result.output
-
-
-def test_status_no_drift_when_equal(monkeypatch):
-    monkeypatch.setattr(cli, "container_status", lambda: "running")
-    monkeypatch.setattr(cli, "effective_selection", lambda: RUNNING)
-    monkeypatch.setattr(
-        "vpn.cli.container_env",
-        lambda: {
-            "VPN_SERVICE_PROVIDER": "surfshark",
-            "VPN_TYPE": "wireguard",
-            "SERVER_COUNTRIES": "Germany",
-        },
-    )
-    result = invoke(["status", "--no-speedtest"])
-    assert result.exit_code == 0
-    assert "Drift:" not in result.output
-
-
 def test_status_unknown_when_control_server_down(monkeypatch):
     monkeypatch.setattr(cli, "container_status", lambda: "running")
     monkeypatch.setattr(cli, "effective_selection", lambda: None)
@@ -372,7 +339,6 @@ def test_status_missing_container(monkeypatch):
 def test_status_shows_vpn_and_dns(monkeypatch):
     monkeypatch.setattr(cli, "container_status", lambda: "running")
     monkeypatch.setattr(cli, "effective_selection", lambda: RUNNING)
-    monkeypatch.setattr(cli, "container_env", lambda: {})
     monkeypatch.setattr("vpn.control.get_vpn_status", lambda: "running")
     monkeypatch.setattr("vpn.control.get_dns_status", lambda: "running")
     monkeypatch.setattr("vpn.control.get_port_forward", lambda: 5914)
@@ -391,7 +357,6 @@ def test_status_hides_dns_and_port_when_unreachable(monkeypatch):
 
     monkeypatch.setattr(cli, "container_status", lambda: "running")
     monkeypatch.setattr(cli, "effective_selection", lambda: RUNNING)
-    monkeypatch.setattr(cli, "container_env", lambda: {})
     monkeypatch.setattr("vpn.control.get_vpn_status", _control_error_noarg)
     monkeypatch.setattr("vpn.control.get_dns_status", _control_error_noarg)
     monkeypatch.setattr("vpn.control.get_port_forward", _control_error_noarg)

@@ -39,6 +39,7 @@ def offline_real_ip(monkeypatch):
     """Host bare-IP fetch fails fast (offline stub); cache reset between tests."""
     monkeypatch.delenv("VPN_REAL_IP", raising=False)
     monkeypatch.setattr(ipinfo, "_real_ip_cache", None)
+    monkeypatch.setattr(ipinfo, "_real_ip_info", None)
 
     def offline(url, timeout=None):
         raise OSError("offline")
@@ -93,7 +94,7 @@ def test_real_ip_fetched_from_host_and_cached(monkeypatch):
             return None
 
         def read(self):
-            return b'{"ip": "198.51.100.9"}'
+            return b'{"ip": "198.51.100.9", "country": "US", "city": "Newark"}'
 
     calls = []
 
@@ -103,6 +104,7 @@ def test_real_ip_fetched_from_host_and_cached(monkeypatch):
 
     monkeypatch.setattr(ipinfo, "urlopen", fake_urlopen)
     monkeypatch.setattr(ipinfo, "_real_ip_cache", None)
+    monkeypatch.setattr(ipinfo, "_real_ip_info", None)
     assert ipinfo.real_ip() == "198.51.100.9"
     assert ipinfo.real_ip() == "198.51.100.9"
     assert len(calls) == 1  # cached after first fetch
@@ -115,6 +117,7 @@ def test_real_ip_unreachable_is_none(monkeypatch):
 
     monkeypatch.setattr(ipinfo, "urlopen", boom)
     monkeypatch.setattr(ipinfo, "_real_ip_cache", None)
+    monkeypatch.setattr(ipinfo, "_real_ip_info", None)
     assert ipinfo.real_ip() is None
 
 

@@ -28,7 +28,6 @@ from vpn.config import (
 from vpn.docker import (
     GLUETUN_IMAGE,
     compose,
-    container_env,
     container_running,
     container_status,
     env_lookup,
@@ -160,25 +159,6 @@ def _apply_request(
         return target, False
     apply_location(target)
     return target, True
-
-
-def _warn_drift(current: Selection) -> None:
-    """Warn when the runtime selection diverges from the compose/.env config."""
-    env = container_env()
-    configured = Selection(
-        env.get("VPN_SERVICE_PROVIDER", ""),
-        env.get("VPN_TYPE", ""),
-        env.get("SERVER_COUNTRIES") or None,
-        env.get("SERVER_CITIES") or None,
-    )
-    if configured.provider and configured.key != current.key:
-        click.echo(
-            click.style(
-                "Drift: runtime selection differs from the compose/.env config — "
-                "recreating the container reverts it.",
-                fg="yellow",
-            )
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +349,6 @@ def status(size: int, no_speedtest: bool) -> None:
     current = effective_selection()
     if current and current.provider:
         click.echo(f"Selection: {_print_target(current)}")
-        _warn_drift(current)
     else:
         click.echo("Selection: unknown — is gluetun's control server reachable?")
     try:

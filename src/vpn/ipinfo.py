@@ -29,6 +29,7 @@ from vpn.docker import run
 from vpn.textutil import fold
 
 _real_ip_cache: str | None = None
+_real_ip_info: dict[str, object] | None = None
 
 
 @dataclass
@@ -55,14 +56,34 @@ def real_ip() -> str | None:
         return override
     if _real_ip_cache is not None:
         return _real_ip_cache
+    _fetch_real_ip_info()
+    return _real_ip_cache
+
+
+def real_ip_info() -> dict[str, object] | None:
+    """Full ipinfo.io response for the host's bare IP. None if unreachable."""
+    if _real_ip_info is not None:
+        return _real_ip_info
+    _fetch_real_ip_info()
+    return _real_ip_info
+
+
+def _fetch_real_ip_info() -> None:
+    """Fetch and cache the full host IP response from ipinfo.io."""
+    global _real_ip_cache, _real_ip_info
+    override = os.getenv("VPN_REAL_IP")
+    if override:
+        _real_ip_cache = override
+        return
     try:
         with urlopen(IP_INFO_URL, timeout=REAL_IP_TIMEOUT_S) as response:
             data = json.loads(response.read().decode(errors="replace"))
-        ip = str(data.get("ip") or "")
-        _real_ip_cache = ip or None
+        if isinstance(data, dict) and data:
+            _real_ip_info = data
+            ip = str(data.get("ip") or "")
+            _real_ip_cache = ip or None
     except (OSError, json.JSONDecodeError):
-        return None
-    return _real_ip_cache
+        pass
 
 
 def _same_country(a: str, b: str) -> bool:
@@ -135,15 +156,23 @@ def fetch_ip_info(
     return IpOutcome(last_info=last_info)
 
 
+def _fmt_row(label: str, info: dict[str, object], color: str | None = None) -> str:
+    """Format one row of IP info: IP, location, org."""
+    ip = str(info.get("ip", "?"))
+    country = resolve_country(str(info.get("country", "?")))
+    location = f"{info.get('city', '?')}, {country}"
+    org = str(info.get("org", "?"))
+    text = f"{label:<10} {ip:<20} {location:<25} {org}"
+    if color:
+        return click.style(text, fg=color)
+    return text
+
+
 def print_ip_status(
     expected_country: str | None = None,
     exclude_ips: Iterable[str] | None = None,
 ) -> bool:
-    """Fetch and display IP info with a tri-state verdict.
-
-    Green: VPN exit in the requested country. Yellow: real VPN exit but wrong
-    country (virtual location / geo mismatch) — warned, still connected.
-    Red: leak (bare connection) or unreachable.
+    """Fetch and display VPN and host IP info side by side with a tri-state verdict.
 
     Returns True only when traffic verifiably exits through the VPN.
     """
@@ -162,17 +191,19 @@ def print_ip_status(
         return False
 
     info = outcome.result.info
-    ip = str(info.get("ip", "?"))
-    country = resolve_country(str(info.get("country", "?")))
-    location = f"{info.get('city', '?')}, {country}"
+    host = real_ip_info()
+
+    vpn_color: str | None = None
     if expected_country and not outcome.result.matched:
-        location += f" (requested {expected_country})"
-        location = click.style(location, fg="yellow")
+        vpn_color = "yellow"
     elif expected_country:
-        location = click.style(location, fg="green")
-    click.echo(f"IP:       {ip}")
-    click.echo(f"Location: {location}")
-    click.echo(f"Org:      {info.get('org', '?')}")
+        vpn_color = "green"
+
+    header = f"{'':10} {'IP':<20} {'Location':<25} {'Org'}"
+    click.echo(header)
+    click.echo(_fmt_row("VPN", info, vpn_color))
+    if host:
+        click.echo(_fmt_row("Bare IP", host, "bright_black"))
     return True
 
 
