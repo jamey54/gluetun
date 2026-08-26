@@ -354,12 +354,12 @@ def status(size: int, no_speedtest: bool) -> None:
 
     try:
         vpn = control.get_vpn_status()
-        _kv("Tunnel", vpn, "green" if vpn == "running" else "red")
+        _kv("Tunnel", vpn, "red" if vpn == "stopped" else None)
     except control.ControlError:
         pass
     try:
         dns = control.get_dns_status()
-        _kv("DNS", dns, "green" if dns == "running" else "red")
+        _kv("DNS", dns, "red" if dns == "stopped" else None)
     except control.ControlError:
         pass
     try:
