@@ -116,8 +116,8 @@ def _require_selection() -> Selection:
 
 
 def _print_target(sel: Selection) -> str:
-    location = (sel.country or "") + (f" / {sel.city}" if sel.city else "")
-    return f"{sel.provider}/{sel.protocol}" + (f" → {location}" if location else "")
+    loc = ", ".join(filter(None, [sel.city, sel.country]))
+    return f"{sel.provider}/{sel.protocol}" + (f" → {loc}" if loc else "")
 
 
 def _apply_request(

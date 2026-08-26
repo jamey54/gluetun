@@ -176,25 +176,35 @@ def print_ip_status(
 
     Returns True only when traffic verifiably exits through the VPN.
     """
-    outcome = fetch_ip_info(expected_country=expected_country, exclude_ips=exclude_ips)
+    bare = real_ip()
+    outcome = fetch_ip_info(
+        expected_country=expected_country,
+        exclude_ips=exclude_ips,
+    )
+    host = real_ip_info()
+
     if outcome.result is None:
         last = outcome.last_info or {}
-        bare = real_ip()
-        if bare and str(last.get("ip") or "") == bare:
-            click.echo(
-                click.style(
-                    "LEAK: traffic exits via your bare connection — the VPN is not up.", fg="red"
-                )
-            )
+        last_ip = str(last.get("ip") or "")
+        if bare and last_ip == bare:
+            header = f"{'':10} {'IP':<20} {'Location':<25} {'Org'}"
+            click.echo(header)
+            click.echo(_fmt_row("VPN", last, "red"))
+            if host:
+                click.echo(_fmt_row("Bare IP", host, "bright_black"))
+            click.echo(click.style("LEAK: VPN exit matches your bare connection", fg="red"))
         else:
             click.echo("Could not fetch public IP.")
         return False
 
     info = outcome.result.info
-    host = real_ip_info()
+    vpn_ip = str(info.get("ip") or "")
 
+    # Determine VPN row color
     vpn_color: str | None = None
-    if expected_country and not outcome.result.matched:
+    if bare and vpn_ip == bare:
+        vpn_color = "red"
+    elif expected_country and not outcome.result.matched:
         vpn_color = "yellow"
     elif expected_country:
         vpn_color = "green"
@@ -204,7 +214,9 @@ def print_ip_status(
     click.echo(_fmt_row("VPN", info, vpn_color))
     if host:
         click.echo(_fmt_row("Bare IP", host, "bright_black"))
-    return True
+    if bare and vpn_ip == bare:
+        click.echo(click.style("LEAK: VPN exit matches your bare connection", fg="red"))
+    return vpn_ip != bare if bare else True
 
 
 def current_exit_ip(retries: int = CURRENT_EXIT_IP_RETRIES) -> str | None:
