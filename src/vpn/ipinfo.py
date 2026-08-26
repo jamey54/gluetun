@@ -206,7 +206,7 @@ def print_ip_status(
         vpn_color = "red"
     elif expected_country and not outcome.result.matched:
         vpn_color = "yellow"
-    elif expected_country:
+    else:
         vpn_color = "green"
 
     header = f"{'':10} {'IP':<20} {'Location':<25} {'Org'}"
