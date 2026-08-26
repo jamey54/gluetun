@@ -324,6 +324,15 @@ def logs(follow: bool, tail: str) -> None:
     compose(*args)
 
 
+def _kv(label: str, value: str, color: str | None = None) -> None:
+    """Print an indented key-value line with a bold label."""
+    text = f"  {label:<12}{value}"
+    if color:
+        click.echo(click.style(text, fg=color))
+    else:
+        click.echo(text)
+
+
 @main.command()
 @click.option(
     "-s",
@@ -340,28 +349,39 @@ def status(size: int, no_speedtest: bool) -> None:
     if not state:
         click.echo(f"Container '{CONTAINER}' not found.")
         return
-    click.echo(f"Container: {CONTAINER} ({state})")
+
+    _kv("Container", f"{CONTAINER} ({state})")
+
     try:
         vpn = control.get_vpn_status()
-        click.echo(f"VPN:      {vpn}")
+        _kv("Tunnel", vpn, "green" if vpn == "running" else "red")
     except control.ControlError:
         pass
-    current = effective_selection()
-    if current and current.provider:
-        click.echo(f"Selection: {_print_target(current)}")
-    else:
-        click.echo("Selection: unknown — is gluetun's control server reachable?")
     try:
         dns = control.get_dns_status()
-        click.echo(f"DNS:      {dns}")
+        _kv("DNS", dns, "green" if dns == "running" else "red")
     except control.ControlError:
         pass
     try:
         port = control.get_port_forward()
         if port:
-            click.echo(f"Port fwd: {port}")
+            _kv("Port fwd", str(port))
     except control.ControlError:
         pass
+
+    current = effective_selection()
+    if current and current.provider:
+        click.echo()
+        _kv("Provider", current.provider)
+        _kv("Protocol", current.protocol or "?")
+        if current.country:
+            loc = ", ".join(filter(None, [current.city, current.country]))
+            _kv("Location", loc)
+    else:
+        click.echo()
+        _kv("Provider", "unknown — is gluetun's control server reachable?")
+
+    click.echo()
     finish_connection(speedtest=not no_speedtest, size=size)
 
 

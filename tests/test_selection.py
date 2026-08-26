@@ -344,9 +344,11 @@ def test_status_shows_vpn_and_dns(monkeypatch):
     monkeypatch.setattr("vpn.control.get_port_forward", lambda: 5914)
     result = invoke(["status", "--no-speedtest"])
     assert result.exit_code == 0
-    assert "VPN:      running" in result.output
-    assert "DNS:      running" in result.output
-    assert "Port fwd: 5914" in result.output
+    assert "Tunnel      running" in result.output
+    assert "DNS         running" in result.output
+    assert "Port fwd    5914" in result.output
+    assert "Provider    surfshark" in result.output
+    assert "Protocol    wireguard" in result.output
 
 
 def test_status_hides_dns_and_port_when_unreachable(monkeypatch):

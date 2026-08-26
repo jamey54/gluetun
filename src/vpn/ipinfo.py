@@ -156,16 +156,34 @@ def fetch_ip_info(
     return IpOutcome(last_info=last_info)
 
 
-def _fmt_row(label: str, info: dict[str, object], color: str | None = None) -> str:
+def _fmt_row(
+    label: str,
+    info: dict[str, object],
+    color: str | None = None,
+    marker: str = " ",
+) -> str:
     """Format one row of IP info: IP, location, org."""
     ip = str(info.get("ip", "?"))
     country = resolve_country(str(info.get("country", "?")))
     location = f"{info.get('city', '?')}, {country}"
     org = str(info.get("org", "?"))
-    text = f"{label:<10} {ip:<20} {location:<25} {org}"
+    text = f"  {marker} {ip:<20} {location:<25} {org}"
     if color:
         return click.style(text, fg=color)
     return text
+
+
+def _fmt_table(
+    vpn_info: dict[str, object],
+    vpn_color: str | None,
+    bare_info: dict[str, object] | None,
+) -> None:
+    """Print the IP comparison table."""
+    header = click.style(f"  {' ':3} {'IP':<20} {'Location':<25} {'Org'}", bold=True)
+    click.echo(header)
+    click.echo(_fmt_row("VPN", vpn_info, vpn_color, marker="▸"))
+    if bare_info:
+        click.echo(_fmt_row("Bare", bare_info, "bright_black"))
 
 
 def print_ip_status(
@@ -187,12 +205,8 @@ def print_ip_status(
         last = outcome.last_info or {}
         last_ip = str(last.get("ip") or "")
         if bare and last_ip == bare:
-            header = f"{'':10} {'IP':<20} {'Location':<25} {'Org'}"
-            click.echo(header)
-            click.echo(_fmt_row("VPN", last, "red"))
-            if host:
-                click.echo(_fmt_row("Bare IP", host, "bright_black"))
-            click.echo(click.style("LEAK: VPN exit matches your bare connection", fg="red"))
+            _fmt_table(last, "red", host)
+            click.echo(click.style("  LEAK: VPN exit matches your bare connection", fg="red"))
         else:
             click.echo("Could not fetch public IP.")
         return False
@@ -200,8 +214,6 @@ def print_ip_status(
     info = outcome.result.info
     vpn_ip = str(info.get("ip") or "")
 
-    # Determine VPN row color
-    vpn_color: str | None = None
     if bare and vpn_ip == bare:
         vpn_color = "red"
     elif expected_country and not outcome.result.matched:
@@ -209,13 +221,9 @@ def print_ip_status(
     else:
         vpn_color = "green"
 
-    header = f"{'':10} {'IP':<20} {'Location':<25} {'Org'}"
-    click.echo(header)
-    click.echo(_fmt_row("VPN", info, vpn_color))
-    if host:
-        click.echo(_fmt_row("Bare IP", host, "bright_black"))
+    _fmt_table(info, vpn_color, host)
     if bare and vpn_ip == bare:
-        click.echo(click.style("LEAK: VPN exit matches your bare connection", fg="red"))
+        click.echo(click.style("  LEAK: VPN exit matches your bare connection", fg="red"))
     return vpn_ip != bare if bare else True
 
 
