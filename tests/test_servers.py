@@ -1,6 +1,7 @@
 """Tests for server fetching, caching, parsing, and display."""
 
 import json
+import subprocess
 import time
 
 import pytest
@@ -17,6 +18,11 @@ from vpn.servers import (
     sorted_server_rows,
 )
 from vpn.textutil import strip_accents
+
+
+def _fake_run(stdout: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess([], 0, stdout, "")
+
 
 SAMPLE_MD = """\
 ## Surfshark servers
@@ -213,16 +219,47 @@ def test_get_servers_uses_cache(monkeypatch):
 
 def test_get_servers_does_not_cache_all_empty(monkeypatch):
     monkeypatch.setattr(servers, "_read_cache", lambda: None)
-    monkeypatch.setattr(servers, "_fetch_servers", lambda provider: [])
+    monkeypatch.setattr(servers, "_fetch_all_servers", lambda providers: {})
+    monkeypatch.setattr(
+        servers,
+        "get_active_providers",
+        lambda: {("surfshark", "wireguard")},
+    )
     written = {}
     monkeypatch.setattr(servers, "_write_cache", lambda data: written.update(data))
     assert servers.get_servers() == {}
     assert written == {}
 
 
-def test_get_servers_fetches_all_providers_in_parallel(cache_path, monkeypatch):
+def test_get_servers_fetches_all_providers_in_one_boot(cache_path, monkeypatch):
     monkeypatch.setattr(servers, "_read_cache", lambda: None)
-    seen = []
+    seen: list[list[str]] = []
+
+    def fake_fetch_all(providers):
+        seen.append(providers)
+        return {
+            p: [{"country": p.upper(), "city": "X", "hostname": "", "vpn": "wireguard"}]
+            for p in providers
+        }
+
+    monkeypatch.setattr(servers, "_fetch_all_servers", fake_fetch_all)
+    monkeypatch.setattr(servers, "_fetch_servers", lambda provider: [])
+    monkeypatch.setattr(
+        servers,
+        "get_active_providers",
+        lambda: {("surfshark", "wireguard"), ("protonvpn", "wireguard")},
+    )
+    by_provider = servers.get_servers()
+    assert seen == [["protonvpn", "surfshark"]]  # single boot, sorted providers
+    assert set(by_provider) == {"surfshark", "protonvpn"}
+    assert by_provider["surfshark"][0]["country"] == "SURFSHARK"
+    assert cache_path.exists()  # result cached
+
+
+def test_get_servers_falls_back_to_per_provider_fetch(cache_path, monkeypatch):
+    monkeypatch.setattr(servers, "_read_cache", lambda: None)
+    monkeypatch.setattr(servers, "_fetch_all_servers", lambda providers: None)
+    seen: list[str] = []
 
     def fake_fetch(provider):
         seen.append(provider)
@@ -237,8 +274,51 @@ def test_get_servers_fetches_all_providers_in_parallel(cache_path, monkeypatch):
     by_provider = servers.get_servers()
     assert sorted(seen) == ["protonvpn", "surfshark"]
     assert set(by_provider) == {"surfshark", "protonvpn"}
-    assert by_provider["surfshark"][0]["country"] == "SURFSHARK"
-    assert cache_path.exists()  # result cached
+    assert cache_path.exists()
+
+
+def test_fetch_all_servers_partitions_combined_stdout(monkeypatch):
+    combined = (
+        f"{servers._PROVIDER_MARKER}protonvpn\n"
+        "| Country | City | Hostname | VPN |\n"
+        "| --- | --- | --- | --- |\n"
+        "| Japan | Tokyo | `jp-1` | wireguard |\n"
+        f"{servers._PROVIDER_MARKER}surfshark\n"
+        "| Country | City | Hostname | VPN |\n"
+        "| --- | --- | --- | --- |\n"
+        "| France | Paris | `fr-1` | openvpn |\n"
+    )
+    monkeypatch.setattr(servers, "run", lambda *args, **kwargs: _fake_run(combined))
+    by_provider = servers._fetch_all_servers(["protonvpn", "surfshark"])
+    assert by_provider is not None
+    assert set(by_provider) == {"protonvpn", "surfshark"}
+    assert by_provider["protonvpn"][0]["city"] == "Tokyo"
+    assert by_provider["surfshark"][0]["city"] == "Paris"
+    assert by_provider["surfshark"][0]["vpn"] == "openvpn"
+
+
+def test_fetch_all_servers_returns_none_on_failure(monkeypatch):
+    monkeypatch.setattr(
+        servers,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 1, "", "boom"),
+    )
+    assert servers._fetch_all_servers(["surfshark"]) is None
+
+
+def test_fetch_all_servers_returns_none_when_nothing_parsed(monkeypatch):
+    monkeypatch.setattr(
+        servers,
+        "run",
+        lambda *args, **kwargs: _fake_run(
+            f"{servers._PROVIDER_MARKER}surfshark\nno table here\n"
+        ),
+    )
+    assert servers._fetch_all_servers(["surfshark"]) is None
+
+
+def test_fetch_all_servers_no_providers():
+    assert servers._fetch_all_servers([]) == {}
 
 
 def test_listable_servers_filters_by_active_pair(monkeypatch):

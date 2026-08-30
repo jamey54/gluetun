@@ -14,6 +14,10 @@ from vpn.textutil import fold
 
 SERVER_SEP = " - "
 
+# Printed before each provider's table so a single container boot's combined
+# stdout can be split back into per-provider blocks.
+_PROVIDER_MARKER = "@@PROVIDER@@"
+
 
 def parse_server_selection(selection: str) -> tuple[str | None, str | None, str, str | None]:
     """Parse '[provider/protocol] Country - City' into (provider, protocol, country, city)."""
@@ -98,6 +102,50 @@ def _fetch_servers(provider: str) -> list[ServerRow]:
     return _parse_servers_output(result.stdout.splitlines())
 
 
+def _fetch_all_servers(providers: list[str]) -> dict[str, list[ServerRow]] | None:
+    """Fetch every provider's servers with a single container boot.
+
+    format-servers accepts exactly one provider per invocation, but its data is
+    embedded in the image, so the shell loops a per-provider call inside one
+    `docker run` — the expensive container startup is paid once instead of once
+    per provider. Returns None when the boot failed or nothing parsed.
+    """
+    if not providers:
+        return {}
+    loop = "; ".join(
+        f'echo "{_PROVIDER_MARKER}{provider}"; /gluetun-entrypoint format-servers -{provider}'
+        for provider in providers
+    )
+    result = run(
+        "docker",
+        "run",
+        "--rm",
+        "--entrypoint",
+        "/bin/sh",
+        GLUETUN_IMAGE,
+        "-c",
+        loop,
+        capture=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+
+    blocks: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in result.stdout.splitlines():
+        if line.startswith(_PROVIDER_MARKER):
+            current = line[len(_PROVIDER_MARKER) :].strip()
+            blocks.setdefault(current, [])
+        elif current is not None:
+            blocks[current].append(line)
+
+    by_provider = {
+        provider: _parse_servers_output(blocks.get(provider, [])) for provider in providers
+    }
+    return by_provider if any(by_provider.values()) else None
+
+
 def _read_cache() -> dict[str, list[ServerRow]] | None:
     if not CACHE_FILE.exists():
         return None
@@ -119,15 +167,21 @@ def _write_cache(servers: dict[str, list[ServerRow]]) -> None:
 
 
 def get_servers() -> dict[str, list[ServerRow]]:
-    """Fetch servers for all credentialed providers in parallel; dict[provider, rows]."""
+    """Fetch servers for all credentialed providers; dict[provider, rows].
+
+    Prefers one container boot for all providers and falls back to a parallel
+    per-provider fetch when that fails (e.g. on older images).
+    """
     cached = _read_cache()
     if cached is not None:
         return cached
     providers = sorted({provider for provider, _ in get_active_providers()})
-    by_provider: dict[str, list[ServerRow]] = {}
-    with ThreadPoolExecutor(max_workers=max(len(providers), 1)) as pool:
-        for provider, rows in zip(providers, pool.map(_fetch_servers, providers), strict=True):
-            by_provider[provider] = rows
+    by_provider = _fetch_all_servers(providers)
+    if by_provider is None:
+        by_provider = {}
+        with ThreadPoolExecutor(max_workers=max(len(providers), 1)) as pool:
+            for provider, rows in zip(providers, pool.map(_fetch_servers, providers), strict=True):
+                by_provider[provider] = rows
     if any(by_provider.values()):
         _write_cache(by_provider)
     return by_provider
