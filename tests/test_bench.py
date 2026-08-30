@@ -465,3 +465,35 @@ def test_cli_bench_requires_running_container(monkeypatch):
     result = CliRunner().invoke(cli.main, ["bench"])
     assert result.exit_code != 0
     assert "not running" in result.output
+
+
+def test_cli_bench_defaults_to_all_credentialed_providers(monkeypatch):
+    """A bare `vpn bench` benches every provider, not just the running pair."""
+    from click.testing import CliRunner
+
+    data = rows(
+        ("surfshark", "wireguard", "France", "", "fr1"),
+        ("protonvpn", "wireguard", "Japan", "", "jp1"),
+    )
+    monkeypatch.setattr(cli, "require_api_key", lambda: None)
+    monkeypatch.setattr(cli, "container_running", lambda: True)
+    monkeypatch.setattr(cli, "get_servers", lambda: data)
+    monkeypatch.setattr(cli, "listable_servers", lambda d: d)
+    monkeypatch.setattr(
+        control,
+        "get_settings",
+        lambda: {"type": "wireguard", "provider": {"name": "surfshark"}},
+    )
+    monkeypatch.setattr(bench, "probe_hosts", Recorder([{"fr1": 0.05, "jp1": 0.20}]))
+
+    def fake_measure(size_mb: int, timeout: int = 120) -> dict[str, float]:
+        return {"mbits": 50.0, "seconds": 1.0, "mbytes": float(size_mb)}
+
+    monkeypatch.setattr(bench, "measure", fake_measure)
+
+    result = CliRunner().invoke(cli.main, ["bench"])
+    assert result.exit_code == 0, result.output
+    # running pair is surfshark/wireguard; protonvpn must still be benched
+    assert "Benchmarking 2 locations" in result.output
+    assert "surfshark/wireguard France" in result.output
+    assert "protonvpn/wireguard Japan" in result.output

@@ -386,8 +386,13 @@ def status(size: int, no_speedtest: bool) -> None:
 
 
 @main.command()
-@click.option("--provider", help="Only bench this provider (default: the running one)")
-@click.option("--protocol", type=PROTOCOL, default=None, help="Only bench this protocol")
+@click.option("--provider", help="Only bench this provider (default: all credentialed)")
+@click.option(
+    "--protocol",
+    type=PROTOCOL,
+    default=None,
+    help="Only bench this protocol (default: all credentialed)",
+)
 @click.option("--country", help="Only bench this country")
 @click.option(
     "-n",
@@ -419,12 +424,6 @@ def status(size: int, no_speedtest: bool) -> None:
     help="Finals download size (MB)",
 )
 @click.option(
-    "--all",
-    "all_providers",
-    is_flag=True,
-    help="Bench every credentialed provider/protocol, not just the running pair",
-)
-@click.option(
     "--no-connect",
     is_flag=True,
     help="Do not connect to the winner; restore pre-bench settings instead",
@@ -437,10 +436,13 @@ def bench(
     top: int,
     scan_size: int,
     size: int,
-    all_providers: bool,
     no_connect: bool,
 ) -> None:
-    """Benchmark locations and connect to the fastest."""
+    """Benchmark locations and connect to the fastest.
+
+    By default every credentialed provider/protocol is benched; narrow with
+    --provider/--protocol/--country, or cap scale with -n/--max-candidates.
+    """
     require_api_key()
     if not container_running():
         raise SystemExit(f"Container '{CONTAINER}' is not running.")
@@ -449,12 +451,10 @@ def bench(
         raise SystemExit("No servers found. Is Docker running?")
 
     try:
-        running = Selection.from_doc(control.get_settings())
+        control.get_settings()
     except control.ControlError as exc:
         raise SystemExit(f"Cannot reach the gluetun control server: {exc}") from None
 
-    if not all_providers and not provider and not protocol and running.provider:
-        provider, protocol = running.provider, running.protocol
     candidates = build_candidates(by_provider, provider, protocol, country)
     if not candidates:
         raise SystemExit("No matching locations for the given filters.")
