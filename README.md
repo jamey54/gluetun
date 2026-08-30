@@ -117,7 +117,12 @@ vpn up --provider protonvpn --protocol openvpn
 
 `vpn connect --list` lists all servers in an aligned table (provider, protocol, country, city, server) for every provider/protocol pair with valid credentials in `.env`.
 
-`vpn connect` with no arguments opens an interactive picker showing the same columns, with live filtering (accent-insensitive) and keyboard navigation (↑/↓ or Ctrl-N/P to move, PgUp/PgDn for pages, Home/End for first/last, type to filter — the filter matches any column including provider and protocol, Enter to select, Ctrl-C/Q to cancel). The selected row's provider *and* protocol are hot-swapped immediately.
+`vpn connect` with no arguments opens an interactive picker showing the same columns, with live filtering and keyboard navigation:
+
+- **Filtering** — type to filter, matching any column (accent-insensitive). `Tab`/`Shift-Tab` cycle an active filter *column* (Provider, Protocol, Country, City); while one is active, typing matches only within it and `←`/`→` cycle through that column's distinct values (e.g. `Tab`, `Tab`, `→` picks Surfshark→ProtonVPN; no typing needed). `Esc` exits column mode (or clears the query).
+- **Navigation** — `↑`/`↓` or `Ctrl-N`/`Ctrl-P` to move, `PgUp`/`PgDn` for pages, `Home`/`End` for first/last, `Enter` to select, `Ctrl-C`/`Ctrl-Q` to cancel.
+
+The selected row's provider *and* protocol are hot-swapped immediately.
 
 ## Runtime selections and drift
 
@@ -144,12 +149,13 @@ Swaps additionally exclude the previous exit IP from acceptance, so a failed swa
 
 ## Benchmark
 
-`vpn bench` finds and connects to the fastest location:
+`vpn bench` finds and connects to the fastest location across **all credentialed providers/protocols**:
 
 ```bash
-vpn bench                        # running provider/protocol, all its countries
-vpn bench --country Japan        # one country
-vpn bench --all                  # every credentialed provider/protocol
+vpn bench                        # every credentialed provider/protocol
+vpn bench --country Japan        # one country, every provider
+vpn bench --provider surfshark   # one provider's countries
+vpn bench --protocol openvpn     # one protocol, every provider
 vpn bench --no-connect           # report results, keep the current location
 ```
 
@@ -164,7 +170,7 @@ All swaps go through the same locked runtime engine as `connect`: concurrent CLI
 
 Notes:
 
-- Candidates default to the running provider/protocol; use `--provider`, `--protocol`, or `--all` to widen.
+- Candidates default to every credentialed provider/protocol; use `--provider`, `--protocol`, or `--country` to narrow, or `-n/--max-candidates` to cap the ones entering the latency stage.
 - Bench state is applied at runtime only — recreating the container (see [Runtime selections and drift](#runtime-selections-and-drift)) reverts to the env-file selection.
 
 ## Configuration
