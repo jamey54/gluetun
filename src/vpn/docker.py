@@ -82,3 +82,29 @@ def compose(
     merged = {**base, **(env_overrides or {})}
     cmd = ["docker", "compose", "-f", COMPOSE_FILE, *args]
     return run(*cmd, env={**os.environ, **merged})
+
+
+def launch_container(name: str, env: dict[str, str]) -> bool:
+    """Start a detached one-off tun container; returns True when it launched."""
+    args = [
+        "docker",
+        "run",
+        "-d",
+        "--rm",
+        "--name",
+        name,
+        "--cap-add",
+        "NET_ADMIN",
+        "--device",
+        "/dev/net/tun:/dev/net/tun",
+    ]
+    for key, value in env.items():
+        args += ["-e", f"{key}={value}"]
+    args.append(GLUETUN_IMAGE)
+    result = run(*args, capture=True, check=False)
+    return result.returncode == 0
+
+
+def remove_container(name: str) -> None:
+    """Force-remove a container (best effort, never raises)."""
+    run("docker", "rm", "-f", name, capture=True, check=False)

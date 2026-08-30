@@ -91,12 +91,12 @@ def _same_country(a: str, b: str) -> bool:
     return bool(a) and bool(b) and fold(resolve_country(a)) == fold(resolve_country(b))
 
 
-def _probe() -> dict[str, object] | None:
-    """One public-IP probe from inside the container. None on failure."""
+def _probe(container: str = CONTAINER) -> dict[str, object] | None:
+    """One public-IP probe from inside a container. None on failure."""
     result = run(
         "docker",
         "exec",
-        CONTAINER,
+        container,
         "timeout",
         str(PROBE_TIMEOUT),
         "wget",
@@ -121,6 +121,7 @@ def fetch_ip_info(
     delay: float = IP_FETCH_DELAY,
     expected_country: str | None = None,
     exclude_ips: Iterable[str] | None = None,
+    container: str = CONTAINER,
 ) -> IpOutcome:
     """Poll until the container's exit IP is outside exclude_ips (bare IP included).
 
@@ -135,7 +136,7 @@ def fetch_ip_info(
 
     last_info: dict[str, object] | None = None
     for attempt in range(retries):
-        info = _probe()
+        info = _probe(container=container)
         if info is None:
             if 0 < attempt < retries - 1:
                 click.echo(f"Waiting for public IP... ({attempt + 1}/{retries})")

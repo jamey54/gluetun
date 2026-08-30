@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from vpn import config
-from vpn.config import HTTP_NOT_FOUND, LOCK_FILE_PERMS
+from vpn.config import CONTAINER, HTTP_NOT_FOUND, LOCK_FILE_PERMS
 from vpn.control import ControlError, get_settings, put_settings, with_location
 from vpn.countries import resolve_country
 from vpn.ipinfo import fetch_ip_info, real_ip
@@ -113,7 +113,7 @@ class Verification:
     reason: str = ""  # failure label: leak / no reconnect / no public IP
 
 
-def verify(sel: Selection, prev_ip: str | None = None) -> Verification:
+def verify(sel: Selection, prev_ip: str | None = None, container: str = CONTAINER) -> Verification:
     """Prove the tunnel moved: new exit IP, different from bare and previous.
 
     The bare-IP exclusion comes from ipinfo itself; prev_ip is added so a
@@ -125,6 +125,7 @@ def verify(sel: Selection, prev_ip: str | None = None) -> Verification:
         delay=VERIFY_DELAY_S,
         expected_country=sel.country,
         exclude_ips={prev_ip} if prev_ip else None,
+        container=container,
     )
     if outcome.result is not None:
         info = outcome.result.info

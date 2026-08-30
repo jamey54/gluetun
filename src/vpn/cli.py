@@ -24,6 +24,7 @@ from vpn.config import (
     DEFAULT_PROTOCOL,
     DEFAULT_SCAN_SIZE_MB,
     DEFAULT_SIZE_MB,
+    DEFAULT_TEST_CONCURRENCY,
 )
 from vpn.docker import (
     GLUETUN_IMAGE,
@@ -424,6 +425,14 @@ def status(size: int, no_speedtest: bool) -> None:
     help="Finals download size (MB)",
 )
 @click.option(
+    "-c",
+    "--concurrency",
+    type=click.IntRange(min=1),
+    default=DEFAULT_TEST_CONCURRENCY,
+    show_default=True,
+    help="Candidates tested in parallel on temporary containers (1 = test on the running one)",
+)
+@click.option(
     "--no-connect",
     is_flag=True,
     help="Do not connect to the winner; restore pre-bench settings instead",
@@ -436,6 +445,7 @@ def bench(
     top: int,
     scan_size: int,
     size: int,
+    concurrency: int,
     no_connect: bool,
 ) -> None:
     """Benchmark locations and connect to the fastest.
@@ -466,6 +476,7 @@ def bench(
             limit=max_candidates,
             scan_size_mb=scan_size,
             final_size_mb=size,
+            concurrency=concurrency,
             connect_winner=not no_connect,
         )
     except KeyboardInterrupt:

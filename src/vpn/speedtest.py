@@ -16,15 +16,17 @@ def format_result(result: dict[str, float]) -> str:
 
 
 def measure(
-    size_mb: int = DEFAULT_SIZE_MB, timeout: int = DOWNLOAD_TIMEOUT_S
+    size_mb: int = DEFAULT_SIZE_MB,
+    timeout: int = DOWNLOAD_TIMEOUT_S,
+    container: str = CONTAINER,
 ) -> dict[str, float] | None:
-    """Download size_mb through the container. Returns dict or None on failure."""
+    """Download size_mb through a container. Returns dict or None on failure."""
     nbytes = size_mb * 1_000_000
     start = time.monotonic()
     result = run(
         "docker",
         "exec",
-        CONTAINER,
+        container,
         "timeout",
         str(timeout),
         "wget",

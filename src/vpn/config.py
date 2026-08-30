@@ -61,6 +61,7 @@ LATENCY_TIMEOUT_S = 2.0
 
 DEFAULT_SCAN_SIZE_MB = 10
 SCAN_TIMEOUT_S = 90
+DEFAULT_TEST_CONCURRENCY = 1
 
 
 # --- Compose file resolution ---------------------------------------------

@@ -1,13 +1,19 @@
 """Location benchmarking: latency prescreen, screened and final speed stages.
 
 Candidates are unique (provider, protocol, country, city) locations from the
-server cache. Each test hot-swaps through the runtime config engine
-(vpn.apply), proves the exit IP actually moved (leak-first verification),
-then downloads through the tunnel. The winner is connected by default;
-Ctrl-C or --no-connect restores the pre-bench settings document instead.
+server cache. With concurrency=1 (the default) each test hot-swaps through the
+runtime config engine (vpn.apply), proves the exit IP actually moved (leak-first
+verification), then downloads through the tunnel. With concurrency>1 the screen
+and final stages instead run batches of candidates on temporary one-off
+containers in parallel, leaving the running tunnel untouched until the winner
+is connected. The winner is connected by default; Ctrl-C or --no-connect
+restores the pre-bench settings document instead.
 """
 
+import itertools
+import os
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -16,10 +22,17 @@ from rich.console import Console
 from rich.table import Table
 
 from vpn.apply import Selection, apply_location, restore_settings, swap_lock, verify
-from vpn.config import DEFAULT_SCAN_SIZE_MB, DOWNLOAD_TIMEOUT_S, SCAN_TIMEOUT_S
+from vpn.config import (
+    DEFAULT_SCAN_SIZE_MB,
+    DEFAULT_TEST_CONCURRENCY,
+    DOWNLOAD_TIMEOUT_S,
+    SCAN_TIMEOUT_S,
+)
 from vpn.control import ControlError, get_settings
+from vpn.docker import launch_container, remove_container
 from vpn.ipinfo import current_exit_ip
 from vpn.latency import probe_hosts
+from vpn.providers import get_provider_env
 from vpn.servers import ServerRow, sorted_server_rows
 from vpn.speedtest import measure
 from vpn.textutil import fold
@@ -27,6 +40,19 @@ from vpn.textutil import fold
 DEFAULT_TOP = 12
 DEFAULT_FINAL_SIZE_MB = 25
 FINALISTS = 3
+
+# Tuning passed to disposable bench containers so their tunnels match the
+# main container's behaviour.
+_BENCH_ENV_TUNING = {
+    "WIREGUARD_MTU": "1420",
+    "PUBLICIP_TIMEOUT": "10s",
+    "DOT": "off",
+    "DNS_PLAINTEXT_ADDRESS": "1.1.1.1",
+    "FIREWALL": "on",
+}
+
+_CONTAINER_PREFIX = "vpn-bench-"
+_container_ids = itertools.count()
 
 
 @dataclass(frozen=True)
@@ -141,6 +167,7 @@ def run_bench(
     scan_size_mb: int = DEFAULT_SCAN_SIZE_MB,
     final_size_mb: int = DEFAULT_FINAL_SIZE_MB,
     connect_winner: bool = True,
+    concurrency: int = DEFAULT_TEST_CONCURRENCY,
     say: Callable[[str], None] = click.echo,
 ) -> BenchReport:
     """Run all bench stages; connect the winner unless asked otherwise."""
@@ -168,6 +195,9 @@ def run_bench(
 
     def test_stage(pool: list[BenchResult], stage: str, size_mb: int, timeout: int) -> None:
         nonlocal current, prev_ip
+        if concurrency > 1:
+            _parallel_stage(pool, stage, size_mb, timeout, concurrency, say)
+            return
         for i, result in enumerate(pool, 1):
             candidate = result.candidate
             say(f"[{i}/{len(pool)}] {candidate.label} ... swapping")
@@ -259,6 +289,87 @@ def run_bench(
 
     report.results = results
     return report
+
+
+# ---------------------------------------------------------------------------
+# Parallel stages (disposable containers)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _ParallelResult:
+    """Outcome of one candidate on a disposable container stage."""
+
+    error: str | None = None
+    mbits: float | None = None
+    geo: str | None = None
+
+
+def _bench_container_env(candidate: Candidate) -> dict[str, str]:
+    """Docker env for a disposable container matching the main container."""
+    env = get_provider_env(candidate.provider, candidate.protocol)
+    env.update(_BENCH_ENV_TUNING)
+    env["SERVER_COUNTRIES"] = candidate.country
+    env["SERVER_CITIES"] = candidate.city or ""
+    return env
+
+
+def _test_one(candidate: Candidate, size_mb: int, timeout: int) -> _ParallelResult:
+    """Benchmark one candidate on its own temporary container."""
+    name = f"{_CONTAINER_PREFIX}{os.getpid()}-{next(_container_ids)}"
+    if not launch_container(name, _bench_container_env(candidate)):
+        return _ParallelResult(error="container launch failed")
+    try:
+        verdict = verify(candidate.selection, container=name)
+        if not verdict.ok:
+            return _ParallelResult(error=verdict.reason)
+        downloaded = measure(size_mb, timeout=timeout, container=name)
+        if not downloaded:
+            return _ParallelResult(error="download failed")
+        return _ParallelResult(mbits=downloaded["mbits"], geo=verdict.geo)
+    finally:
+        remove_container(name)
+
+
+def _test_batch(
+    candidates: list[Candidate], size_mb: int, timeout: int
+) -> list[_ParallelResult]:
+    """Run each candidate on a disposable container, in parallel.
+
+    Waiting on the `with` block guarantees every started worker runs its
+    cleanup `finally` even when iteration is aborted mid-batch.
+    """
+    with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
+        futures = [pool.submit(_test_one, c, size_mb, timeout) for c in candidates]
+        return [future.result() for future in futures]
+
+
+def _parallel_stage(
+    pool: list[BenchResult],
+    stage: str,
+    size_mb: int,
+    timeout: int,
+    concurrency: int,
+    say: Callable[[str], None] = click.echo,
+) -> None:
+    """Run a stage over batches of concurrent disposable containers."""
+    for start in range(0, len(pool), concurrency):
+        batch = pool[start : start + concurrency]
+        say(
+            f"[{start + 1}-{start + len(batch)}/{len(pool)}] "
+            + ", ".join(r.candidate.location for r in batch)
+        )
+        outcomes = _test_batch([r.candidate for r in batch], size_mb, timeout)
+        for result, outcome in zip(batch, outcomes, strict=True):
+            if outcome.error:
+                result.error = outcome.error
+                continue
+            if stage == "screen":
+                result.scan_mbps = outcome.mbits
+            else:
+                result.final_mbps = outcome.mbits
+            if outcome.geo:
+                result.actual_geo = outcome.geo
 
 
 # ---------------------------------------------------------------------------
