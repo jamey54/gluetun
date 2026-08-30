@@ -231,16 +231,6 @@ def test_set_vpn_status_sends_put(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Public IP
-# ---------------------------------------------------------------------------
-
-
-def test_get_public_ip(monkeypatch):
-    monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"public_ip":"1.2.3.4"}')))
-    assert control.get_public_ip() == "1.2.3.4"
-
-
-# ---------------------------------------------------------------------------
 # DNS
 # ---------------------------------------------------------------------------
 
@@ -262,11 +252,6 @@ def test_set_dns_status_sends_put(monkeypatch):
 # ---------------------------------------------------------------------------
 # Updater
 # ---------------------------------------------------------------------------
-
-
-def test_get_updater_status(monkeypatch):
-    monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"status":"completed"}')))
-    assert control.get_updater_status() == "completed"
 
 
 def test_trigger_updater_sends_put(monkeypatch):
@@ -291,12 +276,3 @@ def test_get_port_forward_returns_port(monkeypatch):
 def test_get_port_forward_returns_none_when_empty(monkeypatch):
     monkeypatch.setattr(control, "urlopen", fake_urllib((200, "{}")))
     assert control.get_port_forward() is None
-
-
-def test_set_port_forward_sends_put(monkeypatch):
-    calls: list[Any] = []
-    monkeypatch.setattr(control, "urlopen", fake_urllib((200, ""), calls))
-    control.set_port_forward([5914, 5915])
-    method, url, data, _ = calls[0]
-    assert (method, url) == ("PUT", "http://127.0.0.1:8000/v1/portforward")
-    assert json.loads(data) == {"ports": [5914, 5915]}

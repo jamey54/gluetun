@@ -103,17 +103,6 @@ def set_vpn_status(status: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Public IP
-# ---------------------------------------------------------------------------
-
-
-def get_public_ip() -> str:
-    """Public IP address as seen from inside the container."""
-    _, body = _request("GET", "/v1/publicip/ip")
-    return str(json.loads(body).get("public_ip", ""))
-
-
-# ---------------------------------------------------------------------------
 # DNS
 # ---------------------------------------------------------------------------
 
@@ -134,12 +123,6 @@ def set_dns_status(status: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def get_updater_status() -> str:
-    """Server list updater status: 'completed', 'running', etc."""
-    _, body = _request("GET", "/v1/updater/status")
-    return str(json.loads(body).get("status", ""))
-
-
 def trigger_updater() -> None:
     """Trigger a server list update."""
     _request("PUT", "/v1/updater/status", payload={"status": "running"})
@@ -155,11 +138,6 @@ def get_port_forward() -> int | None:
     _, body = _request("GET", "/v1/portforward")
     port = json.loads(body).get("port")
     return int(port) if port else None
-
-
-def set_port_forward(ports: list[int]) -> None:
-    """Override the forwarded port list (empty list clears forwarding)."""
-    _request("PUT", "/v1/portforward", payload={"ports": ports})
 
 
 def with_location(
