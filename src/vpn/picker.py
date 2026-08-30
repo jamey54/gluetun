@@ -1,4 +1,10 @@
-"""Interactive server selection UI."""
+"""Interactive server selection UI.
+
+Filtering is column-scoped: `Tab`/`Shift-Tab` cycle an active column
+(Provider, Protocol, Country, City), `Left`/`Right` cycle through that
+column's distinct values, and typing narrows within it. Without an active
+column, typed tokens match anywhere in the row as before.
+"""
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.formatted_text import StyleAndTextTuples
@@ -18,6 +24,8 @@ from vpn.textutil import fold, fold_mapped
 
 VISIBLE_ROWS = 10
 
+COLUMNS = ("provider", "protocol", "country", "city")
+
 _STYLE = Style.from_dict(
     {
         "dim": "#6c6c6c",
@@ -26,9 +34,9 @@ _STYLE = Style.from_dict(
         "match": "bold ansiyellow",
         "hits": "ansigreen",
         "none": "ansired",
+        "col": "bold ansiyellow",
     }
 )
-
 
 _PROMPT_STYLE = "class:dim"
 
@@ -47,9 +55,23 @@ class _ServerPicker:
         }
         self.lines = [self._line(row) for row in rows]
         self.folds: list[tuple[str, list[int]]] = [fold_mapped(line) for line in self.lines]
+        self.cells = [list(row[:4]) for row in rows]
+        self.col_folds: list[list[tuple[str, list[int]]]] = [
+            [fold_mapped(cell) for cell in cells] for cells in self.cells
+        ]
+        self.col_offsets: list[int] = []
+        pos = 0
+        for column in COLUMNS:
+            self.col_offsets.append(pos)
+            pos += self.width[column] + 1
+        self.col_labels: list[dict[str, str]] = [
+            self._distinct_values(idx) for idx in range(len(COLUMNS))
+        ]
         self.prompt = prompt
         self.query = ""
         self.tokens: list[str] = []
+        self.active_col: int | None = None
+        self.col_value: str | None = None  # folded exact value for active_col
         self.matches = list(range(len(rows)))
         self.cursor = 0
         self.offset = 0
@@ -62,19 +84,36 @@ class _ServerPicker:
             f"{country:<{w['country']}} {city:<{w['city']}} {hostname or '-'}"
         )
 
+    def _distinct_values(self, idx: int) -> dict[str, str]:
+        """Folded value -> display value for a column (first occurrence wins)."""
+        seen: dict[str, str] = {}
+        for cells in self.cells:
+            if cells[idx]:
+                seen.setdefault(fold(cells[idx]), cells[idx])
+        return dict(sorted(seen.items()))
+
     # -- state -------------------------------------------------------------
+
+    def _row_folded(self, idx: int) -> str:
+        """The text tokens are matched against for a row (whole line or column)."""
+        if self.active_col is None:
+            return self.folds[idx][0]
+        return self.col_folds[idx][self.active_col][0]
 
     def _set_query(self, query: str) -> None:
         self.query = query
-        self.tokens = query.split()
-        if not self.tokens:
-            self.matches = list(range(len(self.rows)))
-        else:
-            self.matches = [
-                i
-                for i, (folded, _) in enumerate(self.folds)
-                if all(token in folded for token in self.tokens)
-            ]
+        self.tokens = [token for token in (fold(t) for t in query.split()) if token]
+        self.matches = []
+        for idx, row in enumerate(self.rows):
+            if (
+                self.active_col is not None
+                and self.col_value is not None
+                and fold(row[self.active_col]) != self.col_value
+            ):
+                continue
+            folded = self._row_folded(idx)
+            if all(token in folded for token in self.tokens):
+                self.matches.append(idx)
         self.cursor = 0
         self.offset = 0
 
@@ -93,6 +132,41 @@ class _ServerPicker:
         elif self.cursor >= self.offset + VISIBLE_ROWS:
             self.offset = self.cursor - VISIBLE_ROWS + 1
         self.offset = max(0, self.offset)
+
+    def _advance_col(self, delta: int) -> None:
+        """Cycle the active filter column; entering/leaving column mode."""
+        if self.active_col is None:
+            target = 0 if delta > 0 else len(COLUMNS) - 1
+        else:
+            target = self.active_col + delta
+        if 0 <= target < len(COLUMNS):
+            self.active_col = target
+            self.col_value = None
+        else:
+            self.active_col = None
+            self.col_value = None
+        self._set_query(self.query)
+
+    def _cycle_value(self, delta: int) -> None:
+        """Cycle the active column's exact filter among its distinct values."""
+        if self.active_col is None:
+            return
+        values = list(self.col_labels[self.active_col])
+        choices: list[str | None] = [None, *values]
+        try:
+            idx = choices.index(self.col_value)
+        except ValueError:
+            idx = 0
+        self.col_value = choices[(idx + delta) % len(choices)]
+        self._set_query(self.query)
+
+    def _escape(self) -> None:
+        if self.active_col is not None:
+            self.active_col = None
+            self.col_value = None
+            self._set_query(self.query)
+        else:
+            self._set_query("")
 
     # -- rendering ---------------------------------------------------------
 
@@ -117,9 +191,16 @@ class _ServerPicker:
 
     def _segments(self, idx: int) -> list[tuple[bool, str]]:
         """Split line idx into (is_match, text) fragments for the current query."""
-        line, (folded, origin) = self.lines[idx], self.folds[idx]
+        line = self.lines[idx]
         if not self.tokens:
             return [(False, line)]
+        if self.active_col is None:
+            folded, origin = self.folds[idx]
+        else:
+            col_folded, col_origin = self.col_folds[idx][self.active_col]
+            start = self.col_offsets[self.active_col]
+            folded = col_folded
+            origin = [o + start for o in col_origin]
         segments: list[tuple[bool, str]] = []
         pos = 0
         for a, b in self._match_spans(folded, origin):
@@ -149,11 +230,20 @@ class _ServerPicker:
     def _footer(self) -> StyleAndTextTuples:
         hits = len(self.matches)
         status = "class:hits" if hits else "class:none"
-        return [
-            ("class:dim", f"{hits}/{len(self.rows)} · "),
-            ("class:dim", "/"),
-            (status, self.query),
-        ]
+        frags: StyleAndTextTuples = [("class:dim", f"{hits}/{len(self.rows)} · ")]
+        if self.active_col is not None:
+            column = COLUMNS[self.active_col]
+            if self.col_value is not None:
+                label = self.col_labels[self.active_col][self.col_value]
+                frags.append(("class:col", f"[{column}: {label}] "))
+            else:
+                frags.append(("class:col", f"[{column}] "))
+            frags.append(("class:dim", "Tab cols · ←/→ value "))
+        else:
+            frags.append(("class:dim", "Tab: filter a column "))
+        frags.append(("class:dim", "/"))
+        frags.append((status, self.query))
+        return frags
 
     # -- run ---------------------------------------------------------------
 
@@ -193,6 +283,26 @@ class _ServerPicker:
         @kb.add("backspace")
         def _backspace(event: KeyPressEvent) -> None:
             self._set_query(self.query[:-1])
+
+        @kb.add("tab")
+        def _col_next(event: KeyPressEvent) -> None:
+            self._advance_col(1)
+
+        @kb.add("s-tab")
+        def _col_prev(event: KeyPressEvent) -> None:
+            self._advance_col(-1)
+
+        @kb.add("left")
+        def _value_prev(event: KeyPressEvent) -> None:
+            self._cycle_value(-1)
+
+        @kb.add("right")
+        def _value_next(event: KeyPressEvent) -> None:
+            self._cycle_value(1)
+
+        @kb.add("escape")
+        def _escape_key(event: KeyPressEvent) -> None:
+            self._escape()
 
         @kb.add("enter")
         def _enter(event: KeyPressEvent) -> None:

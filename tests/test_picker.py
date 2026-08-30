@@ -88,6 +88,110 @@ def test_query_reset_moves_cursor_to_top():
     assert p.cursor == 0
 
 
+def test_query_ignores_non_foldable_tokens():
+    # '⌘' folds to '', which would match every row; it must be dropped
+    p = make_picker()
+    p._set_query("⌘")
+    assert len(p.matches) == 3
+    p._set_query("⌘ germany")
+    assert p.matches == [1]
+
+
+# ---------------------------------------------------------------------------
+# column-scoped filtering
+# ---------------------------------------------------------------------------
+
+
+def test_tab_cycles_active_column():
+    p = make_picker()
+    assert p.active_col is None
+    p._advance_col(1)
+    assert p.active_col == 0  # provider
+    p._advance_col(1)
+    assert p.active_col == 1  # protocol
+    p._advance_col(3)  # wraps city -> back to all columns
+    assert p.active_col is None
+    p._advance_col(-1)  # wraps back from all
+    assert p.active_col == 3  # city
+
+
+def test_active_column_scopes_typed_query():
+    p = make_picker()
+    p._advance_col(1)  # provider column
+    p._set_query("surf")
+    assert p.matches == [0, 1]
+    p._set_query("germany")  # not a provider -> no matches
+    assert p.matches == []
+
+
+def test_column_value_cycles_with_keys():
+    p = make_picker()
+    p._advance_col(1)  # provider
+    p._cycle_value(1)  # -> protonvpn (sorted first)
+    assert p.col_value == "protonvpn"
+    assert p.matches == [2]
+    p._cycle_value(1)  # -> surfshark
+    assert p.col_value == "surfshark"
+    assert p.matches == [0, 1]
+    p._cycle_value(1)  # wraps to none -> all rows
+    assert p.col_value is None
+    assert len(p.matches) == 3
+
+
+def test_column_value_cycles_backwards():
+    p = make_picker()
+    p._advance_col(1)
+    p._cycle_value(-1)
+    assert p.col_value == "surfshark"
+    assert p.matches == [0, 1]
+
+
+def test_column_value_and_typed_tokens_are_both_applied():
+    p = make_picker()
+    p._advance_col(1)
+    p._advance_col(1)  # protocol column
+    p._set_query("wireguard")
+    assert p.matches == [0, 2]  # surfshark-wg + protonvpn-wg
+    p._cycle_value(1)  # openvpn contradicts the typed query
+    assert p.col_value == "openvpn"
+    assert p.matches == []
+    p._cycle_value(1)  # wireguard agrees with it
+    assert p.matches == [0, 2]
+    p._cycle_value(1)  # back to no value filter
+    assert p.col_value is None
+    assert p.matches == [0, 2]
+
+
+def test_column_value_highlight_spans_shifted_to_line():
+    p = make_picker()
+    p._advance_col(1)  # provider column
+    p._set_query("proton")
+    idx = p.matches[0]
+    segments = p._segments(idx)
+    assert "".join(text for _, text in segments) == p.lines[idx]
+    hit = next(text for is_match, text in segments if is_match)
+    assert hit == "proton"  # only the matched substring is highlighted
+
+
+def test_escape_exits_column_mode_keeps_query():
+    p = make_picker()
+    p._advance_col(1)  # provider
+    p._set_query("germany")
+    assert p.matches == []
+    p._escape()
+    assert p.active_col is None
+    assert p.matches == [1]  # query now applies globally
+
+
+def test_escape_clears_query_when_no_column():
+    p = make_picker()
+    p._set_query("boston")
+    assert p.matches == [2]
+    p._escape()
+    assert p.query == ""
+    assert len(p.matches) == 3
+
+
 # ---------------------------------------------------------------------------
 # navigation / paging
 # ---------------------------------------------------------------------------
