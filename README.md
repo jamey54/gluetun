@@ -157,20 +157,24 @@ vpn bench --country Japan        # one country, every provider
 vpn bench --provider surfshark   # one provider's countries
 vpn bench --protocol openvpn     # one protocol, every provider
 vpn bench --no-connect           # report results, keep the current location
+vpn bench -c 4                   # bench 4 candidates at once on temp containers
 ```
 
 How it runs:
 
 1. **Latency prescreen** — parallel TCP-connect probes (port 443, host-side) rank every candidate location; unreachable ones sort last.
-2. **Screening** — the top `--top` (default 12) locations each get hot-swapped in place, proven by IP change (exit IP must differ from your bare IP *and* the previous exit — leaks and failed swaps are marked `leak` / `no reconnect`), then tested with a `--scan-size` MB (default 10) download. Exits that geolocate outside the requested country are flagged `geo: <country>` but still tested.
+2. **Screening** — the top `--top` (default 12) locations are tested with a `--scan-size` MB (default 10) download. Each must prove an IP change (exit IP must differ from your bare IP *and* the previous exit — leaks and failed swaps are marked `leak` / `no reconnect`). Exits that geolocate outside the requested country are flagged `geo: <country>` but still tested.
 3. **Finals** — the best 3 are re-tested with the full `-s/--size` MB (default 25) download.
 4. **Winner** — connected automatically after a final re-check of the exit IP. With `--no-connect` (or Ctrl-C at any point) the pre-bench settings are restored instead.
+
+The default `-c/--concurrency 1` hot-swaps the running container for every test. Raise it (e.g. `-c 4`) to run the screening and final stages as batches of concurrent tests, each candidate on its own **temporary one-off container**; your live connection is then left untouched until the winner is connected. All temporary containers are removed after each batch, and aborted runs tear them down too.
 
 All swaps go through the same locked runtime engine as `connect`: concurrent CLI invocations (e.g. a bench while someone picks a server) serialize on a lockfile instead of clobbering each other's settings.
 
 Notes:
 
 - Candidates default to every credentialed provider/protocol; use `--provider`, `--protocol`, or `--country` to narrow, or `-n/--max-candidates` to cap the ones entering the latency stage.
+- Parallel mode (`-c > 1`) is limited by the credentials your provider permits: if a provider caps simultaneous sessions, some candidates will simply be reported as failures (`no public IP`) while the rest keep benching — it won't abort the run.
 - Bench state is applied at runtime only — recreating the container (see [Runtime selections and drift](#runtime-selections-and-drift)) reverts to the env-file selection.
 
 ## Configuration
