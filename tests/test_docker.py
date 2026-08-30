@@ -1,5 +1,7 @@
 """Tests for docker helpers: container env reading and compose invocation."""
 
+from typing import Any
+
 import pytest
 
 from vpn import config, docker
@@ -60,3 +62,65 @@ def test_compose_merges_env_without_tempfile(monkeypatch):
     assert seen_env is not None
     assert seen_env["WIREGUARD_PRIVATE_KEY"] == "secret"
     assert seen_env["PATH"]  # process env preserved
+
+
+# ---------------------------------------------------------------------------
+# disposable bench containers
+# ---------------------------------------------------------------------------
+
+
+def test_launch_container_builds_docker_run_args(monkeypatch):
+    from subprocess import CompletedProcess
+
+    seen: dict[str, Any] = {}
+
+    def fake_run(*args, capture=False, check=False):
+        seen["args"], seen["capture"], seen["check"] = args, capture, check
+        return CompletedProcess(args, 0)
+
+    monkeypatch.setattr(docker, "run", fake_run)
+    ok = docker.launch_container(
+        "vpn-bench-123-0",
+        {"VPN_SERVICE_PROVIDER": "surfshark", "SERVER_COUNTRIES": "Germany"},
+    )
+
+    assert ok is True
+    args = seen["args"]
+    assert args[:8] == (
+        "docker",
+        "run",
+        "-d",
+        "--rm",
+        "--name",
+        "vpn-bench-123-0",
+        "--cap-add",
+        "NET_ADMIN",
+    )
+    assert args[8:11] == ("--device", "/dev/net/tun:/dev/net/tun", "-e")
+    assert "VPN_SERVICE_PROVIDER=surfshark" in args
+    assert "SERVER_COUNTRIES=Germany" in args
+    assert args[-1] == docker.GLUETUN_IMAGE
+    assert seen["capture"] is True and seen["check"] is False
+
+
+def test_launch_container_failure_reported(monkeypatch):
+    from subprocess import CompletedProcess
+
+    monkeypatch.setattr(
+        docker, "run", lambda *args, **kw: CompletedProcess(args, 1)
+    )
+    assert docker.launch_container("x", {}) is False
+
+
+def test_remove_container_best_effort(monkeypatch):
+    from subprocess import CompletedProcess
+
+    seen = {}
+    monkeypatch.setattr(
+        docker,
+        "run",
+        lambda *args, **kw: (seen.update({"args": args, "kw": kw}) or CompletedProcess(args, 1)),
+    )
+    docker.remove_container("whatever")  # must not raise on failure
+    assert seen["args"] == ("docker", "rm", "-f", "whatever")
+    assert seen["kw"]["check"] is False

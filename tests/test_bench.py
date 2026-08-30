@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from vpn import apply as apply_module
-from vpn import bench, cli, control
+from vpn import bench, cli, config, control
 from vpn.apply import Verification
 
 # ---------------------------------------------------------------------------
@@ -401,6 +401,153 @@ def test_run_bench_limit_caps_candidates(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# parallel mode (disposable containers)
+# ---------------------------------------------------------------------------
+
+
+def test_run_bench_parallel_uses_temp_containers(monkeypatch, happy_path):
+    """concurrency > 1 benches candidates on throwaway containers and cleans up."""
+    launched: list[tuple[str, dict[str, Any]]] = []
+    removed: list[str] = []
+    verify_containers: list[str | None] = []
+    measure_containers: list[str | None] = []
+
+    monkeypatch.setattr(
+        bench, "get_provider_env", lambda prov, prot: {f"{prov.upper()}_KEY": "secret"}
+    )
+
+    def fake_launch(name: str, env: dict[str, Any]) -> bool:
+        launched.append((name, env))
+        return True
+
+    monkeypatch.setattr(bench, "launch_container", fake_launch)
+    monkeypatch.setattr(bench, "remove_container", removed.append)
+    swaps = Recorder()
+    monkeypatch.setattr(bench, "apply_location", swaps)
+
+    def fake_verify(
+        sel: Any, prev_ip: str | None = None, container: str | None = None
+    ) -> Verification:
+        verify_containers.append(container)
+        return Verification(ok=True, ip=f"10.{(len(verify_containers) + 1) // 2}.0.1")
+
+    def fake_measure(
+        size_mb: int, timeout: int = 120, container: str | None = None
+    ) -> dict[str, float]:
+        measure_containers.append(container)
+        return {"mbits": 10.0, "seconds": 1.0, "mbytes": float(size_mb)}
+
+    monkeypatch.setattr(bench, "verify", fake_verify)
+    monkeypatch.setattr(bench, "measure", fake_measure)
+
+    candidates = [
+        candidate("surfshark", "wireguard", "France", None, "fr"),
+        candidate("surfshark", "wireguard", "Spain", None, "es"),
+        candidate("protonvpn", "wireguard", "Japan", "Tokyo", "jp"),
+    ]
+    report = bench.run_bench(candidates, concurrency=2, say=lambda *_: None)
+
+    names = [name for name, _ in launched]
+    assert len(names) == 6  # 3 screened + 3 finalists, all via temp containers
+    assert names == list(dict.fromkeys(names))  # unique
+    assert all(n.startswith("vpn-bench-") for n in names)
+
+    by_country = {env["SERVER_COUNTRIES"]: env for _, env in launched}
+    assert set(by_country) == {"France", "Spain", "Japan"}
+    france_env = by_country["France"]
+    assert france_env["SURFSHARK_KEY"] == "secret"
+    assert france_env["WIREGUARD_MTU"] == "1420"
+    assert france_env["FIREWALL"] == "on"
+    assert france_env["DOT"] == "off"
+    assert by_country["Japan"]["SERVER_CITIES"] == "Tokyo"
+
+    # every disposable container is torn down; main container only touched once
+    assert removed == names
+    assert len(swaps.calls) == 1  # the final winner swap
+
+    # the six stage verifies/measures ran through the disposable containers;
+    # the adoption re-check runs against the (default) main container.
+    assert len(verify_containers) == 7
+    assert all(c is not None and c.startswith("vpn-bench-") for c in verify_containers[:6])
+    assert verify_containers[-1] is None
+    assert all(c is not None and c.startswith("vpn-bench-") for c in measure_containers)
+    assert report.winner is not None
+
+
+def test_run_bench_parallel_failure_keeps_going(monkeypatch, happy_path):
+    """A failing disposable container is recorded; the rest still benchmark."""
+    launched: list[str] = []
+    removed: list[str] = []
+    monkeypatch.setattr(bench, "get_provider_env", lambda prov, prot: {})
+    monkeypatch.setattr(bench, "launch_container", lambda name, env: launched.append(name) or True)
+    monkeypatch.setattr(bench, "remove_container", removed.append)
+
+    def fake_verify(
+        sel: Any, prev_ip: str | None = None, container: str | None = None
+    ) -> Verification:
+        if (sel.country, sel.city) == ("France", None):
+            return Verification(ok=False, reason="no public IP")
+        return Verification(ok=True, ip="10.1.0.1")
+
+    def fake_measure(
+        size_mb: int, timeout: int = 120, container: str | None = None
+    ) -> dict[str, float]:
+        return {"mbits": 25.0, "seconds": 1.0, "mbytes": float(size_mb)}
+
+    monkeypatch.setattr(bench, "verify", fake_verify)
+    monkeypatch.setattr(bench, "measure", fake_measure)
+
+    candidates = [
+        candidate("surfshark", "wireguard", "France", None, "fr"),
+        candidate("surfshark", "wireguard", "Spain", None, "es"),
+    ]
+    report = bench.run_bench(candidates, concurrency=2, say=lambda *_: None)
+
+    by_country = {r.candidate.country: r for r in report.results}
+    assert by_country["France"].error == "no public IP"
+    assert by_country["France"].scan_mbps is None
+    assert by_country["Spain"].scan_mbps == 25.0
+    assert report.winner is not None and report.winner.candidate.country == "Spain"
+    assert "Connected to winner" in report.action
+    assert removed == launched  # both temp containers cleaned up
+
+
+def test_run_bench_parallel_crashed_candidate_is_recorded(monkeypatch, happy_path):
+    """An unexpected exception mid-test is degraded to an error, batch survives."""
+    launched: list[str] = []
+    removed: list[str] = []
+    monkeypatch.setattr(bench, "get_provider_env", lambda prov, prot: {})
+    monkeypatch.setattr(bench, "launch_container", lambda name, env: launched.append(name) or True)
+    monkeypatch.setattr(bench, "remove_container", removed.append)
+
+    def fake_verify(
+        sel: Any, prev_ip: str | None = None, container: str | None = None
+    ) -> Verification:
+        if (sel.country, sel.city) == ("France", None):
+            raise ValueError("boom")
+        return Verification(ok=True, ip="10.1.0.1")
+
+    def fake_measure(
+        size_mb: int, timeout: int = 120, container: str | None = None
+    ) -> dict[str, float]:
+        return {"mbits": 25.0, "seconds": 1.0, "mbytes": float(size_mb)}
+
+    monkeypatch.setattr(bench, "verify", fake_verify)
+    monkeypatch.setattr(bench, "measure", fake_measure)
+
+    candidates = [
+        candidate("surfshark", "wireguard", "France", None, "fr"),
+        candidate("surfshark", "wireguard", "Spain", None, "es"),
+    ]
+    report = bench.run_bench(candidates, concurrency=2, say=lambda *_: None)
+
+    by_country = {r.candidate.country: r for r in report.results}
+    assert "boom" in by_country["France"].error
+    assert by_country["Spain"].scan_mbps == 25.0
+    assert removed == launched
+
+
+# ---------------------------------------------------------------------------
 # display ordering
 # ---------------------------------------------------------------------------
 
@@ -455,6 +602,37 @@ def test_cli_bench_end_to_end(monkeypatch):
     assert "Benchmarking 2 locations" in result.output
     assert "Connected to winner: surfshark/wireguard France" in result.output
     assert "France" in result.output and "Japan" in result.output
+
+
+def test_cli_bench_concurrency_flag_passes_through(monkeypatch):
+    from click.testing import CliRunner
+
+    seen = {}
+    monkeypatch.setattr(cli, "require_api_key", lambda: None)
+    monkeypatch.setattr(cli, "container_running", lambda: True)
+    monkeypatch.setattr(
+        cli,
+        "get_servers",
+        lambda: rows(("surfshark", "wireguard", "France", "", "fr1")),
+    )
+    monkeypatch.setattr(cli, "listable_servers", lambda d: d)
+    monkeypatch.setattr(
+        control, "get_settings", lambda: {"type": "wireguard", "provider": {"name": "surfshark"}}
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_bench",
+        lambda _candidates, **kw: (seen.update(kw) or bench.BenchReport(results=[])),
+    )
+    monkeypatch.setattr(bench, "probe_hosts", Recorder([{}]))
+
+    result = CliRunner().invoke(cli.main, ["bench", "-c", "3"])
+    assert result.exit_code == 0, result.output
+    assert seen["concurrency"] == 3
+
+    result = CliRunner().invoke(cli.main, ["bench"])
+    assert result.exit_code == 0, result.output
+    assert seen["concurrency"] == config.DEFAULT_TEST_CONCURRENCY
 
 
 def test_cli_bench_requires_running_container(monkeypatch):

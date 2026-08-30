@@ -327,6 +327,10 @@ def _test_one(candidate: Candidate, size_mb: int, timeout: int) -> _ParallelResu
         if not downloaded:
             return _ParallelResult(error="download failed")
         return _ParallelResult(mbits=downloaded["mbits"], geo=verdict.geo)
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:  # a broken candidate must not kill the batch
+        return _ParallelResult(error=f"test failed: {exc}")
     finally:
         remove_container(name)
 
