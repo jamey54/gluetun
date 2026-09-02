@@ -66,7 +66,7 @@ You only need to set credentials for providers you actually use.
 | `vpn status [-s SIZE] [--no-speedtest]` | Container state, effective selection, public IP, speed test |
 | `vpn down` | Stop the VPN container |
 | `vpn logs [-f] [-n N]` | Show container logs |
-| `vpn bench` | Benchmark locations and connect to the fastest |
+| `vpn bench [--connect]` | Benchmark locations and report the fastest (keeps current unless `--connect`) |
 
 ### up vs connect
 
@@ -149,14 +149,14 @@ Swaps additionally exclude the previous exit IP from acceptance, so a failed swa
 
 ## Benchmark
 
-`vpn bench` finds and connects to the fastest location across **all credentialed providers/protocols**:
+`vpn bench` benchmarks locations across **all credentialed providers/protocols** and reports the fastest. It does **not** connect by default — your current location is kept unless you pass `--connect`:
 
 ```bash
-vpn bench                        # every credentialed provider/protocol
+vpn bench                        # every credentialed provider/protocol; keep current
 vpn bench --country Japan        # one country, every provider
 vpn bench --provider surfshark   # one provider's countries
 vpn bench --protocol openvpn     # one protocol, every provider
-vpn bench --no-connect           # report results, keep the current location
+vpn bench --connect              # benchmark, then connect to the fastest
 vpn bench -c 4                   # bench 4 candidates at once on temp containers
 ```
 
@@ -165,7 +165,7 @@ How it runs:
 1. **Latency prescreen** — parallel TCP-connect probes (port 443, host-side) rank every candidate location; unreachable ones sort last.
 2. **Screening** — the top `--top` (default 12) locations are tested with a `--scan-size` MB (default 10) download. Each must prove an IP change (exit IP must differ from your bare IP *and* the previous exit — leaks and failed swaps are marked `leak` / `no reconnect`). Exits that geolocate outside the requested country are flagged `geo: <country>` but still tested.
 3. **Finals** — the best 3 are re-tested with the full `-s/--size` MB (default 25) download.
-4. **Winner** — connected automatically after a final re-check of the exit IP. With `--no-connect` (or Ctrl-C at any point) the pre-bench settings are restored instead.
+4. **Result** — without `--connect` the pre-bench settings are restored and the table reports the winner. With `--connect` the winner is adopted after a final re-check of the exit IP. In either case Ctrl-C at any point restores the pre-bench settings.
 
 The default `-c/--concurrency 1` hot-swaps the running container for every test. Raise it (e.g. `-c 4`) to run the screening and final stages as batches of concurrent tests, each candidate on its own **temporary one-off container**; your live connection is then left untouched until the winner is connected. All temporary containers are removed after each batch, and aborted runs tear them down too.
 

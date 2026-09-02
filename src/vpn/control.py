@@ -56,6 +56,8 @@ def _request(
     try:
         with urlopen(request, timeout=timeout) as response:
             return response.status, response.read().decode(errors="replace")
+    except TimeoutError as exc:
+        raise ControlError(None, f"timed out after {timeout}s") from exc
     except HTTPError as exc:
         message = exc.read().decode(errors="replace").strip()
         raise ControlError(exc.code, message or exc.reason.__str__()) from exc
@@ -97,9 +99,9 @@ def get_vpn_status() -> str:
     return str(json.loads(body).get("status", ""))
 
 
-def set_vpn_status(status: str) -> None:
+def set_vpn_status(status: str, timeout: int = GET_TIMEOUT_S) -> None:
     """Start or stop the VPN tunnel ('running' / 'stopped')."""
-    _request("PUT", "/v1/vpn/status", payload={"status": status})
+    _request("PUT", "/v1/vpn/status", payload={"status": status}, timeout=timeout)
 
 
 # ---------------------------------------------------------------------------

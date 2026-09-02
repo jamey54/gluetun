@@ -31,6 +31,7 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 CONTROL_SERVER_PORT = 8000
 GET_TIMEOUT_S = 10
 PUT_TIMEOUT_S = 60
+DOWN_TIMEOUT_S = 3
 HTTP_NOT_FOUND = 404
 
 # --- Provider ------------------------------------------------------------

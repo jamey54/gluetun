@@ -153,15 +153,17 @@ def test_rank_unreachable_last_stable():
 # ---------------------------------------------------------------------------
 
 
-def test_run_bench_connects_winner_by_default(monkeypatch):
+def test_run_bench_restores_baseline_by_default(monkeypatch, happy_path):
+    """Without connect_winner the pre-bench settings are restored, not adopted."""
     probes = {"fast": 0.05, "mid": 0.10, "slow": 0.20}
     monkeypatch.setattr(bench, "probe_hosts", Recorder([probes]))
 
+    base = baseline_doc()
+    monkeypatch.setattr(bench, "get_settings", Recorder([base]))
     counter = {"n": 0}
 
     def fake_measure(size_mb: int, timeout: int = 120) -> dict[str, float]:
         counter["n"] += 1
-        # screening runs latency-ranked (fast, mid, slow), speeds descending
         return {
             "mbits": 30.0 - 10.0 * ((counter["n"] - 1) % 3),
             "seconds": 1.0,
@@ -180,6 +182,32 @@ def test_run_bench_connects_winner_by_default(monkeypatch):
     assert report.winner is not None
     assert report.winner.candidate.location == "Fast"
     assert not report.interrupted
+    assert report.action.startswith("Kept previous settings")
+    assert any(args and args[0] is base for args, _ in happy_path.calls)
+
+
+def test_run_bench_connects_winner_when_requested(monkeypatch, happy_path):
+    """connect_winner=True adopts the fastest location (opt-in connect)."""
+    probes = {"fast": 0.05, "slow": 0.20}
+    monkeypatch.setattr(bench, "probe_hosts", Recorder([probes]))
+
+    counter = {"n": 0}
+
+    def fake_measure(size_mb: int, timeout: int = 120) -> dict[str, float]:
+        counter["n"] += 1
+        return {"mbits": 30.0 - 10.0 * ((counter["n"] - 1) % 2), "seconds": 1.0,
+                "mbytes": float(size_mb)}
+
+    monkeypatch.setattr(bench, "measure", fake_measure)
+
+    candidates = [
+        candidate("surfshark", "wireguard", "Slow", None, "slow"),
+        candidate("surfshark", "wireguard", "Fast", None, "fast"),
+    ]
+    report = bench.run_bench(candidates, top=3, connect_winner=True, say=lambda *_: None)
+
+    assert report.winner is not None
+    assert report.winner.candidate.location == "Fast"
     assert report.action.startswith("Connected to winner")
 
 
@@ -279,6 +307,7 @@ def test_run_bench_winner_adoption_stayed_passes_no_prev_ip(monkeypatch, happy_p
     monkeypatch.setattr(bench, "verify", fake_verify)
     report = bench.run_bench(
         [candidate("surfshark", "wireguard", "France", None, "fr")],
+        connect_winner=True,
         say=lambda *_: None,
     )
     assert report.action.startswith("Connected to winner")
@@ -307,7 +336,7 @@ def test_run_bench_winner_adoption_after_swap_excludes_prev_exit(monkeypatch, ha
         candidate("surfshark", "wireguard", "Spain", None, "es"),
         candidate("surfshark", "wireguard", "France", None, "fr"),
     ]
-    report = bench.run_bench(candidates, say=lambda *_: None)
+    report = bench.run_bench(candidates, connect_winner=True, say=lambda *_: None)
     assert report.action.startswith("Connected to winner")
     # France's final ran last, so prev_ip is France's exit when swapping to Spain
     assert seen[-1] == ("Spain", "10.4.0.1")
@@ -325,6 +354,7 @@ def test_run_bench_winner_adoption_reports_failed_recheck(monkeypatch, happy_pat
     monkeypatch.setattr(bench, "verify", fake_verify)
     report = bench.run_bench(
         [candidate("surfshark", "wireguard", "France", None, "fr")],
+        connect_winner=True,
         say=lambda *_: None,
     )
     assert report.action.startswith("Stayed on")
@@ -387,6 +417,7 @@ def test_run_bench_interrupt_during_adoption_restores(monkeypatch, happy_path):
     monkeypatch.setattr(bench, "verify", fake_verify)
     report = bench.run_bench(
         [candidate("surfshark", "wireguard", "France", None, "fr")],
+        connect_winner=True,
         say=lambda *_: None,
     )
     assert report.winner is not None
@@ -445,7 +476,7 @@ def test_run_bench_parallel_uses_temp_containers(monkeypatch, happy_path):
         candidate("surfshark", "wireguard", "Spain", None, "es"),
         candidate("protonvpn", "wireguard", "Japan", "Tokyo", "jp"),
     ]
-    report = bench.run_bench(candidates, concurrency=2, say=lambda *_: None)
+    report = bench.run_bench(candidates, concurrency=2, connect_winner=True, say=lambda *_: None)
 
     names = [name for name, _ in launched]
     assert len(names) == 6  # 3 screened + 3 finalists, all via temp containers
@@ -501,7 +532,7 @@ def test_run_bench_parallel_failure_keeps_going(monkeypatch, happy_path):
         candidate("surfshark", "wireguard", "France", None, "fr"),
         candidate("surfshark", "wireguard", "Spain", None, "es"),
     ]
-    report = bench.run_bench(candidates, concurrency=2, say=lambda *_: None)
+    report = bench.run_bench(candidates, concurrency=2, connect_winner=True, say=lambda *_: None)
 
     by_country = {r.candidate.country: r for r in report.results}
     assert by_country["France"].error == "no public IP"
@@ -596,7 +627,7 @@ def test_cli_bench_end_to_end(monkeypatch):
 
     monkeypatch.setattr(bench, "measure", fake_measure)
 
-    result = CliRunner().invoke(cli.main, ["bench"])
+    result = CliRunner().invoke(cli.main, ["bench", "--connect"])
     assert result.exit_code == 0, result.output
     # default scope = running pair; latency-ranked screening; winner France connected
     assert "Benchmarking 2 locations" in result.output
@@ -629,10 +660,17 @@ def test_cli_bench_concurrency_flag_passes_through(monkeypatch):
     result = CliRunner().invoke(cli.main, ["bench", "-c", "3"])
     assert result.exit_code == 0, result.output
     assert seen["concurrency"] == 3
+    assert seen["connect_winner"] is False  # no connect by default
 
     result = CliRunner().invoke(cli.main, ["bench"])
     assert result.exit_code == 0, result.output
     assert seen["concurrency"] == config.DEFAULT_TEST_CONCURRENCY
+    assert seen["connect_winner"] is False
+
+    result = CliRunner().invoke(cli.main, ["bench", "--connect"])
+    assert result.exit_code == 0, result.output
+    assert seen["concurrency"] == config.DEFAULT_TEST_CONCURRENCY
+    assert seen["connect_winner"] is True
 
 
 def test_cli_bench_requires_running_container(monkeypatch):

@@ -6,8 +6,9 @@ runtime config engine (vpn.apply), proves the exit IP actually moved (leak-first
 verification), then downloads through the tunnel. With concurrency>1 the screen
 and final stages instead run batches of candidates on temporary one-off
 containers in parallel, leaving the running tunnel untouched until the winner
-is connected. The winner is connected by default; Ctrl-C or --no-connect
-restores the pre-bench settings document instead.
+is connected. The winner is connected only when ``connect_winner`` is set
+(--connect); by default the pre-bench settings are restored, and Ctrl-C at any
+point restores them too.
 """
 
 import itertools
@@ -166,7 +167,7 @@ def run_bench(
     limit: int = 0,
     scan_size_mb: int = DEFAULT_SCAN_SIZE_MB,
     final_size_mb: int = DEFAULT_FINAL_SIZE_MB,
-    connect_winner: bool = True,
+    connect_winner: bool = False,
     concurrency: int = DEFAULT_TEST_CONCURRENCY,
     say: Callable[[str], None] = click.echo,
 ) -> BenchReport:

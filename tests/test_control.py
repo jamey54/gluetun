@@ -135,6 +135,17 @@ def test_connection_error_wrapped(monkeypatch):
     assert "connection refused" in str(excinfo.value)
 
 
+def test_timeout_error_wrapped(monkeypatch):
+    def boom(request: Any, timeout: float = 10) -> None:
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(control, "urlopen", boom)
+    with pytest.raises(control.ControlError) as excinfo:
+        control.get_settings()
+    assert excinfo.value.status is None
+    assert "timed out" in str(excinfo.value)
+
+
 def test_get_settings_invalid_json_raises(monkeypatch):
     monkeypatch.setattr(control, "urlopen", fake_urllib((200, "<html>nope</html>")))
     with pytest.raises(control.ControlError):

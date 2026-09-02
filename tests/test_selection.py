@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from vpn import cli
+from vpn import cli, config
 from vpn.apply import Selection
 
 
@@ -375,11 +375,14 @@ def test_status_hides_dns_and_port_when_unreachable(monkeypatch):
 
 
 def test_down_stops_vpn_before_compose(monkeypatch, compose_calls):
-    stopped: list[str] = []
-    monkeypatch.setattr("vpn.control.set_vpn_status", lambda s: stopped.append(s))
+    stopped: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        "vpn.control.set_vpn_status",
+        lambda s, timeout=10: stopped.append((s, timeout)),
+    )
     result = invoke(["down"])
     assert result.exit_code == 0
-    assert stopped == ["stopped"]
+    assert stopped == [("stopped", config.DOWN_TIMEOUT_S)]
     assert compose_calls[0][0] == ("down",)
     assert "VPN stopped." in result.output
 
@@ -387,8 +390,19 @@ def test_down_stops_vpn_before_compose(monkeypatch, compose_calls):
 def test_down_succeeds_when_control_server_unreachable(monkeypatch, compose_calls):
     from vpn.control import ControlError
 
-    def boom(s):
+    def boom(s, timeout=10):
         raise ControlError(None, "no")
+
+    monkeypatch.setattr("vpn.control.set_vpn_status", boom)
+    result = invoke(["down"])
+    assert result.exit_code == 0
+    assert compose_calls[0][0] == ("down",)
+    assert "VPN stopped." in result.output
+
+
+def test_down_succeeds_when_control_server_times_out(monkeypatch, compose_calls):
+    def boom(s, timeout=10):
+        raise TimeoutError("timed out")
 
     monkeypatch.setattr("vpn.control.set_vpn_status", boom)
     result = invoke(["down"])

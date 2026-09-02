@@ -25,6 +25,7 @@ from vpn.config import (
     DEFAULT_SCAN_SIZE_MB,
     DEFAULT_SIZE_MB,
     DEFAULT_TEST_CONCURRENCY,
+    DOWN_TIMEOUT_S,
 )
 from vpn.docker import (
     GLUETUN_IMAGE,
@@ -307,8 +308,8 @@ def connect(
 @main.command()
 def down() -> None:
     """Stop the VPN container."""
-    with contextlib.suppress(control.ControlError):
-        control.set_vpn_status("stopped")
+    with contextlib.suppress(Exception):
+        control.set_vpn_status("stopped", timeout=DOWN_TIMEOUT_S)
     compose("down")
     click.echo("VPN stopped.")
 
@@ -433,9 +434,9 @@ def status(size: int, no_speedtest: bool) -> None:
     help="Candidates tested in parallel on temporary containers (1 = test on the running one)",
 )
 @click.option(
-    "--no-connect",
+    "--connect",
     is_flag=True,
-    help="Do not connect to the winner; restore pre-bench settings instead",
+    help="Connect to the fastest location after benchmarking (default: keep the current location)",
 )
 def bench(
     provider: str | None,
@@ -446,12 +447,13 @@ def bench(
     scan_size: int,
     size: int,
     concurrency: int,
-    no_connect: bool,
+    connect: bool,
 ) -> None:
-    """Benchmark locations and connect to the fastest.
+    """Benchmark locations and report the fastest.
 
     By default every credentialed provider/protocol is benched; narrow with
     --provider/--protocol/--country, or cap scale with -n/--max-candidates.
+    The current location is kept unless --connect is passed.
     """
     require_api_key()
     if not container_running():
@@ -477,7 +479,7 @@ def bench(
             scan_size_mb=scan_size,
             final_size_mb=size,
             concurrency=concurrency,
-            connect_winner=not no_connect,
+            connect_winner=connect,
         )
     except KeyboardInterrupt:
         raise SystemExit(130) from None
