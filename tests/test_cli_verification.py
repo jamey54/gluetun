@@ -257,7 +257,7 @@ def test_same_country_used_for_verification():
 
 def test_container_running_requires_running_state(monkeypatch):
     states = iter(["exited", "running", None])
-    monkeypatch.setattr("vpn.docker.container_status", lambda: next(states))
+    monkeypatch.setattr("vpn.docker.container_status", lambda name=None: next(states))
     from vpn.docker import container_running
 
     assert container_running() is False  # exited

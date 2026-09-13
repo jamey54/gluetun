@@ -43,15 +43,15 @@ def inspect_container(format_string: str, name: str | None = None) -> str | None
     return result.stdout if result.returncode == 0 else None
 
 
-def container_status() -> str | None:
+def container_status(name: str | None = None) -> str | None:
     """Return the container's Docker state ('running', 'exited', ...), or None."""
-    out = inspect_container("{{.State.Status}}")
+    out = inspect_container("{{.State.Status}}", name=name)
     return out.strip() if out else None
 
 
-def container_running() -> bool:
+def container_running(name: str | None = None) -> bool:
     """True only when the container exists and is running."""
-    return container_status() == "running"
+    return container_status(name=name) == "running"
 
 
 def container_env() -> dict[str, str]:
