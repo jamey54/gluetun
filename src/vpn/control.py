@@ -13,8 +13,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from vpn.config import DEFAULT_BASE_URL, GET_TIMEOUT_S, PUT_TIMEOUT_S
-from vpn.docker import env_lookup
+from vpn.config import GET_TIMEOUT_S, PUT_TIMEOUT_S
+from vpn.instance import current_instance, env_lookup
 from vpn.providers import get_provider_env
 
 SETTINGS_PATH = "/v1/vpn/settings"
@@ -34,9 +34,14 @@ class ControlError(RuntimeError):
 
 
 def base_url() -> str:
-    """Control server base URL (env-overridable, loopback by default)."""
+    """Control server base URL for the active instance (loopback by default).
+
+    An explicit HTTP_CONTROL_SERVER_ADDRESS (full URL) still overrides — it
+    was the historical escape hatch. Otherwise each instance targets its own
+    published host port.
+    """
     address = env_lookup("HTTP_CONTROL_SERVER_ADDRESS")
-    return (address or DEFAULT_BASE_URL).rstrip("/")
+    return (address or current_instance().base_url).rstrip("/")
 
 
 def _request(

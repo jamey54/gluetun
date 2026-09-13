@@ -1,25 +1,25 @@
 """Central configuration: paths, network, timeouts, and tuning knobs.
 
 Every magic number lives here. Modules import what they need; nothing is
-duplicated.
+duplicated. Per-instance state (name, control port, env, compose file, lock)
+lives in vpn.instance.
 """
 
 import os
 from importlib.resources import files as resource_files
 from pathlib import Path
 
-# --- Paths & container ---------------------------------------------------
+# --- Paths ---------------------------------------------------------------
 
-CONTAINER: str = os.getenv("GLUETUN_CONTAINER", "gluetun")
-
-CACHE_DIR = Path.home() / ".cache" / "gluetun"
+CACHE_DIR = Path.home() / ".cache" / "vpn"
 CACHE_FILE = CACHE_DIR / "servers.json"
-LOCK_FILE = CACHE_DIR / "settings.lock"
+LOCKS_DIR = CACHE_DIR / "locks"
+INSTANCES_DIR = CACHE_DIR / "instances"
 
 # --- Caching -------------------------------------------------------------
 
 CACHE_TTL: int = int(os.getenv("GLUETUN_CACHE_TTL", "3600"))
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 
 # --- Lock ----------------------------------------------------------------
 
@@ -27,8 +27,7 @@ LOCK_FILE_PERMS = 0o600
 
 # --- HTTP / Control server -----------------------------------------------
 
-DEFAULT_BASE_URL = "http://127.0.0.1:8000"
-CONTROL_SERVER_PORT = 8000
+DEFAULT_CONTROL_PORT = 8000
 GET_TIMEOUT_S = 10
 PUT_TIMEOUT_S = 60
 DOWN_TIMEOUT_S = 3
@@ -68,7 +67,7 @@ DEFAULT_TEST_CONCURRENCY = 1
 # --- Compose file resolution ---------------------------------------------
 
 
-def _resolve_compose_file() -> str:
+def resolve_compose_file() -> str:
     """Locate vpn.yml: env override, then cwd, then the packaged copy."""
     override = os.getenv("GLUETUN_COMPOSE_FILE")
     if override:
@@ -77,9 +76,6 @@ def _resolve_compose_file() -> str:
     if local.exists():
         return str(local)
     return str(resource_files("vpn").joinpath("vpn.yml"))
-
-
-COMPOSE_FILE: str = _resolve_compose_file()
 
 
 # --- .env loading --------------------------------------------------------
@@ -97,12 +93,3 @@ def read_env_file(path: Path | str) -> dict[str, str]:
             key, value = line.split("=", 1)
             env[key.strip()] = value.strip()
     return env
-
-
-def _load_dotenv() -> None:
-    env_path = Path(COMPOSE_FILE).parent / ".env"
-    for key, value in read_env_file(env_path).items():
-        os.environ.setdefault(key, value)
-
-
-_load_dotenv()

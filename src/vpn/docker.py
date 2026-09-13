@@ -1,17 +1,12 @@
 """Docker / docker compose helpers."""
 
+import json
 import os
 import subprocess
-from pathlib import Path
 
-from vpn.config import COMPOSE_FILE, CONTAINER, read_env_file
+from vpn.instance import current_instance
 
 GLUETUN_IMAGE = "qmcgaw/gluetun:latest"
-
-
-def env_lookup(name: str) -> str | None:
-    """Effective value for compose substitution (.env loaded into os.environ at startup)."""
-    return os.environ.get(name)
 
 
 def run(
@@ -33,14 +28,15 @@ def run(
     return result
 
 
-def inspect_container(format_string: str) -> str | None:
-    """Inspect the container with a Go template. None if the container doesn't exist."""
+def inspect_container(format_string: str, name: str | None = None) -> str | None:
+    """Inspect the active instance's container with a Go template. None if absent."""
+    container = name or current_instance().container
     result = run(
         "docker",
         "inspect",
         "--format",
         format_string,
-        CONTAINER,
+        container,
         capture=True,
         check=False,
     )
@@ -69,19 +65,45 @@ def container_env() -> dict[str, str]:
     return env
 
 
+def container_image() -> str | None:
+    """The container's image reference, or None when absent."""
+    out = inspect_container("{{.Config.Image}}")
+    return out.strip() if out else None
+
+
+def container_control_port() -> int | None:
+    """Host port published for the container's control server (8000/tcp), if any."""
+    out = inspect_container("{{json .NetworkSettings.Ports}}")
+    if not out:
+        return None
+    try:
+        ports = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    bindings = ports.get("8000/tcp") or []
+    if not bindings or not bindings[0].get("HostPort"):
+        return None
+    try:
+        return int(bindings[0]["HostPort"])
+    except (TypeError, ValueError):
+        return None
+
+
 def compose(
     *args: str, env_overrides: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
-    """Run docker compose with the vpn.yml file.
+    """Run docker compose against the active instance's file and project.
 
-    Interpolation values come from the process environment: the project .env
-    file merged with any overrides. Process env beats compose's own .env
-    lookup, so no temporary env file (and no secrets on disk) is needed.
+    The project name is always pinned with ``-p`` so it never depends on the
+    file location or a ``name:`` key. Interpolation env is the instance's
+    merged env (its .env/env-file wins over the process environment) overlaid
+    by any overrides baked at create time — no temporary env file (and no
+    secrets on disk) is needed.
     """
-    base = read_env_file(Path(COMPOSE_FILE).parent / ".env")
-    merged = {**base, **(env_overrides or {})}
-    cmd = ["docker", "compose", "-f", COMPOSE_FILE, *args]
-    return run(*cmd, env={**os.environ, **merged})
+    inst = current_instance()
+    cmd = ["docker", "compose", "-f", inst.compose_file, "-p", inst.project, *args]
+    env = {**inst.env, **(env_overrides or {})}
+    return run(*cmd, env={**os.environ, **env})
 
 
 def launch_container(name: str, env: dict[str, str]) -> bool:

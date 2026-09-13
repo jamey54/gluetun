@@ -2,8 +2,9 @@
 
 import time
 
-from vpn.config import CONTAINER, DEFAULT_SIZE_MB, DOWNLOAD_TIMEOUT_S, SPEEDTEST_URL
+from vpn.config import DEFAULT_SIZE_MB, DOWNLOAD_TIMEOUT_S, SPEEDTEST_URL
 from vpn.docker import run
+from vpn.instance import current_instance
 
 
 def mbps(nbytes: int | float, seconds: float) -> float:
@@ -18,9 +19,10 @@ def format_result(result: dict[str, float]) -> str:
 def measure(
     size_mb: int = DEFAULT_SIZE_MB,
     timeout: int = DOWNLOAD_TIMEOUT_S,
-    container: str = CONTAINER,
+    container: str | None = None,
 ) -> dict[str, float] | None:
     """Download size_mb through a container. Returns dict or None on failure."""
+    container = container or current_instance().container
     nbytes = size_mb * 1_000_000
     start = time.monotonic()
     result = run(

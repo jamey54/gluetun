@@ -256,6 +256,27 @@ def test_get_servers_fetches_all_providers_in_one_boot(cache_path, monkeypatch):
     assert cache_path.exists()  # result cached
 
 
+def test_get_servers_fetches_all_providers_beyond_credentials(cache_path, monkeypatch):
+    """Shared cache is instance-independent: every provider is fetched even when
+    only a few are credentialed, so one instance's write never starves another."""
+    monkeypatch.setattr(servers, "_read_cache", lambda: None)
+    seen: list[list[str]] = []
+
+    def fake_fetch_all(providers):
+        seen.append(providers)
+        return {
+            p: [{"country": p.upper(), "city": "X", "hostname": "", "vpn": "wireguard"}]
+            for p in providers
+        }
+
+    monkeypatch.setattr(servers, "_fetch_all_servers", fake_fetch_all)
+    monkeypatch.setattr(servers, "_fetch_servers", lambda provider: [])
+    monkeypatch.setattr(servers, "get_active_providers", lambda: {("surfshark", "wireguard")})
+    servers.get_servers()
+    assert seen == [["protonvpn", "surfshark"]]
+    assert cache_path.exists()
+
+
 def test_get_servers_falls_back_to_per_provider_fetch(cache_path, monkeypatch):
     monkeypatch.setattr(servers, "_read_cache", lambda: None)
     monkeypatch.setattr(servers, "_fetch_all_servers", lambda providers: None)

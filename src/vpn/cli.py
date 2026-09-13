@@ -19,8 +19,6 @@ from vpn.bench import (
     run_bench,
 )
 from vpn.config import (
-    CONTAINER,
-    CONTROL_SERVER_PORT,
     DEFAULT_PROTOCOL,
     DEFAULT_SCAN_SIZE_MB,
     DEFAULT_SIZE_MB,
@@ -32,9 +30,9 @@ from vpn.docker import (
     compose,
     container_running,
     container_status,
-    env_lookup,
     run,
 )
+from vpn.instance import current_instance, env_lookup
 from vpn.ipinfo import current_exit_ip, print_ip_status
 from vpn.picker import select_server
 from vpn.providers import (
@@ -64,9 +62,10 @@ PROTOCOL = click.Choice(
 def require_api_key() -> None:
     """Fail closed: the control server must never run with an empty API key (M2)."""
     if not env_lookup("HTTP_CONTROL_SERVER_API_KEY"):
+        port = current_instance().control_port
         raise SystemExit(
             "HTTP_CONTROL_SERVER_API_KEY is not set.\n"
-            f"It authenticates gluetun's control server (port {CONTROL_SERVER_PORT}) "
+            f"It authenticates gluetun's control server (port {port}) "
             "— add any random string to .env."
         )
 
@@ -280,7 +279,9 @@ def connect(
 
     require_api_key()
     if not container_running():
-        raise SystemExit(f"Container '{CONTAINER}' is not running. Use 'vpn up' first.")
+        raise SystemExit(
+            f"Container '{current_instance().container}' is not running. Use 'vpn up' first."
+        )
     current = _require_selection()
 
     if not any(v is not None for v in (provider, protocol, country, city)):
@@ -322,7 +323,7 @@ def logs(follow: bool, tail: str) -> None:
     args: list[str] = ["logs"]
     if follow:
         args.append("-f")
-    args.extend(["--tail", tail, CONTAINER])
+    args.extend(["--tail", tail, current_instance().container])
     compose(*args)
 
 
@@ -349,10 +350,11 @@ def status(size: int, no_speedtest: bool) -> None:
     """Show container state, effective selection, public IP, and speed test."""
     state = container_status()
     if not state:
-        click.echo(f"Container '{CONTAINER}' not found.")
+        click.echo(f"Container '{current_instance().container}' not found.")
         return
 
-    _kv("Container", f"{CONTAINER} ({state})")
+    container = current_instance().container
+    _kv("Container", f"{container} ({state})")
 
     try:
         vpn = control.get_vpn_status()
@@ -457,7 +459,7 @@ def bench(
     """
     require_api_key()
     if not container_running():
-        raise SystemExit(f"Container '{CONTAINER}' is not running.")
+        raise SystemExit(f"Container '{current_instance().container}' is not running.")
     by_provider = listable_servers(get_servers())
     if not any(by_provider.values()):
         raise SystemExit("No servers found. Is Docker running?")

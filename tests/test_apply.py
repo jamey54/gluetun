@@ -11,8 +11,8 @@ from vpn import apply, config, control
 
 @pytest.fixture(autouse=True)
 def _lock(monkeypatch, tmp_path):
-    """Redirect the advisory lockfile into the test sandbox."""
-    monkeypatch.setattr(config, "LOCK_FILE", tmp_path / "settings.lock")
+    """Redirect per-instance locks into the test sandbox."""
+    monkeypatch.setattr(config, "LOCKS_DIR", tmp_path)
 
 
 def selection(
@@ -63,7 +63,7 @@ def test_key_folds_case():
 
 def test_swap_lock_excludes_concurrent_holders():
     with apply.swap_lock():
-        fd = os.open(config.LOCK_FILE, os.O_CREAT | os.O_RDWR)
+        fd = os.open(config.LOCKS_DIR / "gluetun.lock", os.O_CREAT | os.O_RDWR)
         try:
             with pytest.raises(BlockingIOError):
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -74,7 +74,7 @@ def test_swap_lock_excludes_concurrent_holders():
 def test_swap_lock_released_after_context():
     with apply.swap_lock():
         pass
-    fd = os.open(config.LOCK_FILE, os.O_CREAT | os.O_RDWR)
+    fd = os.open(config.LOCKS_DIR / "gluetun.lock", os.O_CREAT | os.O_RDWR)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # must not raise
     finally:

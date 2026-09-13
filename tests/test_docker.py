@@ -58,7 +58,9 @@ def test_compose_merges_env_without_tempfile(monkeypatch):
     monkeypatch.setattr(docker, "run", fake_run)
     docker.compose("up", "-d", env_overrides={"WIREGUARD_PRIVATE_KEY": "secret"})
 
-    assert seen_args[:4] == ("docker", "compose", "-f", config.COMPOSE_FILE)
+    assert seen_args[:4] == ("docker", "compose", "-f", config.resolve_compose_file())
+    assert seen_args[4] == "-p"
+    assert seen_args[5] == "vpn-gluetun"
     assert seen_env is not None
     assert seen_env["WIREGUARD_PRIVATE_KEY"] == "secret"
     assert seen_env["PATH"]  # process env preserved

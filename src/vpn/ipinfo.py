@@ -16,7 +16,6 @@ from urllib.request import urlopen
 import click
 
 from vpn.config import (
-    CONTAINER,
     CURRENT_EXIT_IP_RETRIES,
     IP_FETCH_DELAY,
     IP_FETCH_RETRIES,
@@ -26,6 +25,7 @@ from vpn.config import (
 )
 from vpn.countries import resolve_country
 from vpn.docker import run
+from vpn.instance import current_instance
 from vpn.textutil import fold
 
 _real_ip_cache: str | None = None
@@ -91,8 +91,9 @@ def _same_country(a: str, b: str) -> bool:
     return bool(a) and bool(b) and fold(resolve_country(a)) == fold(resolve_country(b))
 
 
-def _probe(container: str = CONTAINER) -> dict[str, object] | None:
+def _probe(container: str | None = None) -> dict[str, object] | None:
     """One public-IP probe from inside a container. None on failure."""
+    container = container or current_instance().container
     result = run(
         "docker",
         "exec",
@@ -121,7 +122,7 @@ def fetch_ip_info(
     delay: float = IP_FETCH_DELAY,
     expected_country: str | None = None,
     exclude_ips: Iterable[str] | None = None,
-    container: str = CONTAINER,
+    container: str | None = None,
 ) -> IpOutcome:
     """Poll until the container's exit IP is outside exclude_ips (bare IP included).
 

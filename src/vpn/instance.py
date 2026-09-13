@@ -1,0 +1,259 @@
+"""Per-instance identity: name, control port, env, compose file, lock, registry.
+
+An *instance* is one Gluetun container fully owned by vpn, identified by its
+docker container name (== instance name). The default instance is ``gluetun``
+and keeps the historical single-container behaviour. Commands resolve an
+instance up front and run inside ``instance_context``; everything else reads
+the active instance through ``current_instance()``.
+
+Isolation invariants:
+- container name is always the instance name (never derived from the compose
+  project, which is pinned to ``vpn-<instance>`` via ``docker compose -p``);
+- swaps/benches serialize on ``~/.cache/vpn/locks/<instance>.lock`` per
+  instance only;
+- every docker exec / IP probe / status read targets the instance's container
+  name explicitly.
+"""
+
+import json
+import os
+import re
+import socket
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
+from importlib.resources import files as resource_files
+from pathlib import Path
+
+import click
+
+from vpn import config
+from vpn.config import (
+    DEFAULT_CONTROL_PORT,
+    read_env_file,
+    resolve_compose_file,
+)
+
+DEFAULT_INSTANCE = "gluetun"
+INSTANCE_ENV_VAR = "GLUETUN_INSTANCE"
+INSTANCE_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
+PORT_RANGE = range(DEFAULT_CONTROL_PORT, 9001)
+
+
+def parse_instance_name(name: str) -> str:
+    """Validate an instance name against docker-safe rules; usage error on fail."""
+    name = name.strip()
+    if not INSTANCE_PATTERN.match(name):
+        raise click.UsageError(
+            f"Invalid instance name {name!r}: must match {INSTANCE_PATTERN.pattern}"
+        )
+    return name
+
+
+def resolve_default_name() -> str:
+    """Default instance name: the GLUETUN_INSTANCE env alias, else 'gluetun'."""
+    return os.getenv(INSTANCE_ENV_VAR, DEFAULT_INSTANCE)
+
+
+@dataclass(frozen=True)
+class Instance:
+    """A fully-resolved vpn instance: one owned Gluetun container."""
+
+    name: str
+    control_port: int
+    env_file: Path | None
+    env: dict[str, str]
+    compose_file: str
+
+    @property
+    def container(self) -> str:
+        return self.name
+
+    @property
+    def project(self) -> str:
+        return f"vpn-{self.name}"
+
+    @property
+    def lock_file(self) -> str:
+        return str(config.LOCKS_DIR / f"{self.name}.lock")
+
+    @property
+    def base_url(self) -> str:
+        return f"http://127.0.0.1:{self.control_port}"
+
+
+# ---------------------------------------------------------------------------
+# Registry (persisted per-instance config)
+# ---------------------------------------------------------------------------
+
+
+def registry_path(name: str) -> Path:
+    return config.INSTANCES_DIR / f"{name}.json"
+
+
+def read_registry(name: str) -> dict[str, object] | None:
+    """Persisted instance state (control port, env file); None when absent."""
+    path = registry_path(name)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_registry(instance: Instance) -> None:
+    """Persist the instance's control port and env file for later reuse."""
+    config.INSTANCES_DIR.mkdir(parents=True, exist_ok=True)
+    data = {
+        "instance": instance.name,
+        "control_port": instance.control_port,
+        "env_file": str(instance.env_file) if instance.env_file else None,
+    }
+    registry_path(instance.name).write_text(json.dumps(data, indent=2) + "\n")
+
+
+def list_registry() -> list[str]:
+    """Instances known to the registry, sorted."""
+    if not config.INSTANCES_DIR.is_dir():
+        return []
+    return sorted(p.stem for p in config.INSTANCES_DIR.iterdir() if p.suffix == ".json")
+
+
+# ---------------------------------------------------------------------------
+# Env
+# ---------------------------------------------------------------------------
+
+
+def build_env(env_file: Path | None, compose_file: str) -> dict[str, str]:
+    """Merged env for an instance: its env source wins over the process env.
+
+    With ``--env-file`` the file *replaces* the project's ``.env`` for that
+    instance (compose-style); otherwise the ``.env`` next to the compose file
+    is the source. The process environment is the fallback for everything a
+    non-secret source doesn't set.
+    """
+    if env_file is not None:
+        base = read_env_file(env_file)
+    else:
+        base = read_env_file(Path(compose_file).parent / ".env")
+    return {**os.environ, **base}
+
+
+def env_lookup(name: str) -> str | None:
+    """Effective value for a variable: the active instance's env first."""
+    return current_instance().env.get(name)
+
+
+# ---------------------------------------------------------------------------
+# Compose files
+# ---------------------------------------------------------------------------
+
+
+def compose_file_for(name: str) -> str:
+    """Default instance honors GLUETUN_COMPOSE_FILE/./vpn.yml; others generate one."""
+    if name == DEFAULT_INSTANCE:
+        return resolve_compose_file()
+    return str(config.INSTANCES_DIR / name / "compose.yml")
+
+
+def render_compose(name: str, port: int) -> str:
+    """Per-instance compose file: bundled vpn.yml with name and host port swapped.
+
+    The project is pinned by docker.compose via ``-p``, so the file only pins
+    the container name (== instance) and the host control port.
+    """
+    body = resource_files("vpn").joinpath("vpn.yml").read_text()
+    body = body.replace("container_name: gluetun", f"container_name: {name}")
+    body = re.sub(r"127\.0\.0\.1:\d+:8000/tcp", f"127.0.0.1:{port}:8000/tcp", body)
+    return body
+
+
+def ensure_compose_file(instance: Instance) -> None:
+    """Write the generated per-instance compose file (default uses its own)."""
+    if instance.name == DEFAULT_INSTANCE:
+        return
+    path = Path(instance.compose_file)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_compose(instance.name, instance.control_port))
+
+
+# ---------------------------------------------------------------------------
+# Resolution & context
+# ---------------------------------------------------------------------------
+
+
+def resolve_instance(
+    name: str, control_port: int | None = None, env_file: str | None = None
+) -> Instance:
+    """Build an instance, applying explicit values over persisted registry state."""
+    name = parse_instance_name(name)
+    registry = read_registry(name)
+
+    env_file_path = Path(env_file) if env_file else None
+    if env_file_path is None and registry and registry.get("env_file"):
+        env_file_path = Path(str(registry["env_file"]))
+
+    compose_file = compose_file_for(name)
+
+    if control_port is None:
+        registry_port = registry.get("control_port") if registry else None
+        if isinstance(registry_port, int):
+            control_port = registry_port
+    if control_port is None:
+        control_port = DEFAULT_CONTROL_PORT
+
+    return Instance(
+        name=name,
+        control_port=control_port,
+        env_file=env_file_path,
+        env=build_env(env_file_path, compose_file),
+        compose_file=compose_file,
+    )
+
+
+def default_instance() -> Instance:
+    return resolve_instance(resolve_default_name())
+
+
+_active: ContextVar[Instance | None] = ContextVar("vpn_active_instance", default=None)
+
+
+def current_instance() -> Instance:
+    """The active instance, falling back to the default (recomputed each call)."""
+    active = _active.get()
+    return active if active is not None else default_instance()
+
+
+@contextmanager
+def instance_context(instance: Instance) -> Iterator[None]:
+    """Run inside a specific instance scope."""
+    token = _active.set(instance)
+    try:
+        yield
+    finally:
+        _active.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# Control port allocation
+# ---------------------------------------------------------------------------
+
+
+def _port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+            return False
+        except OSError:
+            return True
+
+
+def allocate_free_port() -> int:
+    """First free host port in [8000, 9000], or a scripted error."""
+    for port in PORT_RANGE:
+        if not _port_in_use(port):
+            return port
+    raise SystemExit("No free control port in [8000, 9000]; pass --ctl-port explicitly.")

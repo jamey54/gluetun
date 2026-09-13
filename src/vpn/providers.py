@@ -1,9 +1,9 @@
 """VPN provider registry and credential handling."""
 
-import os
 from dataclasses import dataclass
 
 from vpn.config import DEFAULT_PROTOCOL
+from vpn.instance import env_lookup
 
 # Surfshark accepts a bare private key, ProtonVPN requires the WireGuard
 # address as well -- hence the require_addresses flag below.
@@ -58,7 +58,7 @@ def active_protocols(provider: str) -> list[str]:
     return [
         protocol
         for protocol, protocol_config in config.items()
-        if all(os.environ.get(var) for var in protocol_config.required_env)
+        if all(env_lookup(var) for var in protocol_config.required_env)
     ]
 
 
@@ -92,7 +92,7 @@ def validate_provider(name: str, protocol: str = DEFAULT_PROTOCOL) -> tuple[str,
     if protocol not in PROVIDERS[name]:
         protocols = ", ".join(PROVIDERS[name])
         raise SystemExit(f"Unknown protocol '{protocol}' for {name}. Available: {protocols}")
-    missing = [var for var in PROVIDERS[name][protocol].required_env if not os.environ.get(var)]
+    missing = [var for var in PROVIDERS[name][protocol].required_env if not env_lookup(var)]
     if missing:
         others = [p for p in active_protocols(name) if p != protocol]
         hint = f" — or pass --protocol {'/'.join(others)}" if others else ""
@@ -104,7 +104,7 @@ def get_provider_env(provider: str, protocol: str) -> dict[str, str]:
     """Map provider-specific env vars to Gluetun's generic env vars."""
     overrides: dict[str, str] = {"VPN_SERVICE_PROVIDER": provider, "VPN_TYPE": protocol}
     for gluetun_var, provider_var in PROVIDERS[provider][protocol].env_map.items():
-        value = os.getenv(provider_var)
+        value = env_lookup(provider_var)
         if value:
             overrides[gluetun_var] = value
     return overrides

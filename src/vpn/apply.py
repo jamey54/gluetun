@@ -16,9 +16,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from vpn import config
-from vpn.config import CONTAINER, HTTP_NOT_FOUND, LOCK_FILE_PERMS
+from vpn.config import HTTP_NOT_FOUND, LOCK_FILE_PERMS
 from vpn.control import ControlError, get_settings, put_settings, with_location
 from vpn.countries import resolve_country
+from vpn.instance import current_instance
 from vpn.ipinfo import fetch_ip_info, real_ip
 from vpn.textutil import fold
 
@@ -65,7 +66,7 @@ class Selection:
 @contextmanager
 def swap_lock() -> Iterator[None]:
     """Advisory cross-process lock held across each settings mutation."""
-    lock_file = config.LOCK_FILE  # read dynamically so tests can redirect it
+    lock_file = config.LOCKS_DIR / (current_instance().name + ".lock")
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, LOCK_FILE_PERMS)
     try:
@@ -113,7 +114,9 @@ class Verification:
     reason: str = ""  # failure label: leak / no reconnect / no public IP
 
 
-def verify(sel: Selection, prev_ip: str | None = None, container: str = CONTAINER) -> Verification:
+def verify(
+    sel: Selection, prev_ip: str | None = None, container: str | None = None
+) -> Verification:
     """Prove the tunnel moved: new exit IP, different from bare and previous.
 
     The bare-IP exclusion comes from ipinfo itself; prev_ip is added so a

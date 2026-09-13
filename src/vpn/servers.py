@@ -9,7 +9,7 @@ from rich.table import Table
 
 from vpn.config import CACHE_DIR, CACHE_FILE, CACHE_TTL, CACHE_VERSION, DEFAULT_PROTOCOL
 from vpn.docker import GLUETUN_IMAGE, run
-from vpn.providers import get_active_providers
+from vpn.providers import PROVIDERS, get_active_providers
 from vpn.textutil import fold
 
 SERVER_SEP = " - "
@@ -167,15 +167,18 @@ def _write_cache(servers: dict[str, list[ServerRow]]) -> None:
 
 
 def get_servers() -> dict[str, list[ServerRow]]:
-    """Fetch servers for all credentialed providers; dict[provider, rows].
+    """Fetch servers for every known provider; dict[provider, rows].
 
-    Prefers one container boot for all providers and falls back to a parallel
-    per-provider fetch when that fails (e.g. on older images).
+    All providers are fetched regardless of credentials so the shared cache is
+    instance-independent (a cache written by one instance is never missing
+    another instance's providers). Prefers one container boot for all providers
+    and falls back to a parallel per-provider fetch when that fails (e.g. on
+    older images). Callers narrow to credentialed pairs via ``listable_servers``.
     """
     cached = _read_cache()
     if cached is not None:
         return cached
-    providers = sorted({provider for provider, _ in get_active_providers()})
+    providers = sorted(PROVIDERS)
     by_provider = _fetch_all_servers(providers)
     if by_provider is None:
         by_provider = {}

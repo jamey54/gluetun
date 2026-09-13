@@ -509,8 +509,13 @@ def test_run_bench_parallel_failure_keeps_going(monkeypatch, happy_path):
     """A failing disposable container is recorded; the rest still benchmark."""
     launched: list[str] = []
     removed: list[str] = []
+
+    def launch(name: str, env: dict[str, str]) -> bool:
+        launched.append(name)
+        return True
+
     monkeypatch.setattr(bench, "get_provider_env", lambda prov, prot: {})
-    monkeypatch.setattr(bench, "launch_container", lambda name, env: launched.append(name) or True)
+    monkeypatch.setattr(bench, "launch_container", launch)
     monkeypatch.setattr(bench, "remove_container", removed.append)
 
     def fake_verify(
@@ -547,8 +552,13 @@ def test_run_bench_parallel_crashed_candidate_is_recorded(monkeypatch, happy_pat
     """An unexpected exception mid-test is degraded to an error, batch survives."""
     launched: list[str] = []
     removed: list[str] = []
+
+    def launch(name: str, env: dict[str, str]) -> bool:
+        launched.append(name)
+        return True
+
     monkeypatch.setattr(bench, "get_provider_env", lambda prov, prot: {})
-    monkeypatch.setattr(bench, "launch_container", lambda name, env: launched.append(name) or True)
+    monkeypatch.setattr(bench, "launch_container", launch)
     monkeypatch.setattr(bench, "remove_container", removed.append)
 
     def fake_verify(
@@ -573,7 +583,7 @@ def test_run_bench_parallel_crashed_candidate_is_recorded(monkeypatch, happy_pat
     report = bench.run_bench(candidates, concurrency=2, say=lambda *_: None)
 
     by_country = {r.candidate.country: r for r in report.results}
-    assert "boom" in by_country["France"].error
+    assert "boom" in (by_country["France"].error or "")
     assert by_country["Spain"].scan_mbps == 25.0
     assert removed == launched
 
