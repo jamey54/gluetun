@@ -61,6 +61,7 @@ You only need to set credentials for providers you actually use.
 
 | Command | Description |
 |---------|-------------|
+| `vpn --version` | Print the exact version (e.g. `vpn 0.2.0`) and exit `0` — derived from `src/vpn/version.py`, kept in sync with `pyproject.toml` |
 | `vpn up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `vpn connect [--instance NAME] [--provider --protocol --country --city] [--list]` | Hot-swap to another server; no arguments opens the picker |
 | `vpn status [--instance NAME] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
@@ -140,7 +141,7 @@ Selections made through the control server live at **runtime only** — `.env` s
 
 Verification is **leak-first**: a connection counts as up only when the exit IP observed from inside the container differs from the host's bare public IP. The bare IP is fetched host-side once per run (overridable with `VPN_REAL_IP` for testing; when unavailable, leak detection degrades to country heuristics only).
 
-After connecting (and after every swap), the CLI probes the public IP from inside the container (`wget https://ipinfo.io`, time-bounded) and reports one of three verdicts:
+After connecting (and after every swap), the CLI probes the public IP from inside the container and reports one of three verdicts. The probe mirrors gluetun's resilient fetch: four echo services (ipinfo.io, Cloudflare `one.one.one.one/cdn-cgi/trace`, ifconfig.co, ip2location) are queried in parallel from inside the container and the most-agreed result wins, so a rate-limited provider (e.g. ipinfo returning HTTP 429) is absorbed by the rest instead of stalling the retry loop. The verdict notes via yellow when the IP was confirmed by a service other than ipinfo:
 
 - **Green** — real VPN exit in the requested country.
 - **Yellow warning** — real VPN exit, but it geolocates elsewhere than requested (common with provider "virtual locations"). You stay connected and the speed test still runs.
@@ -277,7 +278,7 @@ Other non-zero codes are unspecified. `vpn up` and `vpn connect` return `1` when
 |---------|---------|
 | Ensure shared gluetun is running (idempotent; verify-only when already up) | `vpn up` |
 | Shared gluetun health probe | `vpn status --json` |
-| Capability probe (is vpn 0.2+ implemented?) | `vpn ls --json` |
+| Capability probe (is vpn 0.2+ implemented?) | `vpn ls --json` (or `vpn --version` for the exact version) |
 | Create a dedicated instance (creds from `.env`) | `vpn up --instance <plan>-gluetun --provider P [--protocol T] [--country C] [--city Ci]` |
 | Verify a dedicated instance after create | `vpn status --instance <plan>-gluetun --json` |
 | Tear down when the plan container is removed | `vpn down --instance <plan>-gluetun` |

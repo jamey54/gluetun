@@ -69,6 +69,7 @@ from vpn.servers import (
 )
 from vpn.speedtest import format_result, measure
 from vpn.textutil import fold
+from vpn.version import __version__
 
 DEBUG = False
 
@@ -308,6 +309,7 @@ def _apply_request(
 
 
 @click.group()
+@click.version_option(version=__version__, prog_name="vpn", message="%(prog)s %(version)s")
 @click.option("--debug", is_flag=True, envvar="VPN_DEBUG", help="Enable debug output")
 def main(debug: bool) -> None:
     """Gluetun VPN manager."""

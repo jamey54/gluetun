@@ -11,3 +11,7 @@
 - Use modern techniques and best practices.
 - No need for backward compatibility — it's OK to make migrations and break old formats when it improves the code.
 - You may update packages/dependencies to their latest versions and install new tools when needed.
+
+## Versioning
+- The project version lives in `src/vpn/version.py` (`__version__`) and `pyproject.toml` (`[project] version`) — they MUST always match, and `vpn --version` must report exactly that.
+- Bump both together whenever behavior changes; `importlib.metadata` is not used, so drift breaks the contract silently.

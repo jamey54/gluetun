@@ -1,6 +1,7 @@
 """CLI tests for the per-instance surface: naming, ports, env files, exit codes."""
 
 import json
+from pathlib import Path
 from subprocess import CompletedProcess
 
 import pytest
@@ -8,6 +9,7 @@ from click.testing import CliRunner
 
 from vpn import cli, config
 from vpn.apply import Selection
+from vpn.version import __version__
 
 
 @pytest.fixture(autouse=True)
@@ -134,3 +136,15 @@ def test_connect_exit_1_when_not_verified(monkeypatch):
     monkeypatch.setattr(cli, "apply_location", lambda sel: None)
     result = invoke(["connect", "--country", "France"])
     assert result.exit_code == 1
+
+
+def test_version_flag_reports_exact_package_version():
+    result = invoke(["--version"])
+    assert result.exit_code == 0
+    assert result.output.strip() == f"vpn {__version__}"
+
+
+def test_pyproject_version_matches_version_module():
+    tomllib = pytest.importorskip("tomllib")
+    pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+    assert pyproject["project"]["version"] == __version__
