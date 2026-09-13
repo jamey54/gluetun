@@ -131,6 +131,40 @@ def test_vote_single_provider_answer_is_accepted():
     assert probe.sources == ("ifconfigco",)
 
 
+def test_vote_merges_geo_from_winning_group():
+    """Cloudflare reports only the IP; geo/org come from the agreeing providers."""
+    probe = ipinfo._vote(
+        [
+            ("cloudflare", {"ip": "1.1.1.1"}),
+            (
+                "ifconfigco",
+                {"ip": "1.1.1.1", "country": "Germany", "city": "Frankfurt", "org": "AS1"},
+            ),
+            ("ip2location", {"ip": "1.1.1.1", "country": "Germany", "region": "Hesse"}),
+        ]
+    )
+    assert probe.info == {
+        "ip": "1.1.1.1",
+        "country": "Germany",
+        "city": "Frankfurt",
+        "region": "Hesse",
+        "org": "AS1",
+    }
+    assert probe.sources == ("cloudflare", "ifconfigco", "ip2location")
+
+
+def test_vote_merge_keeps_highest_priority_field_values():
+    probe = ipinfo._vote(
+        [
+            ("cloudflare", {"ip": "1.1.1.1"}),
+            ("ip2location", {"ip": "1.1.1.1", "country": "Germany", "org": "AS-ALT"}),
+            ("ipinfo", {"ip": "1.1.1.1", "country": "DE"}),
+        ]
+    )
+    assert probe.info["country"] == "DE"  # ipinfo wins over ip2location
+    assert probe.info["org"] == "AS-ALT"  # filled from ip2location
+
+
 # ---------------------------------------------------------------------------
 # parallel probe
 # ---------------------------------------------------------------------------

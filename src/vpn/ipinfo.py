@@ -201,9 +201,13 @@ def _vote(results: list[tuple[str, dict[str, object]]]) -> _Probe:
         ):
             best_entries, best_priority = entries, priority
 
-    winner = min(best_entries, key=lambda pair: order[pair[0]])
-    sources = tuple(name for name, _ in sorted(best_entries, key=lambda pair: order[pair[0]]))
-    return _Probe(info=dict(winner[1]), sources=sources)
+    ordered = sorted(best_entries, key=lambda pair: order[pair[0]])
+    sources = tuple(name for name, _ in ordered)
+    merged: dict[str, object] = {}
+    for _name, entry in ordered:
+        for key, value in entry.items():
+            merged.setdefault(key, value)
+    return _Probe(info=merged, sources=sources)
 
 
 def _probe(container: str | None = None) -> _Probe | None:
