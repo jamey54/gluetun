@@ -61,12 +61,17 @@ You only need to set credentials for providers you actually use.
 
 | Command | Description |
 |---------|-------------|
-| `vpn up [--provider --protocol --country --city] [--pull] [--recreate]` | Start the VPN; apply any requested location via hot-swap |
-| `vpn connect [--provider --protocol --country --city] [--list]` | Hot-swap to another server; no arguments opens the picker |
-| `vpn status [-s SIZE] [--no-speedtest]` | Container state, effective selection, public IP, speed test |
-| `vpn down` | Stop the VPN container |
-| `vpn logs [-f] [-n N]` | Show container logs |
-| `vpn bench [--connect]` | Benchmark locations and report the fastest (keeps current unless `--connect`) |
+| `vpn up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate]` | Start (or verify) the VPN; apply any requested location via hot-swap |
+| `vpn connect [--instance NAME] [--provider --protocol --country --city] [--list]` | Hot-swap to another server; no arguments opens the picker |
+| `vpn status [--instance NAME] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
+| `vpn ls [--instance NAME] [--json]` | List instances (registry + `vpn-*` compose containers) and their consumers |
+| `vpn down [--instance NAME]` | Stop the VPN container |
+| `vpn logs [--instance NAME] [-f] [-n N]` | Show container logs |
+| `vpn bench [--instance NAME] [--connect]` | Benchmark locations and report the fastest (keeps current unless `--connect`) |
+| `vpn dns [--instance NAME] [on\|off]` | Show or toggle the DNS-over-TLS resolver |
+| `vpn update [--instance NAME]` | Trigger a server list update |
+
+`--instance` is the first option of every command and defaults to `gluetun` (or `GLUETUN_INSTANCE`). See [Instances](#instances).
 
 ### up vs connect
 
@@ -177,14 +182,55 @@ Notes:
 - Parallel mode (`-c > 1`) is limited by the credentials your provider permits: if a provider caps simultaneous sessions, some candidates will simply be reported as failures (`no public IP`) while the rest keep benching — it won't abort the run.
 - Bench state is applied at runtime only — recreating the container (see [Runtime selections and drift](#runtime-selections-and-drift)) reverts to the env-file selection.
 
+## Instances
+
+vpn 0.2 runs several independent Gluetun containers side by side, each its own *instance*. An instance is identified by a name — its docker container name — and owns:
+
+- a container named exactly `<instance>` (compose project `vpn-<instance>`);
+- a control server published on `127.0.0.1:<port>`;
+- a lockfile `~/.cache/vpn/locks/<instance>.lock` (swaps/benches serialize per instance only; different instances run concurrently);
+- an optional `--env-file` replacing `.env` for that instance;
+- a registry record `~/.cache/vpn/instances/<instance>.json` (control port + env file).
+
+Every command accepts `--instance NAME`. Resolution: `--instance` → `GLUETUN_INSTANCE` → default `gluetun`. The default instance is exactly the historical single-container behaviour, so nothing breaks for existing usage.
+
+Container names are **exact matches only**: vpn never touches a container other than the one named after the instance, so a shared gluetun owned by another tool is never matched.
+
+### Control port
+
+Each instance publishes the control server on `127.0.0.1:<port>`. `vpn up` resolves the port in this order:
+
+1. `--ctl-port HOST_PORT`
+2. `GLUETUN_CTL_PORT` (from the instance's env)
+3. a free port in `[8000, 9000]` is auto-allocated on first creation and persisted in the registry for later reuse
+
+The default instance keeps `8000`. `bench -c N` temporary one-off containers never publish host ports.
+
+All control-server traffic (hot-swap `GET/PUT /v1/vpn/settings`, DNS, updater, status) targets the instance's own published port — never a hardcoded `8000`.
+
+### Per-instance env files
+
+The shared `.env` stays the default for every instance. For a dedicated instance, pass `--env-file <path>`: that file **replaces** `.env` for the instance (compose `--env-file` semantics), while the process environment still fills anything it doesn't set. This lets different instances use different providers/credentials.
+
+### Listing instances
+
+`vpn ls [--json]` enumerates instances from the registry and from containers whose compose project starts with `vpn-`, reporting per-instance state, selection, control-server port, and *consumers* — containers sharing the instance's network (`NetworkMode == container:<instance>`).
+
+```text
+$ vpn ls
+INSTANCE   STATE    CONTROL  SELECTION                             CONSUMERS
+gluetun    running  8000     surfshark/wireguard → Germany         firefox-app, squiz-dev
+```
+
 ## Configuration
 
 Secrets live in `.env` (copy `.env.sample`; located next to your compose file). Other settings are overridable via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GLUETUN_CONTAINER` | `gluetun` | Container name |
-| `GLUETUN_COMPOSE_FILE` | bundled `vpn.yml` | Path to compose file (a `./vpn.yml` in the working directory takes precedence) |
+| `GLUETUN_INSTANCE` | `gluetun` | Default instance name when `--instance` is absent |
+| `GLUETUN_CTL_PORT` | unset | Control-server host port for the resolved instance (equivalent to `--ctl-port`) |
+| `GLUETUN_COMPOSE_FILE` | bundled `vpn.yml` | Path to compose file, default instance only (a `./vpn.yml` in the working directory takes precedence) |
 | `GLUETUN_CACHE_TTL` | `3600` | Server cache TTL (seconds) |
 | `VPN_DEBUG` | unset | Set to enable debug output (same as `--debug`) |
 
@@ -204,3 +250,84 @@ A provider/protocol pair only appears in listings and can only be started when a
 ### Set automatically
 
 These are managed by the CLI at container creation time — never define them yourself: `VPN_SERVICE_PROVIDER`, `VPN_TYPE`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `OPENVPN_USER`, `OPENVPN_PASSWORD` (mapped from your provider credentials). Location is *not* baked into env vars: after creation, all selection changes happen through the control server.
+
+## Consumer API (dockerstrator)
+
+This is the contract `dockerstrator` consumes from `vpn`. Stable schemas — additions only, never removals or renames.
+
+### Instance identity and naming
+
+Instance names follow docker-safe rules (`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`); anything else is a usage error (exit `2`). The container name is **always** the instance name and is never derived from the compose project. The compose project is pinned to `vpn-<instance>` via `docker compose -p`, independent of the file location.
+
+Resolution order for every command: `--instance NAME` → `GLUETUN_INSTANCE` → `gluetun`.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0`  | success |
+| `1`  | scripted error / VPN failed / leak (verdict in JSON under `--json`) |
+| `2`  | usage error |
+
+Other non-zero codes are unspecified. `vpn up` and `vpn connect` return `1` when the connection cannot be verified; `vpn status --json` returns `1` when `leak` is `true`; `vpn status --json` returns `0` for any other emitted JSON.
+
+### The calls dockerstrator makes
+
+| Purpose | Command |
+|---------|---------|
+| Ensure shared gluetun is running (idempotent; verify-only when already up) | `vpn up` |
+| Shared gluetun health probe | `vpn status --json` |
+| Capability probe (is vpn 0.2+ implemented?) | `vpn ls --json` |
+| Create a dedicated instance (creds from `.env`) | `vpn up --instance <plan>-gluetun --provider P [--protocol T] [--country C] [--city Ci]` |
+| Verify a dedicated instance after create | `vpn status --instance <plan>-gluetun --json` |
+| Tear down when the plan container is removed | `vpn down --instance <plan>-gluetun` |
+
+dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag, treat vpn as pre-0.2 and hide the *dedicated* gluetun option (shared-only falls back to plain `vpn up`). dockerstrator keeps its own container inventory from `docker ps`; `vpn ls` is used only for instance/control-port/selection state.
+
+`--json` output is deterministic single-line JSON on stdout (no colors, no progress). `--instance` filters `vpn ls` output to one instance.
+
+### `vpn status --json`
+
+```json
+{
+  "instance": "gluetun",
+  "container_name": "gluetun",
+  "image": "qmcgaw/gluetun:latest",
+  "state": "running",
+  "selection": { "provider": "surfshark", "protocol": "wireguard", "country": "Japan", "city": "Tokyo" },
+  "drift": false,
+  "control_server": { "port": 8000, "enabled": true },
+  "exit_ip": { "ip": "1.2.3.4", "country": "Japan" },
+  "leak": false,
+  "last_error": null
+}
+```
+
+- `state` — `running` | `starting` | `stopped` | `absent`.
+- `selection` — the runtime selection (control server) or `null` when the server is unreachable or the instance isn't up.
+- `drift` — `true` when the runtime selection differs from the selection baked into the container's env at create time (i.e. it was hot-swapped).
+- `control_server` — the instance's published host port and whether the control server responded.
+- `exit_ip` — `{ip, country}` observed from inside the container, or `null` (probed only while `running`).
+- `leak` — `true` when the instance is `running` but no exit IP could be read, or the exit IP equals the host's bare public IP.
+- `last_error` — human-readable failure detail (e.g. control server unreachable), else `null`.
+
+### `vpn ls --json`
+
+```json
+{
+  "default": "gluetun",
+  "instances": [
+    {
+      "instance": "gluetun",
+      "container_name": "gluetun",
+      "state": "running",
+      "selection": { "provider": "surfshark", "protocol": "wireguard", "country": "Japan", "city": "Tokyo" },
+      "control_server": { "port": 8000, "enabled": true },
+      "consumers": ["firefox-app", "squiz-dev"]
+    }
+  ]
+}
+```
+
+- `default` — the default instance name (`GLUETUN_INSTANCE`, else `gluetun`).
+- `instances` — one entry per known instance; `state` uses the same values as `status --json`. `selection` and `control_server` are `null` when unknown. `consumers` lists containers sharing the instance's network (`NetworkMode == container:<container_name>`).

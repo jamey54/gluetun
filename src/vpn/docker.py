@@ -31,15 +31,18 @@ def run(
 def inspect_container(format_string: str, name: str | None = None) -> str | None:
     """Inspect the active instance's container with a Go template. None if absent."""
     container = name or current_instance().container
-    result = run(
-        "docker",
-        "inspect",
-        "--format",
-        format_string,
-        container,
-        capture=True,
-        check=False,
-    )
+    try:
+        result = run(
+            "docker",
+            "inspect",
+            "--format",
+            format_string,
+            container,
+            capture=True,
+            check=False,
+        )
+    except OSError:
+        return None  # docker unavailable: treat as absent for read-only probes
     return result.stdout if result.returncode == 0 else None
 
 
