@@ -4,12 +4,18 @@ Verification is leak-first: an observation counts as "connected" only when the
 observed exit IP differs from the host's bare public IP. Country matching is
 advisory — a VPN exit that geolocates elsewhere (virtual locations) is a
 warning, not a failure.
+
+Probability of getting a public IP, gluetun's way: instead of one echo service
+(ipinfo.io) whose rate limit stalls the retry loop, probe the same services
+gluetun uses, in parallel, and accept the most-agreed answer. One provider
+being rate-limited (HTTP 429) no longer blocks everyone else.
 """
 
 import json
 import os
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from urllib.request import urlopen
 
@@ -38,6 +44,7 @@ class IpResult:
 
     info: dict[str, object]
     matched: bool  # country matches expected_country; always True when none given
+    sources: tuple[str, ...] = ()  # provider(s) that supplied the IP
 
 
 @dataclass
@@ -91,9 +98,75 @@ def _same_country(a: str, b: str) -> bool:
     return bool(a) and bool(b) and fold(resolve_country(a)) == fold(resolve_country(b))
 
 
-def _probe(container: str | None = None) -> dict[str, object] | None:
-    """One public-IP probe from inside a container. None on failure."""
-    container = container or current_instance().container
+# ---------------------------------------------------------------------------
+# Resilient probing: the same echo services gluetun uses, in parallel
+# ---------------------------------------------------------------------------
+
+
+def _json_ip(payload: str, key_map: dict[str, str]) -> dict[str, object] | None:
+    """Parse echo-service JSON into a common info dict; None when it has no IP."""
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict) or not data.get("ip"):
+        return None
+    info: dict[str, object] = {"ip": str(data["ip"])}
+    for source, target in key_map.items():
+        value = str(data.get(source) or "")
+        if value:
+            info[target] = value
+    return info
+
+
+def _extract_ipinfo(payload: str) -> dict[str, object] | None:
+    """ipinfo.io full JSON: ip, country, city, region, org."""
+    keys = {"country": "country", "city": "city", "region": "region", "org": "org"}
+    return _json_ip(payload, keys)
+
+
+def _extract_trace(payload: str) -> dict[str, object] | None:
+    """Cloudflare trace text (one.one.one.one/cdn-cgi/trace): an `ip=` field."""
+    for line in payload.splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key == "ip" and value.strip():
+            return {"ip": value.strip()}
+    return None
+
+
+def _extract_ifconfigco(payload: str) -> dict[str, object] | None:
+    """ifconfig.co echoip JSON: ip, country, city, region_name, asn_org."""
+    return _json_ip(
+        payload, {"country": "country", "city": "city", "region_name": "region", "asn_org": "org"}
+    )
+
+
+def _extract_ip2location(payload: str) -> dict[str, object] | None:
+    """api.ip2location.io JSON: ip, country_name, city_name, region_name, as."""
+    return _json_ip(
+        payload,
+        {"country_name": "country", "city_name": "city", "region_name": "region", "as": "org"},
+    )
+
+
+_PROVIDERS: list[tuple[str, str, Callable[[str], dict[str, object] | None]]] = [
+    ("ipinfo", "https://ipinfo.io/", _extract_ipinfo),
+    ("cloudflare", "https://one.one.one.one/cdn-cgi/trace", _extract_trace),
+    ("ifconfigco", "https://ifconfig.co/json", _extract_ifconfigco),
+    ("ip2location", "https://api.ip2location.io/", _extract_ip2location),
+]
+
+
+@dataclass(frozen=True)
+class _Probe:
+    """One accepted probe observation and the providers that supplied it."""
+
+    info: dict[str, object]
+    sources: tuple[str, ...]
+
+
+def _probe_provider(container: str, url: str) -> str:
+    """One echo fetch from inside the container; '' on failure."""
     result = run(
         "docker",
         "exec",
@@ -101,20 +174,64 @@ def _probe(container: str | None = None) -> dict[str, object] | None:
         "timeout",
         str(PROBE_TIMEOUT),
         "wget",
+        "-q",
         "-T",
         str(PROBE_TIMEOUT),
-        "-qO-",
-        IP_INFO_URL,
+        "-O-",
+        url,
         capture=True,
         check=False,
     )
-    if result.returncode != 0:
+    return result.stdout if result.returncode == 0 else ""
+
+
+def _vote(results: list[tuple[str, dict[str, object]]]) -> _Probe:
+    """Plurality over distinct IPs; ties broken by provider priority order."""
+    order = {name: i for i, (name, _, _) in enumerate(_PROVIDERS)}
+    by_ip: dict[str, list[tuple[str, dict[str, object]]]] = {}
+    for name, info in results:
+        by_ip.setdefault(str(info["ip"]), []).append((name, info))
+
+    best_entries: list[tuple[str, dict[str, object]]] = []
+    best_priority = len(_PROVIDERS)
+    for _ip, entries in by_ip.items():
+        priority = min(order[name] for name, _ in entries)
+        if len(entries) > len(best_entries) or (
+            len(entries) == len(best_entries) and best_entries and priority < best_priority
+        ):
+            best_entries, best_priority = entries, priority
+
+    winner = min(best_entries, key=lambda pair: order[pair[0]])
+    sources = tuple(name for name, _ in sorted(best_entries, key=lambda pair: order[pair[0]]))
+    return _Probe(info=dict(winner[1]), sources=sources)
+
+
+def _probe(container: str | None = None) -> _Probe | None:
+    """One public-IP probe from inside a container. None when every provider failed.
+
+    Providers run in parallel, so a single rate-limited service is absorbed
+    rather than stalling the caller's retry loop; the most-agreed answer wins.
+    """
+    container = container or current_instance().container
+    results: list[tuple[str, dict[str, object]]] = []
+    with ThreadPoolExecutor(max_workers=len(_PROVIDERS)) as pool:
+        futures = {
+            pool.submit(_probe_provider, container, url): (name, extract)
+            for name, url, extract in _PROVIDERS
+        }
+        for future in as_completed(futures):
+            name, extract = futures[future]
+            info = extract(future.result())
+            if info:
+                results.append((name, info))
+    if not results:
         return None
-    try:
-        info = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    return info if isinstance(info, dict) and info else None
+    return _vote(results)
+
+
+# ---------------------------------------------------------------------------
+# Polling loop
+# ---------------------------------------------------------------------------
 
 
 def fetch_ip_info(
@@ -137,22 +254,28 @@ def fetch_ip_info(
 
     last_info: dict[str, object] | None = None
     for attempt in range(retries):
-        info = _probe(container=container)
-        if info is None:
+        result = _probe(container=container)
+        if result is None:
             if 0 < attempt < retries - 1:
                 click.echo(f"Waiting for public IP... ({attempt + 1}/{retries})")
-        elif (ip := str(info.get("ip") or "")) and ip in exclude:
-            last_info = info
-            if bare and ip == bare:
-                click.echo(f"Leak: traffic not going through VPN ({attempt + 1}/{retries})")
-            else:
-                country = resolve_country(str(info.get("country", "")))
-                click.echo(f"Still routed via {country} ({attempt + 1}/{retries})")
         else:
-            matched = not expected_country or _same_country(
-                str(info.get("country", "")), expected_country
-            )
-            return IpOutcome(IpResult(info=info, matched=matched), info)
+            info = result.info
+            last_info = info
+            ip = str(info.get("ip") or "")
+            if not ip or ip in exclude:
+                if not ip:
+                    if 0 < attempt < retries - 1:
+                        click.echo(f"Waiting for public IP... ({attempt + 1}/{retries})")
+                elif bare and ip == bare:
+                    click.echo(f"Leak: traffic not going through VPN ({attempt + 1}/{retries})")
+                else:
+                    country = resolve_country(str(info.get("country", "")))
+                    click.echo(f"Still routed via {country} ({attempt + 1}/{retries})")
+            else:
+                matched = not expected_country or _same_country(
+                    str(info.get("country", "")), expected_country
+                )
+                return IpOutcome(IpResult(info=info, matched=matched, sources=result.sources), info)
         if attempt < retries - 1:
             time.sleep(delay)
     return IpOutcome(last_info=last_info)
@@ -215,6 +338,16 @@ def print_ip_status(
 
     info = outcome.result.info
     vpn_ip = str(info.get("ip") or "")
+    sources = outcome.result.sources
+    if "ipinfo" not in sources:
+        backup = ", ".join(sources) or "unknown"
+        click.echo(
+            click.style(
+                f"  Public IP confirmed via {backup} — "
+                "ipinfo.io was rate-limited or unreachable",
+                fg="yellow",
+            )
+        )
 
     if bare and vpn_ip == bare:
         vpn_color = "red"

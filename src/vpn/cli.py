@@ -229,10 +229,11 @@ def _status_doc() -> dict[str, object]:
     exit_ip: dict[str, str] | None = None
     leak = False
     if state == "running":
-        info = _probe()
-        if info is None:
+        result = _probe()
+        if result is None:
             leak = True
         else:
+            info = result.info
             ip = str(info.get("ip") or "")
             exit_ip = {
                 "ip": ip,

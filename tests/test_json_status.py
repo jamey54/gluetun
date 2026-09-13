@@ -5,7 +5,7 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from vpn import cli, control
+from vpn import cli, control, ipinfo
 from vpn.control import ControlError
 
 
@@ -36,6 +36,7 @@ def invoke_status(
     baked_provider: str = "surfshark",
     baked_country: str = "Germany",
     runtime: dict[str, object] | None = None,
+    probe_fail: bool = False,
 ):
     monkeypatch.setattr(
         "vpn.discovery.container_status",
@@ -61,8 +62,12 @@ def invoke_status(
         monkeypatch.setattr(
             control, "get_settings", lambda: runtime or _settings(country="Germany")
         )
-    probe = {"ip": "1.1.1.1", "country": "DE"} if leak else {"ip": "9.9.9.9", "country": "DE"}
-    monkeypatch.setattr(cli, "_probe", lambda: probe)
+    probe_ip = "1.1.1.1" if leak else "9.9.9.9"
+    if probe_fail:
+        monkeypatch.setattr(cli, "_probe", lambda: None)
+    else:
+        probe = ipinfo._Probe({"ip": probe_ip, "country": "DE"}, sources=("ipinfo",))
+        monkeypatch.setattr(cli, "_probe", lambda: probe)
     monkeypatch.setattr(cli, "real_ip", lambda: "1.1.1.1")
     return CliRunner().invoke(cli.main, ["status", "--json"], catch_exceptions=False)
 
@@ -130,3 +135,12 @@ def test_status_json_drift_when_hot_swapped():
 def test_status_json_deterministic_single_line():
     result = invoke_status(pytest.MonkeyPatch())
     assert result.output.strip().count("\n") == 0
+
+
+def test_status_json_probe_totally_failed_is_leak():
+    """All echo providers down on the single-shot probe -> honest leak, exit 1."""
+    result = invoke_status(pytest.MonkeyPatch(), probe_fail=True)
+    assert result.exit_code == 1
+    doc = json.loads(result.output)
+    assert doc["leak"] is True
+    assert doc["exit_ip"] is None
