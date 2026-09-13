@@ -1,0 +1,132 @@
+"""Tests for machine-readable `status --json` (schema, exit codes)."""
+
+import json
+
+import pytest
+from click.testing import CliRunner
+
+from vpn import cli, control
+from vpn.control import ControlError
+
+
+def _settings(provider: str = "surfshark", country: str | None = None) -> dict[str, object]:
+    return {
+        "type": "wireguard",
+        "provider": {
+            "name": provider,
+            "server_selection": {
+                "countries": [country] if country else [],
+                "cities": [],
+            },
+        },
+    }
+
+
+@pytest.fixture(autouse=True)
+def creds(monkeypatch):
+    monkeypatch.setenv("HTTP_CONTROL_SERVER_API_KEY", "test-key")
+
+
+def invoke_status(
+    monkeypatch,
+    *,
+    state: str = "running",
+    leak: bool = False,
+    control_error: str | None = None,
+    baked_provider: str = "surfshark",
+    baked_country: str = "Germany",
+    runtime: dict[str, object] | None = None,
+):
+    monkeypatch.setattr(
+        "vpn.discovery.container_status",
+        lambda n=None: None if state == "absent" else state,
+    )
+    monkeypatch.setattr(
+        cli,
+        "container_env",
+        lambda: {
+            "VPN_SERVICE_PROVIDER": baked_provider,
+            "VPN_TYPE": "wireguard",
+            "VPN_COUNTRY": baked_country,
+        },
+    )
+    monkeypatch.setattr(cli, "container_image", lambda: "qmcgaw/gluetun:latest")
+    if control_error:
+
+        def raise_error():
+            raise ControlError(500, control_error)
+
+        monkeypatch.setattr(control, "get_settings", raise_error)
+    else:
+        monkeypatch.setattr(
+            control, "get_settings", lambda: runtime or _settings(country="Germany")
+        )
+    probe = {"ip": "1.1.1.1", "country": "DE"} if leak else {"ip": "9.9.9.9", "country": "DE"}
+    monkeypatch.setattr(cli, "_probe", lambda: probe)
+    monkeypatch.setattr(cli, "real_ip", lambda: "1.1.1.1")
+    return CliRunner().invoke(cli.main, ["status", "--json"], catch_exceptions=False)
+
+
+def test_status_json_schema_running():
+    result = invoke_status(pytest.MonkeyPatch())
+    assert result.exit_code == 0
+    doc = json.loads(result.output)
+    assert set(doc) == {
+        "instance", "container_name", "image", "state", "selection", "drift",
+        "control_server", "exit_ip", "leak", "last_error",
+    }
+    assert doc["instance"] == "gluetun"
+    assert doc["container_name"] == "gluetun"
+    assert doc["image"] == "qmcgaw/gluetun:latest"
+    assert doc["state"] == "running"
+    assert doc["selection"]["provider"] == "surfshark"
+    assert doc["drift"] is False  # runtime matches baked env selection
+    assert doc["control_server"] == {"port": 8000, "enabled": True}
+    assert doc["exit_ip"] == {"ip": "9.9.9.9", "country": "Germany"}
+    assert doc["leak"] is False
+    assert doc["last_error"] is None
+
+
+def test_status_json_exit_1_on_leak():
+    result = invoke_status(pytest.MonkeyPatch(), leak=True)
+    assert result.exit_code == 1
+    doc = json.loads(result.output)
+    assert doc["leak"] is True
+    assert doc["exit_ip"] == {"ip": "1.1.1.1", "country": "Germany"}
+
+
+def test_status_json_absent_container():
+    result = invoke_status(pytest.MonkeyPatch(), state="absent")
+    assert result.exit_code == 0
+    doc = json.loads(result.output)
+    assert doc["state"] == "absent"
+    assert doc["image"] is None
+    assert doc["selection"] is None
+    assert doc["control_server"] == {"port": 8000, "enabled": False}
+    assert doc["exit_ip"] is None
+    assert doc["leak"] is False
+
+
+def test_status_json_control_server_down():
+    result = invoke_status(pytest.MonkeyPatch(), control_error="boom")
+    assert result.exit_code == 0
+    doc = json.loads(result.output)
+    assert doc["selection"] is None
+    assert doc["control_server"] == {"port": 8000, "enabled": False}
+    assert doc["last_error"] == "control server unreachable (HTTP 500): boom"
+
+
+def test_status_json_drift_when_hot_swapped():
+    result = invoke_status(
+        pytest.MonkeyPatch(),
+        baked_provider="protonvpn",
+        runtime=_settings(provider="surfshark", country="Japan"),
+    )
+    doc = json.loads(result.output)
+    assert doc["drift"] is True
+    assert doc["selection"]["country"] == "Japan"
+
+
+def test_status_json_deterministic_single_line():
+    result = invoke_status(pytest.MonkeyPatch())
+    assert result.output.strip().count("\n") == 0

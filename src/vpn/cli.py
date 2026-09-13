@@ -6,6 +6,7 @@ stop) and logs.
 """
 
 import contextlib
+import json
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, TypeVar
@@ -28,9 +29,13 @@ from vpn.config import (
     DEFAULT_TEST_CONCURRENCY,
     DOWN_TIMEOUT_S,
 )
+from vpn.countries import resolve_country
+from vpn.discovery import _state, instance_records, print_ls_table, selection_doc
 from vpn.docker import (
     GLUETUN_IMAGE,
     compose,
+    container_env,
+    container_image,
     container_running,
     container_status,
     run,
@@ -48,7 +53,7 @@ from vpn.instance import (
     resolve_instance,
     write_registry,
 )
-from vpn.ipinfo import current_exit_ip, print_ip_status
+from vpn.ipinfo import _probe, current_exit_ip, print_ip_status, real_ip
 from vpn.picker import select_server
 from vpn.providers import (
     PROVIDERS,
@@ -190,6 +195,64 @@ def _require_selection() -> Selection:
     if sel is None or not sel.provider:
         raise SystemExit("Cannot read runtime settings — is gluetun's control server reachable?")
     return sel
+
+
+def _baked_selection() -> Selection | None:
+    """Selection baked into the container at create time (its compose env)."""
+    env = container_env()
+    provider = env.get("VPN_SERVICE_PROVIDER")
+    if not provider:
+        return None
+    return Selection(
+        provider, env.get("VPN_TYPE") or "", env.get("VPN_COUNTRY"), env.get("VPN_CITY")
+    )
+
+
+def _status_doc() -> dict[str, object]:
+    """Stable status document (status --json). Called inside the instance context."""
+    inst = current_instance()
+    state = _state(inst.name)
+    sel: Selection | None = None
+    enabled = False
+    last_error: str | None = None
+    if state in ("running", "starting"):
+        try:
+            sel = Selection.from_doc(control.get_settings())
+        except control.ControlError as exc:
+            status = f"HTTP {exc.status}" if exc.status is not None else "connection failed"
+            last_error = f"control server unreachable ({status}): {exc.message}"
+        enabled = bool(sel and sel.provider)
+
+    baked = _baked_selection() if state in ("running", "starting") else None
+    drift = bool(sel is not None and sel.provider and baked is not None and sel.key != baked.key)
+
+    exit_ip: dict[str, str] | None = None
+    leak = False
+    if state == "running":
+        info = _probe()
+        if info is None:
+            leak = True
+        else:
+            ip = str(info.get("ip") or "")
+            exit_ip = {
+                "ip": ip,
+                "country": resolve_country(str(info.get("country") or "")),
+            }
+            bare = real_ip()
+            if bare and ip == bare:
+                leak = True
+    return {
+        "instance": inst.name,
+        "container_name": inst.name,
+        "image": container_image() if state != "absent" else None,
+        "state": state,
+        "selection": selection_doc(sel) if sel and sel.provider else None,
+        "drift": drift,
+        "control_server": {"port": inst.control_port, "enabled": enabled},
+        "exit_ip": exit_ip,
+        "leak": leak,
+        "last_error": last_error,
+    }
 
 
 def _print_target(sel: Selection) -> str:
@@ -460,9 +523,23 @@ def _kv(label: str, value: str, color: str | None = None) -> None:
     help="Speed test download size (MB)",
 )
 @click.option("--no-speedtest", is_flag=True, help="Skip the speed test")
-def status(instance: str | None, size: int, no_speedtest: bool) -> None:
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Machine-readable status (single-line JSON)",
+)
+def status(
+    instance: str | None, size: int, no_speedtest: bool, json_output: bool
+) -> None:
     """Show container state, effective selection, public IP, and speed test."""
     with instance_context(_resolve_for_command(instance)):
+        if json_output:
+            doc = _status_doc()
+            click.echo(json.dumps(doc))
+            if doc["leak"]:
+                raise SystemExit(1)
+            return
         state = container_status()
         if not state:
             click.echo(f"Container '{current_instance().container}' not found.")
@@ -607,6 +684,25 @@ def bench(
         print_report(report)
         if report.action:
             click.echo(report.action)
+
+
+@main.command()
+@add_instance_options()
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Machine-readable list (single-line JSON)",
+)
+def ls(instance: str | None, json_output: bool) -> None:
+    """List instances (registry and vpn-* compose containers) and their consumers."""
+    records = instance_records()
+    if instance:
+        records = [r for r in records if r["instance"] == instance]
+    if json_output:
+        click.echo(json.dumps({"default": resolve_default_name(), "instances": records}))
+        return
+    print_ls_table(records)
 
 
 @main.command()

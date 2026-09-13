@@ -65,15 +65,15 @@ def container_env() -> dict[str, str]:
     return env
 
 
-def container_image() -> str | None:
+def container_image(name: str | None = None) -> str | None:
     """The container's image reference, or None when absent."""
-    out = inspect_container("{{.Config.Image}}")
+    out = inspect_container("{{.Config.Image}}", name=name)
     return out.strip() if out else None
 
 
-def container_control_port() -> int | None:
+def container_control_port(name: str | None = None) -> int | None:
     """Host port published for the container's control server (8000/tcp), if any."""
-    out = inspect_container("{{json .NetworkSettings.Ports}}")
+    out = inspect_container("{{json .NetworkSettings.Ports}}", name=name)
     if not out:
         return None
     try:
