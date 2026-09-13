@@ -58,6 +58,14 @@ def test_build_env_env_file_overrides_process(tmp_path, monkeypatch):
     assert inst.env["BAZ"] == "z"
 
 
+def test_non_default_instances_share_the_default_env_file(tmp_path, monkeypatch):
+    """Section 4: dedicated instances still read credentials from the shared .env."""
+    monkeypatch.setenv("GLUETUN_COMPOSE_FILE", str(tmp_path / "compose.yml"))
+    (tmp_path / ".env").write_text("SURFSHARK_WIREGUARD_PRIVATE_KEY=shared-key\n")
+    inst = resolve_instance("plan-a", control_port=8123)
+    assert inst.env["SURFSHARK_WIREGUARD_PRIVATE_KEY"] == "shared-key"
+
+
 def test_registry_round_trip():
     inst = resolve_instance("plan-a", control_port=8123)
     write_registry(inst)

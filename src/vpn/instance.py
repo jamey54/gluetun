@@ -127,18 +127,18 @@ def list_registry() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def build_env(env_file: Path | None, compose_file: str) -> dict[str, str]:
+def build_env(env_file: Path | None) -> dict[str, str]:
     """Merged env for an instance: its env source wins over the process env.
 
-    With ``--env-file`` the file *replaces* the project's ``.env`` for that
-    instance (compose-style); otherwise the ``.env`` next to the compose file
-    is the source. The process environment is the fallback for everything a
-    non-secret source doesn't set.
+    The shared ``.env`` (next to the default instance's compose file) is the
+    default source for every instance; ``--env-file`` replaces it for that
+    instance (compose-style). The process environment is the fallback for
+    everything a non-secret source doesn't set.
     """
     if env_file is not None:
         base = read_env_file(env_file)
     else:
-        base = read_env_file(Path(compose_file).parent / ".env")
+        base = read_env_file(Path(resolve_compose_file()).parent / ".env")
     return {**os.environ, **base}
 
 
@@ -209,7 +209,7 @@ def resolve_instance(
         name=name,
         control_port=control_port,
         env_file=env_file_path,
-        env=build_env(env_file_path, compose_file),
+        env=build_env(env_file_path),
         compose_file=compose_file,
     )
 
