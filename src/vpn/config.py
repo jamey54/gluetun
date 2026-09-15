@@ -88,14 +88,26 @@ def resolve_compose_file() -> str:
 
 
 def read_env_file(path: Path | str) -> dict[str, str]:
-    """Parse a .env-style file into a dict (skips blanks and # comments)."""
+    """Parse a .env-style file into a dict.
+
+    Skips blanks and ``#`` comments, tolerates an ``export `` prefix, keeps
+    values with embedded ``=``, and strips one pair of surrounding quotes.
+    """
     env: dict[str, str] = {}
     path = Path(path)
     if not path.exists():
         return env
     for line in path.read_text().splitlines():
         line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, value = line.split("=", 1)
-            env[key.strip()] = value.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export ") or line.startswith("export\t"):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        env[key.strip()] = value
     return env

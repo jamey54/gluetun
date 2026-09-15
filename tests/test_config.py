@@ -31,6 +31,18 @@ def test_read_env_file_ignores_lines_without_equals(tmp_path):
     assert read_env_file(path) == {"KEY": "1"}
 
 
+def test_read_env_file_strips_surrounding_quotes(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text('DQ="quoted value"\nSQ=\'single\'\n')
+    assert read_env_file(path) == {"DQ": "quoted value", "SQ": "single"}
+
+
+def test_read_env_file_tolerates_export_prefix(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("export SURFSHARK_KEY=abc-cba\n")
+    assert read_env_file(path) == {"SURFSHARK_KEY": "abc-cba"}
+
+
 def test_resolve_prefers_env_override(monkeypatch, tmp_path):
     override = tmp_path / "custom.yml"
     monkeypatch.setenv("GLUETUN_COMPOSE_FILE", str(override))

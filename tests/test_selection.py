@@ -38,7 +38,7 @@ RUNNING = Selection("surfshark", "wireguard", "Germany")
 
 
 def running(monkeypatch, sel: Selection | None = RUNNING):
-    monkeypatch.setattr(cli, "container_running", lambda: sel is not None)
+    monkeypatch.setattr(cli, "container_running", lambda name=None: sel is not None)
     monkeypatch.setattr(cli, "effective_selection", lambda: sel)
 
 
@@ -193,7 +193,7 @@ def test_up_city_without_any_country_fails_clearly(monkeypatch, compose_calls, s
 
 def test_up_running_unreachable_control_server_exits(monkeypatch, compose_calls, swaps):
     running(monkeypatch, None)
-    monkeypatch.setattr(cli, "container_running", lambda: True)
+    monkeypatch.setattr(cli, "container_running", lambda name=None: True)
     result = invoke(["up", "--country", "Japan"])
     assert result.exit_code != 0
     assert "control server" in result.output

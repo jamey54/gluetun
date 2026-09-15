@@ -97,6 +97,22 @@ def test_up_gluetun_ctl_port_env_honored(compose_calls, cold, monkeypatch):
     assert read_registry("gluetun")["control_port"] == 8450
 
 
+def test_up_running_without_registry_adopts_published_port(monkeypatch):
+    """A container not owned by a registry record stays addressable via its port."""
+    monkeypatch.setattr(cli, "container_running", lambda name=None: True)
+    monkeypatch.setattr(cli, "container_control_port", lambda name=None: 8123)
+    monkeypatch.setattr(
+        cli,
+        "effective_selection",
+        lambda: Selection("surfshark", "wireguard", "Germany"),
+    )
+    result = invoke(["up", "--instance", "plan-a"])
+    assert result.exit_code == 0
+    assert not (config.INSTANCES_DIR / "plan-a.json").exists()  # still not vpn-owned
+    body = (config.INSTANCES_DIR / "plan-a" / "compose.yml").read_text()
+    assert "127.0.0.1:8123:8000/tcp" in body
+
+
 def test_up_env_file_replaces_dotenv(compose_calls, cold, monkeypatch, tmp_path):
     env_file = tmp_path / "plan.env"
     env_file.write_text("HTTP_CONTROL_SERVER_API_KEY=from-file\nPLAN_ONLY=1\n")

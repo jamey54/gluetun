@@ -37,6 +37,7 @@ def invoke_status(
     baked_country: str = "Germany",
     runtime: dict[str, object] | None = None,
     probe_fail: bool = False,
+    probe_geo: bool = True,
 ):
     monkeypatch.setattr(
         "vpn.discovery.container_status",
@@ -65,6 +66,9 @@ def invoke_status(
     probe_ip = "1.1.1.1" if leak else "9.9.9.9"
     if probe_fail:
         monkeypatch.setattr(cli, "_probe", lambda: None)
+    elif not probe_geo:
+        probe = ipinfo._Probe({"ip": probe_ip}, sources=("cloudflare",))
+        monkeypatch.setattr(cli, "_probe", lambda: probe)
     else:
         probe = ipinfo._Probe({"ip": probe_ip, "country": "DE"}, sources=("ipinfo",))
         monkeypatch.setattr(cli, "_probe", lambda: probe)
@@ -144,3 +148,12 @@ def test_status_json_probe_totally_failed_is_leak():
     doc = json.loads(result.output)
     assert doc["leak"] is True
     assert doc["exit_ip"] is None
+
+
+def test_status_json_unknown_country_is_null_not_empty():
+    """valid echo-only IP with no geo info reports null country, not ''."""
+    result = invoke_status(pytest.MonkeyPatch(), probe_geo=False)
+    assert result.exit_code == 0
+    doc = json.loads(result.output)
+    assert doc["exit_ip"] == {"ip": "9.9.9.9", "country": None}
+    assert doc["leak"] is False

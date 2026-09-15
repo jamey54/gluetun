@@ -36,6 +36,7 @@ from vpn.discovery import _state, instance_records, print_ls_table, selection_do
 from vpn.docker import (
     GLUETUN_IMAGE,
     compose,
+    container_control_port,
     container_env,
     container_image,
     container_running,
@@ -229,7 +230,7 @@ def _status_doc() -> dict[str, object]:
     baked = _baked_selection() if state in ("running", "starting") else None
     drift = bool(sel is not None and sel.provider and baked is not None and sel.key != baked.key)
 
-    exit_ip: dict[str, str] | None = None
+    exit_ip: dict[str, str | None] | None = None
     leak = False
     if state == "running":
         result = _probe()
@@ -240,7 +241,7 @@ def _status_doc() -> dict[str, object]:
             ip = str(info.get("ip") or "")
             exit_ip = {
                 "ip": ip,
-                "country": resolve_country(str(info.get("country") or "")),
+                "country": resolve_country(str(info.get("country") or "")) or None,
             }
             bare = real_ip()
             if bare and ip == bare:
@@ -353,15 +354,20 @@ def up(
     inst = _resolve_for_command(instance, ctl_port, env_file)
     # A fresh non-default instance gets a free host port allocated and
     # persisted, so its registry survives restarts without ever colliding with
-    # the default instance's 8000.
+    # the default instance's 8000. A registry-less but running instance instead
+    # adopts its published control port, so an imported/legacy container stays
+    # addressable even though its registry record is gone.
     if (
         ctl_port is None
         and inst.env.get("GLUETUN_CTL_PORT") is None
-        and inst.name != DEFAULT_INSTANCE
         and read_registry(inst.name) is None
-        and not container_running(name=inst.name)
     ):
-        inst = replace(inst, control_port=allocate_free_port())
+        if container_running(name=inst.name):
+            published = container_control_port(name=inst.name)
+            if published is not None and published != inst.control_port:
+                inst = replace(inst, control_port=published)
+        elif inst.name != DEFAULT_INSTANCE:
+            inst = replace(inst, control_port=allocate_free_port())
     ensure_compose_file(inst)
     with instance_context(inst):
         require_api_key()
