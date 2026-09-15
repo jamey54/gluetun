@@ -200,6 +200,15 @@ def test_up_running_unreachable_control_server_exits(monkeypatch, compose_calls,
     assert swaps == [] and compose_calls == []
 
 
+def test_up_recreate_works_with_unreachable_control_server(monkeypatch, compose_calls):
+    """--recreate is the escape hatch: it must not block on the control server."""
+    running(monkeypatch)
+    monkeypatch.setattr(cli, "effective_selection", lambda: None)
+    result = invoke(["up", "--provider", "surfshark", "--recreate"])
+    assert result.exit_code == 0
+    assert compose_calls[0][0] == ("up", "-d", "--force-recreate")
+
+
 def test_up_explicit_protocol_requires_its_own_creds(monkeypatch, compose_calls, swaps):
     running(monkeypatch)
     result = invoke(["up", "--protocol", "openvpn"])
