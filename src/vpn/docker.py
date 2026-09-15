@@ -1,9 +1,11 @@
 """Docker / docker compose helpers."""
 
+import contextlib
 import json
 import os
 import subprocess
 
+from vpn.config import CONTAINER_OP_TIMEOUT_S
 from vpn.instance import current_instance
 
 GLUETUN_IMAGE = "qmcgaw/gluetun:latest"
@@ -14,14 +16,22 @@ def run(
     capture: bool = False,
     check: bool = True,
     env: dict[str, str] | None = None,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command with argv-style arguments. Returns CompletedProcess."""
-    result = subprocess.run(
-        args,
-        capture_output=capture,
-        text=True,
-        env=env,
-    )
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=capture,
+            text=True,
+            env=env,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        msg = f"Command timed out after {timeout:g}s"
+        if check:
+            raise SystemExit(f"Error: {msg}") from None
+        return subprocess.CompletedProcess(tuple(args), 124, stdout="", stderr=msg)
     if check and result.returncode != 0:
         msg = (result.stderr or result.stdout or "").strip()
         raise SystemExit(f"Error: {msg}" if msg else f"Command failed ({result.returncode})")
@@ -93,7 +103,9 @@ def container_control_port(name: str | None = None) -> int | None:
 
 
 def compose(
-    *args: str, env_overrides: dict[str, str] | None = None
+    *args: str,
+    env_overrides: dict[str, str] | None = None,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run docker compose against the active instance's file and project.
 
@@ -106,7 +118,7 @@ def compose(
     inst = current_instance()
     cmd = ["docker", "compose", "-f", inst.compose_file, "-p", inst.project, *args]
     env = {**inst.env, **(env_overrides or {})}
-    return run(*cmd, env={**os.environ, **env})
+    return run(*cmd, env={**os.environ, **env}, timeout=timeout)
 
 
 def launch_container(name: str, env: dict[str, str]) -> bool:
@@ -126,10 +138,16 @@ def launch_container(name: str, env: dict[str, str]) -> bool:
     for key, value in env.items():
         args += ["-e", f"{key}={value}"]
     args.append(GLUETUN_IMAGE)
-    result = run(*args, capture=True, check=False)
+    try:
+        result = run(
+            *args, capture=True, check=False, timeout=CONTAINER_OP_TIMEOUT_S
+        )
+    except OSError:
+        return False  # docker unavailable: treat as a failed launch
     return result.returncode == 0
 
 
 def remove_container(name: str) -> None:
     """Force-remove a container (best effort, never raises)."""
-    run("docker", "rm", "-f", name, capture=True, check=False)
+    with contextlib.suppress(OSError):
+        run("docker", "rm", "-f", name, capture=True, check=False, timeout=CONTAINER_OP_TIMEOUT_S)

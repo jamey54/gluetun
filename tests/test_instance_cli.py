@@ -28,7 +28,9 @@ def compose_calls(monkeypatch):
     calls: list[tuple[str, ...]] = []
 
     def fake_compose(
-        *args: str, env_overrides: dict[str, str] | None = None
+        *args: str,
+        env_overrides: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> CompletedProcess[str]:
         calls.append(args)
         return CompletedProcess((), 0)

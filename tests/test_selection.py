@@ -58,7 +58,9 @@ def compose_calls(monkeypatch):
     calls: list[tuple[tuple[str, ...], dict[str, str] | None]] = []
 
     def fake_compose(
-        *args: str, env_overrides: dict[str, str] | None = None
+        *args: str,
+        env_overrides: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> CompletedProcess[str]:
         calls.append((args, env_overrides))
         return CompletedProcess((), 0)
@@ -148,7 +150,7 @@ def test_up_pull_pulls_image_and_recreates(monkeypatch, compose_calls, swaps):
     running(monkeypatch)
     pulls: list[tuple[str, ...]] = []
 
-    def fake_pull(*args: str) -> CompletedProcess[str]:
+    def fake_pull(*args: str, timeout: float | None = None) -> CompletedProcess[str]:
         pulls.append(args)
         return CompletedProcess((), 0)
 

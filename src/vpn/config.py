@@ -33,6 +33,12 @@ PUT_TIMEOUT_S = 60
 DOWN_TIMEOUT_S = 3
 HTTP_NOT_FOUND = 404
 
+# --- Docker operations ---------------------------------------------------
+
+COMPOSE_TIMEOUT_S = 300  # compose up/down; a stalled daemon must not hang forever
+PULL_TIMEOUT_S = 600  # docker pull of the gluetun image
+CONTAINER_OP_TIMEOUT_S = 60  # disposable container launch/removal
+
 # --- Provider ------------------------------------------------------------
 
 DEFAULT_PROTOCOL = "wireguard"

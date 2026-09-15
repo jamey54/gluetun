@@ -50,7 +50,7 @@ def test_compose_merges_env_without_tempfile(monkeypatch):
     seen_args: tuple[str, ...] = ()
     seen_env: dict[str, str] | None = None
 
-    def fake_run(*args, capture=False, check=True, env=None):
+    def fake_run(*args, capture=False, check=True, env=None, timeout=None):
         nonlocal seen_args, seen_env
         seen_args, seen_env = args, env
         return CompletedProcess(args, 0)
@@ -76,7 +76,7 @@ def test_launch_container_builds_docker_run_args(monkeypatch):
 
     seen: dict[str, Any] = {}
 
-    def fake_run(*args, capture=False, check=False):
+    def fake_run(*args, capture=False, check=False, timeout=None):
         seen["args"], seen["capture"], seen["check"] = args, capture, check
         return CompletedProcess(args, 0)
 
@@ -126,3 +126,20 @@ def test_remove_container_best_effort(monkeypatch):
     docker.remove_container("whatever")  # must not raise on failure
     assert seen["args"] == ("docker", "rm", "-f", "whatever")
     assert seen["kw"]["check"] is False
+
+
+def test_launch_container_survives_missing_docker(monkeypatch):
+    monkeypatch.setattr(docker, "run", lambda *args, **kw: (_ for _ in ()).throw(OSError()))
+    assert docker.launch_container("x", {}) is False
+    docker.remove_container("x")  # must not raise
+
+
+def test_run_timeout_surfaces_as_exit_code_124():
+    result = docker.run("sleep", "60", capture=True, check=False, timeout=0.3)
+    assert result.returncode == 124
+    assert "timed out" in result.stderr
+
+
+def test_run_timeout_with_check_raises_system_exit():
+    with pytest.raises(SystemExit):
+        docker.run("sleep", "60", timeout=0.3)

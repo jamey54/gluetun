@@ -23,11 +23,13 @@ from vpn.bench import (
     run_bench,
 )
 from vpn.config import (
+    COMPOSE_TIMEOUT_S,
     DEFAULT_PROTOCOL,
     DEFAULT_SCAN_SIZE_MB,
     DEFAULT_SIZE_MB,
     DEFAULT_TEST_CONCURRENCY,
     DOWN_TIMEOUT_S,
+    PULL_TIMEOUT_S,
 )
 from vpn.countries import resolve_country
 from vpn.discovery import _state, instance_records, print_ls_table, selection_doc
@@ -368,7 +370,7 @@ def up(
         current = effective_selection() if was_running else None
         created = not was_running
         if pull:
-            run("docker", "pull", GLUETUN_IMAGE)
+            run("docker", "pull", GLUETUN_IMAGE, timeout=PULL_TIMEOUT_S)
             recreate = True
         if recreate:
             created = True
@@ -377,7 +379,7 @@ def up(
         # only an explicit location constitutes a further hot-swap request there.
         if created:
             requested = country is not None or city is not None
-        if was_running and requested and current is None:
+        if was_running and requested and current is None and not recreate:
             raise SystemExit(
                 "Cannot read runtime settings — is gluetun's control server reachable?"
             )
@@ -398,6 +400,7 @@ def up(
                 "-d",
                 *(("--force-recreate",) if recreate else ()),
                 env_overrides=overrides,
+                timeout=COMPOSE_TIMEOUT_S,
             )
             write_registry(inst)
             click.echo(f"VPN {'recreated' if recreate else 'started'} ({name}/{proto}).")
@@ -488,7 +491,7 @@ def down(instance: str | None) -> None:
     with instance_context(_resolve_for_command(instance)):
         with contextlib.suppress(Exception):
             control.set_vpn_status("stopped", timeout=DOWN_TIMEOUT_S)
-        compose("down")
+        compose("down", timeout=COMPOSE_TIMEOUT_S)
         click.echo("VPN stopped.")
 
 

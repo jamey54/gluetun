@@ -152,6 +152,27 @@ def test_get_settings_invalid_json_raises(monkeypatch):
         control.get_settings()
 
 
+@pytest.mark.parametrize(
+    "endpoint",
+    [control.get_vpn_status, control.get_dns_status, control.get_port_forward],
+)
+def test_simple_reads_wrap_invalid_json_as_control_error(monkeypatch, endpoint):
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, "oops not json")))
+    with pytest.raises(control.ControlError):
+        endpoint()
+
+
+def test_simple_reads_parse_valid_json(monkeypatch):
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"status": "running"}')))
+    assert control.get_vpn_status() == "running"
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"status": "running"}')))
+    assert control.get_dns_status() == "running"
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"port": 51820}')))
+    assert control.get_port_forward() == 51820
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"port": 0}')))
+    assert control.get_port_forward() is None
+
+
 # ---------------------------------------------------------------------------
 # with_location document building
 # ---------------------------------------------------------------------------

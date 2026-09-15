@@ -548,6 +548,28 @@ def test_run_bench_parallel_failure_keeps_going(monkeypatch, happy_path):
     assert removed == launched  # both temp containers cleaned up
 
 
+def test_test_batch_interrupt_removes_containers(monkeypatch):
+    """Ctrl-C mid-batch removes every disposable container without waiting."""
+    removed: list[str] = []
+
+    def raise_interrupt(
+        candidate: bench.Candidate, name: str, size_mb: int, timeout: int
+    ) -> bench._ParallelResult:
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(bench, "_test_one", raise_interrupt)
+    monkeypatch.setattr(bench, "remove_container", removed.append)
+
+    candidates = [
+        candidate("surfshark", "wireguard", "France", None, "fr"),
+        candidate("surfshark", "wireguard", "Spain", None, "es"),
+    ]
+    with pytest.raises(KeyboardInterrupt):
+        bench._test_batch(candidates, 10, 90)
+    assert len(removed) == len(candidates)
+    assert all(n.startswith("vpn-bench-") for n in removed)
+
+
 def test_run_bench_parallel_crashed_candidate_is_recorded(monkeypatch, happy_path):
     """An unexpected exception mid-test is degraded to an error, batch survives."""
     launched: list[str] = []

@@ -315,9 +315,8 @@ def _bench_container_env(candidate: Candidate) -> dict[str, str]:
     return env
 
 
-def _test_one(candidate: Candidate, size_mb: int, timeout: int) -> _ParallelResult:
+def _test_one(candidate: Candidate, name: str, size_mb: int, timeout: int) -> _ParallelResult:
     """Benchmark one candidate on its own temporary container."""
-    name = f"{_CONTAINER_PREFIX}{os.getpid()}-{next(_container_ids)}"
     if not launch_container(name, _bench_container_env(candidate)):
         return _ParallelResult(error="container launch failed")
     try:
@@ -341,12 +340,28 @@ def _test_batch(
 ) -> list[_ParallelResult]:
     """Run each candidate on a disposable container, in parallel.
 
-    Waiting on the `with` block guarantees every started worker runs its
-    cleanup `finally` even when iteration is aborted mid-batch.
+    An interrupt aborts promptly: every disposable container is removed and
+    the untouched futures are cancelled, so the caller restores the previous
+    settings without waiting out in-flight downloads. Workers drain on their
+    own once their container is gone.
     """
-    with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
-        futures = [pool.submit(_test_one, c, size_mb, timeout) for c in candidates]
+    names = [f"{_CONTAINER_PREFIX}{os.getpid()}-{next(_container_ids)}" for _ in candidates]
+    pool = ThreadPoolExecutor(max_workers=len(names))
+    futures = [
+        pool.submit(_test_one, candidate, name, size_mb, timeout)
+        for candidate, name in zip(candidates, names, strict=True)
+    ]
+    try:
         return [future.result() for future in futures]
+    except KeyboardInterrupt:
+        for name in names:
+            remove_container(name)
+        pool.shutdown(wait=False, cancel_futures=True)
+        for future in futures:
+            if not future.cancel() and not future.cancelled():
+                future.exception()  # drain so no "exception never retrieved" noise
+        raise
+    pool.shutdown()
 
 
 def _parallel_stage(

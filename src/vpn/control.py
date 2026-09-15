@@ -70,6 +70,17 @@ def _request(
         raise ControlError(None, str(exc.reason)) from exc
 
 
+def _parse_json(body: str, path: str) -> dict[str, Any]:
+    """Parse a response body into a dict; failures are ControlErrors, not crashes."""
+    try:
+        doc = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise ControlError(None, f"invalid JSON from {path}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise ControlError(None, f"unexpected payload from {path}")
+    return doc
+
+
 # ---------------------------------------------------------------------------
 # VPN settings
 # ---------------------------------------------------------------------------
@@ -78,13 +89,7 @@ def _request(
 def get_settings() -> dict[str, Any]:
     """Fetch the full VPN settings document."""
     _, body = _request("GET", SETTINGS_PATH)
-    try:
-        doc = json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise ControlError(None, f"invalid JSON from {SETTINGS_PATH}: {exc}") from exc
-    if not isinstance(doc, dict):
-        raise ControlError(None, f"unexpected payload from {SETTINGS_PATH}")
-    return doc
+    return _parse_json(body, SETTINGS_PATH)
 
 
 def put_settings(doc: dict[str, Any]) -> str:
@@ -101,7 +106,7 @@ def put_settings(doc: dict[str, Any]) -> str:
 def get_vpn_status() -> str:
     """VPN tunnel status: 'running' or 'stopped'."""
     _, body = _request("GET", "/v1/vpn/status")
-    return str(json.loads(body).get("status", ""))
+    return str(_parse_json(body, "/v1/vpn/status").get("status", ""))
 
 
 def set_vpn_status(status: str, timeout: int = GET_TIMEOUT_S) -> None:
@@ -117,7 +122,7 @@ def set_vpn_status(status: str, timeout: int = GET_TIMEOUT_S) -> None:
 def get_dns_status() -> str:
     """DNS-over-TLS resolver status: 'running' or 'stopped'."""
     _, body = _request("GET", "/v1/dns/status")
-    return str(json.loads(body).get("status", ""))
+    return str(_parse_json(body, "/v1/dns/status").get("status", ""))
 
 
 def set_dns_status(status: str) -> None:
@@ -143,7 +148,7 @@ def trigger_updater() -> None:
 def get_port_forward() -> int | None:
     """Currently forwarded port, or None if not forwarding."""
     _, body = _request("GET", "/v1/portforward")
-    port = json.loads(body).get("port")
+    port = _parse_json(body, "/v1/portforward").get("port")
     return int(port) if port else None
 
 
