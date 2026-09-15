@@ -122,7 +122,7 @@ def test_vote_keeps_geodata_of_winning_group():
             ("cloudflare", {"ip": "1.1.1.1"}),
         ]
     )
-    assert probe.info == {"ip": "1.1.1.1", "country": "DE", "org": "ACME"}
+    assert probe.info == {"ip": "1.1.1.1", "country": "Germany", "org": "ACME"}
 
 
 def test_vote_single_provider_answer_is_accepted():
@@ -161,8 +161,33 @@ def test_vote_merge_keeps_highest_priority_field_values():
             ("ipinfo", {"ip": "1.1.1.1", "country": "DE"}),
         ]
     )
-    assert probe.info["country"] == "DE"  # ipinfo wins over ip2location
+    assert probe.info["country"] == "Germany"  # ipinfo's "DE" wins, canonicalized
     assert probe.info["org"] == "AS-ALT"  # filled from ip2location
+
+
+def test_vote_canonicalizes_country_codes_and_names():
+    name_first = ipinfo._vote([("ip2location", {"ip": "1.1.1.1", "country": "Germany"})])
+    assert name_first.info["country"] == "Germany"
+
+    code_first = ipinfo._vote([("ipinfo", {"ip": "1.1.1.1", "country": "FR"})])
+    assert code_first.info["country"] == "France"
+
+
+def test_vote_drops_non_iso_country():
+    """A POP-style code (cloudflare loc=) never becomes a bogus country."""
+    probe = ipinfo._vote([("cloudflare", {"ip": "1.1.1.1", "country": "WAW"})])
+    assert "country" not in probe.info
+
+
+def test_vote_drops_non_iso_country_but_keeps_other_geo():
+    badge = ipinfo._vote(
+        [
+            ("cloudflare", {"ip": "1.1.1.1", "country": "WAW", "city": "Warsaw"}),
+            ("ip2location", {"ip": "1.1.1.1", "country": "Poland"}),
+        ]
+    )
+    assert badge.info["country"] == "Poland"
+    assert badge.info["city"] == "Warsaw"
 
 
 # ---------------------------------------------------------------------------

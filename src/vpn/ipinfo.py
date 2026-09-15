@@ -29,7 +29,7 @@ from vpn.config import (
     PROBE_TIMEOUT,
     REAL_IP_TIMEOUT_S,
 )
-from vpn.countries import resolve_country
+from vpn.countries import COUNTRY_NAMES, resolve_country, to_code
 from vpn.docker import run
 from vpn.instance import current_instance
 from vpn.textutil import fold
@@ -209,6 +209,11 @@ def _vote(results: list[tuple[str, dict[str, object]]]) -> _Probe:
     merged: dict[str, object] = {}
     for _name, entry in ordered:
         for key, value in entry.items():
+            if key == "country":
+                code = to_code(str(value or ""))
+                if code:
+                    merged.setdefault("country", COUNTRY_NAMES[code])
+                continue
             merged.setdefault(key, value)
     return _Probe(info=merged, sources=sources)
 
