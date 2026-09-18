@@ -405,6 +405,21 @@ def test_status_does_not_probe_when_not_running(monkeypatch):
     assert "Could not fetch public IP." not in result.output
 
 
+def test_hotswap_control_error_shows_friendly_exit(monkeypatch):
+    from vpn.control import ControlError
+
+    def boom(*args, **kwargs):
+        raise ControlError(None, "control server unreachable")
+
+    running(monkeypatch)
+    monkeypatch.setattr(cli, "apply_location", boom)
+    result = invoke(["up", "--country", "France"])
+    assert result.exit_code != 0
+    assert "France" in result.output
+    assert "control server unreachable" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_status_hides_dns_and_port_when_unreachable(monkeypatch):
     from vpn.control import ControlError
 

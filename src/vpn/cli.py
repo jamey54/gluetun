@@ -300,7 +300,10 @@ def _apply_request(
     target = Selection(target_provider, target_protocol, target_country, target_city)
     if target.key == base.key:
         return target, False
-    apply_location(target)
+    try:
+        apply_location(target)
+    except control.ControlError as exc:
+        raise SystemExit(f"Could not switch to {_print_target(target)} — {exc.message}") from exc
     return target, True
 
 
