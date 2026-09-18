@@ -149,7 +149,12 @@ def get_port_forward() -> int | None:
     """Currently forwarded port, or None if not forwarding."""
     _, body = _request("GET", "/v1/portforward")
     port = _parse_json(body, "/v1/portforward").get("port")
-    return int(port) if port else None
+    if not port:
+        return None
+    try:
+        return int(port)
+    except (TypeError, ValueError) as exc:
+        raise ControlError(None, f"invalid port-forward value from gluetun: {port!r}") from exc
 
 
 def with_location(

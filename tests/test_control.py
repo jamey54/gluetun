@@ -308,3 +308,11 @@ def test_get_port_forward_returns_port(monkeypatch):
 def test_get_port_forward_returns_none_when_empty(monkeypatch):
     monkeypatch.setattr(control, "urlopen", fake_urllib((200, "{}")))
     assert control.get_port_forward() is None
+
+
+def test_get_port_forward_bad_value_is_a_control_error_not_valueerror(monkeypatch):
+    from vpn.control import ControlError
+
+    monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"port":"open"}')))
+    with pytest.raises(ControlError, match="port-forward"):
+        control.get_port_forward()
