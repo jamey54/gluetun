@@ -158,6 +158,31 @@ def test_status_json_probe_totally_failed_is_leak(monkeypatch):
     assert doc["exit_ip"] is None
 
 
+def test_status_json_uses_published_port_without_registry(monkeypatch):
+    """A registry-less (imported) running container is targeted via its
+    published control port, not a blind port 8000."""
+    monkeypatch.setattr("vpn.discovery.container_status", lambda n=None: "running")
+    monkeypatch.setattr(
+        cli,
+        "container_env",
+        lambda: {
+            "VPN_SERVICE_PROVIDER": "surfshark",
+            "VPN_TYPE": "wireguard",
+            "VPN_COUNTRY": "Germany",
+        },
+    )
+    monkeypatch.setattr(cli, "container_image", lambda: "qmcgaw/gluetun:latest")
+    monkeypatch.setattr(cli, "container_control_port", lambda name=None: 8123)
+    monkeypatch.setattr(control, "get_settings", lambda: _settings(country="Germany"))
+    probe = ipinfo._Probe({"ip": "9.9.9.9", "country": "DE"}, sources=("ipinfo",))
+    monkeypatch.setattr(cli, "_probe", lambda: probe)
+    monkeypatch.setattr(cli, "real_ip", lambda: "1.1.1.1")
+    result = CliRunner().invoke(cli.main, ["status", "--json"], catch_exceptions=False)
+    assert result.exit_code == 0
+    doc = json.loads(result.output)
+    assert doc["control_server"] == {"port": 8123, "enabled": True}
+
+
 def test_status_json_unknown_country_is_null_not_empty(monkeypatch):
     """valid echo-only IP with no geo info reports null country, not ''."""
     result = invoke_status(monkeypatch, probe_geo=False)

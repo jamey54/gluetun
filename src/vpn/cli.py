@@ -145,7 +145,8 @@ def _resolve_for_command(
     env_file: str | None = None,
 ) -> Instance:
     """Resolve the target instance: --instance > GLUETUN_INSTANCE > usage error,
-    honoring GLUETUN_CTL_PORT."""
+    honoring GLUETUN_CTL_PORT. A registry-less instance falls back to its
+    published control port so imported/shared containers stay addressable."""
     base = resolve_instance(instance, env_file=env_file)
     port = ctl_port
     if port is None:
@@ -157,6 +158,10 @@ def _resolve_for_command(
                 raise click.UsageError(
                     f"GLUETUN_CTL_PORT must be a port number, got {env_port!r}"
                 ) from None
+    if port is None and read_registry(base.name) is None:
+        published = container_control_port(name=base.name)
+        if published is not None:
+            port = published
     if port is not None and port != base.control_port:
         base = replace(base, control_port=port)
     return base
@@ -423,7 +428,7 @@ def up(
             base = current or Selection("", "")
             target, swapped = _apply_request(provider, protocol, country, city, base)
             click.echo(f"{'Swapped to' if swapped else 'Already on'} {_print_target(target)}.")
-        elif current is not None and not recreate:
+        elif current is not None:
             target = current
 
         verified = finish_connection(
@@ -697,6 +702,8 @@ def bench(
             )
         except KeyboardInterrupt:
             raise SystemExit(130) from None
+        except control.ControlError as exc:
+            raise SystemExit(f"Cannot reach the gluetun control server: {exc}") from None
 
         print_report(report)
         if report.action:

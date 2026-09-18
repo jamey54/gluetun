@@ -187,6 +187,26 @@ def test_up_recreate_reverts_to_env_config(monkeypatch, compose_calls, swaps):
     assert swaps == []
 
 
+def test_up_recreate_verifies_baked_country(monkeypatch, compose_calls, swaps, verified):
+    """A recreate reverts to env config, so the target must verify against the
+    country baked into the container env (same as a cold start)."""
+    running(monkeypatch)
+    monkeypatch.setattr(
+        cli,
+        "container_env",
+        lambda: {
+            "VPN_SERVICE_PROVIDER": "surfshark",
+            "VPN_TYPE": "wireguard",
+            "SERVER_COUNTRIES": "Germany",
+        },
+    )
+    result = invoke(["up", "--recreate"])
+    assert result.exit_code == 0
+    assert compose_calls[0][0] == ("up", "-d", "--force-recreate")
+    assert swaps == []
+    assert verified[0]["expected_country"] == "Germany"
+
+
 def test_up_recreate_same_country_still_swaps(monkeypatch, compose_calls, swaps, verified):
     """Recreate resets runtime state to env config, so an explicit request
     matching the pre-recreate selection must still be applied."""

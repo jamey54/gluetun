@@ -551,6 +551,48 @@ def test_run_bench_parallel_failure_keeps_going(monkeypatch, happy_path):
     assert removed == launched  # both temp containers cleaned up
 
 
+def test_run_bench_parallel_winner_already_active_stays_put(monkeypatch, happy_path):
+    """--connect on a winner that is already the active location is a no-op in
+    parallel mode, not a swap that fails its own re-check."""
+    base_france = {
+        "type": "wireguard",
+        "provider": {
+            "name": "surfshark",
+            "server_selection": {"vpn": "wireguard", "countries": ["France"]},
+        },
+    }
+    monkeypatch.setattr(bench, "get_settings", Recorder([base_france]))
+    monkeypatch.setattr(apply_module, "get_settings", lambda: base_france)
+    monkeypatch.setattr(bench, "get_provider_env", lambda prov, prot: {})
+    monkeypatch.setattr(bench, "launch_container", lambda name, env: True)
+    monkeypatch.setattr(bench, "remove_container", lambda name: None)
+    swaps = Recorder()
+    monkeypatch.setattr(bench, "apply_location", swaps)
+
+    def fake_verify(
+        sel: Any, prev_ip: str | None = None, container: str | None = None
+    ) -> Verification:
+        return Verification(ok=True, ip="10.1.0.1")
+
+    def fake_measure(
+        size_mb: int, timeout: int = 120, container: str | None = None
+    ) -> dict[str, float]:
+        return {"mbits": 10.0, "seconds": 1.0, "mbytes": float(size_mb)}
+
+    monkeypatch.setattr(bench, "verify", fake_verify)
+    monkeypatch.setattr(bench, "measure", fake_measure)
+
+    report = bench.run_bench(
+        [candidate("surfshark", "wireguard", "France", None, "fr")],
+        concurrency=2,
+        connect_winner=True,
+        say=lambda *_: None,
+    )
+    assert report.winner is not None
+    assert swaps.calls == []  # no unnecessary swap back onto the same location
+    assert report.action.startswith("Connected to winner")
+
+
 def test_test_batch_interrupt_removes_containers(monkeypatch):
     """Ctrl-C mid-batch removes every disposable container without waiting."""
     removed: list[str] = []
@@ -706,6 +748,31 @@ def test_cli_bench_concurrency_flag_passes_through(monkeypatch):
     assert result.exit_code == 0, result.output
     assert seen["concurrency"] == config.DEFAULT_TEST_CONCURRENCY
     assert seen["connect_winner"] is True
+
+
+def test_cli_bench_control_error_is_friendly_exit(monkeypatch):
+    """A control-server failure during the bench run is a friendly error, never
+    a traceback (the pre-check and the baseline snapshot are separate calls)."""
+    from click.testing import CliRunner
+
+    monkeypatch.setattr(cli, "require_api_key", lambda: None)
+    monkeypatch.setattr(cli, "container_running", lambda: True)
+    monkeypatch.setattr(
+        cli,
+        "get_servers",
+        lambda: rows(("surfshark", "wireguard", "France", "", "fr1")),
+    )
+    monkeypatch.setattr(cli, "listable_servers", lambda d: d)
+    monkeypatch.setattr(control, "get_settings", lambda: baseline_doc())
+
+    def boom(*args, **kwargs):
+        raise control.ControlError(None, "control server unreachable")
+
+    monkeypatch.setattr(cli, "run_bench", boom)
+    result = CliRunner().invoke(cli.main, ["bench"], catch_exceptions=False)
+    assert result.exit_code != 0
+    assert "control server unreachable" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_cli_bench_requires_running_container(monkeypatch):

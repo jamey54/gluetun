@@ -265,10 +265,19 @@ def run_bench(
             )
         else:
             winner = report.winner.candidate
-            did_swap = False
-            if current != winner:
+            # In serial mode `current` tracks the last applied candidate; in
+            # parallel mode nothing was applied yet, so "already on" means the
+            # winner matches the pre-bench baseline selection.
+            if current is not None:
+                already_on = current.key == winner.selection.key
+            else:
+                already_on = bool(
+                    report.baseline
+                    and Selection.from_doc(report.baseline).key == winner.selection.key
+                )
+            did_swap = not already_on
+            if did_swap:
                 apply_location(winner.selection)
-                did_swap = True
             # Exclude the pre-swap exit only when we actually moved; otherwise
             # the tunnel still exits via the winner itself, which must count.
             check = verify(winner.selection, prev_ip if did_swap else None)
