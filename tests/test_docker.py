@@ -1,5 +1,6 @@
 """Tests for docker helpers: container env reading and compose invocation."""
 
+import subprocess
 from typing import Any
 
 import pytest
@@ -134,7 +135,13 @@ def test_remove_container_best_effort(monkeypatch):
 
 
 def test_launch_container_survives_missing_docker(monkeypatch):
-    monkeypatch.setattr(docker, "run", lambda *args, **kw: (_ for _ in ()).throw(OSError()))
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kw: (_ for _ in ()).throw(
+            OSError("[Errno 2] No such file or directory: 'docker'")
+        ),
+    )
     assert docker.launch_container("x", {}) is False
     docker.remove_container("x")  # must not raise
 
