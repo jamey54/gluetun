@@ -268,3 +268,13 @@ def test_probe_provider_timeout_counts_as_provider_failure(monkeypatch):
 
     monkeypatch.setattr(ipinfo, "run", fake_run)
     assert ipinfo._probe_provider("gluetun", "https://echo/") == ""
+
+
+def test_probe_provider_missing_docker_reads_as_failure(monkeypatch):
+    """A missing docker binary (run returns 127) is absorbed, not a crash."""
+
+    def fake_run(*args, **kwargs):
+        return CompletedProcess(args, 127, stdout="", stderr="no such file")
+
+    monkeypatch.setattr(ipinfo, "run", fake_run)
+    assert ipinfo._probe_provider("gluetun", "https://echo/") == ""

@@ -250,6 +250,33 @@ def test_print_ip_status_still_detects_leak_from_backup_sources(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# current_exit_ip: single-shot read used by up/connect/bench exclusions
+# ---------------------------------------------------------------------------
+
+
+def test_current_exit_ip_returns_accepted_observation(monkeypatch):
+    probe, _ = stub_probe([{"ip": "9.9.9.9", "country": "DE"}])
+    monkeypatch.setenv("VPN_REAL_IP", "1.1.1.1")
+    monkeypatch.setattr(ipinfo, "_probe", probe)
+    assert ipinfo.current_exit_ip() == "9.9.9.9"
+
+
+def test_current_exit_ip_falls_back_to_last_observation(monkeypatch):
+    """When every observation is excluded (e.g. still on the bare IP), the
+    single-shot still reports what was last seen rather than None."""
+    probe, _ = stub_probe([{"ip": "1.1.1.1", "country": "Egypt"}])
+    monkeypatch.setenv("VPN_REAL_IP", "1.1.1.1")
+    monkeypatch.setattr(ipinfo, "_probe", probe)
+    assert ipinfo.current_exit_ip() == "1.1.1.1"
+
+
+def test_current_exit_ip_none_when_probe_failed(monkeypatch):
+    probe, _ = stub_probe([None])
+    monkeypatch.setattr(ipinfo, "_probe", probe)
+    assert ipinfo.current_exit_ip() is None
+
+
+# ---------------------------------------------------------------------------
 # container state helpers (M3)
 # ---------------------------------------------------------------------------
 

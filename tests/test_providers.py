@@ -6,8 +6,10 @@ from vpn import providers
 from vpn.config import DEFAULT_PROTOCOL
 from vpn.providers import (
     active_protocols,
+    choose_protocol,
     get_active_providers,
     get_provider_env,
+    resolve_provider,
     validate_provider,
 )
 
@@ -110,3 +112,30 @@ def test_registry_shapes_consistent():
         for protocol, config in protocols.items():
             unmapped = set(config.required_env) - set(config.env_map.values())
             assert not unmapped, f"{provider}/{protocol}: {unmapped}"
+
+
+def test_choose_protocol_explicit_request_wins(monkeypatch):
+    monkeypatch.setenv("SURFSHARK_WIREGUARD_PRIVATE_KEY", "k")
+    monkeypatch.setenv("SURFSHARK_OPENVPN_USER", "u")
+    monkeypatch.setenv("SURFSHARK_OPENVPN_PASSWORD", "p")
+    assert choose_protocol("surfshark", requested="openvpn") == "openvpn"
+
+
+def test_choose_protocol_prefers_active_current_then_default(monkeypatch):
+    """The running protocol wins only if still credentialed; else the default."""
+    monkeypatch.setenv("SURFSHARK_WIREGUARD_PRIVATE_KEY", "k")
+    assert active_protocols("surfshark") == ["wireguard"]
+    assert choose_protocol("surfshark", current="wireguard") == "wireguard"
+    assert choose_protocol("surfshark", current="openvpn") == DEFAULT_PROTOCOL
+    assert choose_protocol("surfshark") == DEFAULT_PROTOCOL
+
+
+def test_resolve_provider_normalizes_and_defaults(monkeypatch):
+    monkeypatch.setenv("SURFSHARK_WIREGUARD_PRIVATE_KEY", "k")
+    assert resolve_provider("SurfShark") == ("surfshark", DEFAULT_PROTOCOL)
+    assert resolve_provider("surfshark", "wireguard") == ("surfshark", "wireguard")
+
+
+def test_resolve_provider_unknown_is_friendly_exit():
+    with pytest.raises(SystemExit, match="Unknown provider 'nordvpn'"):
+        resolve_provider("nordvpn")

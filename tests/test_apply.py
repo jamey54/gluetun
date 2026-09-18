@@ -147,6 +147,18 @@ def test_restore_settings_puts_document_under_lock(monkeypatch):
     assert seen and seen[0] is base
 
 
+def test_restore_settings_404_translates_to_upgrade_hint(monkeypatch):
+    monkeypatch.setattr(
+        apply,
+        "put_settings",
+        lambda doc: (_ for _ in ()).throw(control.ControlError(404, "404 page not found")),
+    )
+    with pytest.raises(control.ControlError) as excinfo:
+        apply.restore_settings(full_doc())
+    assert excinfo.value.status == 404
+    assert "--pull" in excinfo.value.message
+
+
 # ---------------------------------------------------------------------------
 # verify (IP-delta proof over the leak-first fetcher)
 # ---------------------------------------------------------------------------
