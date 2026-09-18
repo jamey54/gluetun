@@ -309,6 +309,25 @@ def test_connect_picker_selection(monkeypatch, swaps):
     assert swaps == [Selection("surfshark", "wireguard", "Japan", "Tokyo")]
 
 
+def test_up_cold_start_verifies_baked_country(monkeypatch, compose_calls, swaps, verified):
+    """A plain cold start must verify against the country baked via compose env."""
+    running(monkeypatch, None)
+    monkeypatch.setattr(
+        cli,
+        "container_env",
+        lambda: {
+            "VPN_SERVICE_PROVIDER": "surfshark",
+            "VPN_TYPE": "wireguard",
+            "SERVER_COUNTRIES": "Germany",
+            "SERVER_CITIES": "Berlin",
+        },
+    )
+    result = invoke(["up", "--provider", "surfshark"])
+    assert result.exit_code == 0
+    assert swaps == []  # no hot-swap: baked config already applies
+    assert verified[0]["expected_country"] == "Germany"
+
+
 def test_connect_city_without_country_fails_clearly(monkeypatch, swaps):
     running(monkeypatch, Selection("surfshark", "wireguard", None))
     result = invoke(["connect", "--city", "Tokyo"])

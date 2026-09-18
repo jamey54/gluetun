@@ -206,7 +206,10 @@ def _baked_selection() -> Selection | None:
     if not provider:
         return None
     return Selection(
-        provider, env.get("VPN_TYPE") or "", env.get("VPN_COUNTRY"), env.get("VPN_CITY")
+        provider,
+        env.get("VPN_TYPE") or "",
+        env.get("SERVER_COUNTRIES") or env.get("VPN_COUNTRY"),
+        env.get("SERVER_CITIES") or env.get("VPN_CITY"),
     )
 
 
@@ -413,8 +416,9 @@ def up(
             write_registry(inst)
             click.echo(f"VPN {'recreated' if recreate else 'started'} ({name}/{proto}).")
             # Runtime state now equals env config: the fresh container runs the
-            # baked pair with no location, so requests resolve against this.
-            current = Selection(name, proto)
+            # baked pair (provider, protocol, and any baked country/city), so
+            # requests resolve against that instead of an unfilled Selection.
+            current = _baked_selection() or Selection(name, proto)
 
         if requested:
             if not created:
