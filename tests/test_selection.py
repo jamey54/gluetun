@@ -8,6 +8,7 @@ from click.testing import CliRunner
 
 from vpn import cli, config
 from vpn.apply import Selection
+from vpn.control import ControlError
 
 
 @pytest.fixture(autouse=True)
@@ -384,6 +385,24 @@ def test_status_flags_running_country_mismatch(monkeypatch, verified):
     result = invoke(["status", "--no-speedtest"])
     assert result.exit_code == 0
     assert verified and verified[0]["expected_country"] == "Germany"
+
+
+def test_status_does_not_probe_when_not_running(monkeypatch):
+    """A stopped container must not stall the 15x2s verification retry loop."""
+    calls: list[tuple[str, object]] = []
+
+    def boom():
+        raise ControlError(None, "no")
+
+    monkeypatch.setattr(cli, "container_status", lambda: "exited")
+    monkeypatch.setattr(cli, "effective_selection", lambda: None)
+    monkeypatch.setattr("vpn.control.get_vpn_status", boom)
+    monkeypatch.setattr(cli, "finish_connection", lambda **kw: (calls.append((kw, True)), True)[1])
+    result = invoke(["status", "--no-speedtest"])
+    assert result.exit_code == 0
+    assert calls == []
+    assert "exited" in result.output
+    assert "Could not fetch public IP." not in result.output
 
 
 def test_status_hides_dns_and_port_when_unreachable(monkeypatch):

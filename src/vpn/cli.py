@@ -588,12 +588,13 @@ def status(
             click.echo()
             _kv("Provider", "unknown — is gluetun's control server reachable?")
 
-        click.echo()
-        finish_connection(
-            expected_country=current.country if current and current.country else None,
-            speedtest=not no_speedtest,
-            size=size,
-        )
+        if state == "running":
+            click.echo()
+            finish_connection(
+                expected_country=current.country if current and current.country else None,
+                speedtest=not no_speedtest,
+                size=size,
+            )
 
 
 @main.command()
