@@ -1,6 +1,5 @@
 """Docker / docker compose helpers."""
 
-import contextlib
 import json
 import os
 import subprocess
@@ -146,16 +145,12 @@ def launch_container(name: str, env: dict[str, str]) -> bool:
     for key, value in env.items():
         args += ["-e", f"{key}={value}"]
     args.append(GLUETUN_IMAGE)
-    try:
-        result = run(
-            *args, capture=True, check=False, timeout=CONTAINER_OP_TIMEOUT_S
-        )
-    except OSError:
-        return False  # docker unavailable: treat as a failed launch
+    result = run(
+        *args, capture=True, check=False, timeout=CONTAINER_OP_TIMEOUT_S
+    )
     return result.returncode == 0
 
 
 def remove_container(name: str) -> None:
     """Force-remove a container (best effort, never raises)."""
-    with contextlib.suppress(OSError):
-        run("docker", "rm", "-f", name, capture=True, check=False, timeout=CONTAINER_OP_TIMEOUT_S)
+    run("docker", "rm", "-f", name, capture=True, check=False, timeout=CONTAINER_OP_TIMEOUT_S)
