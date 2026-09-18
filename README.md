@@ -72,7 +72,7 @@ You only need to set credentials for providers you actually use.
 | `vpn dns [--instance NAME] [on\|off]` | Show or toggle the DNS-over-TLS resolver |
 | `vpn update [--instance NAME]` | Trigger a server list update |
 
-`--instance` is the first option of every command and defaults to `gluetun` (or `GLUETUN_INSTANCE`). See [Instances](#instances).
+`--instance` is the first option of every command. Set `GLUETUN_INSTANCE` to avoid repeating it. See [Instances](#instances).
 
 ### up vs connect
 
@@ -147,7 +147,7 @@ After connecting (and after every swap), the CLI probes the public IP from insid
 - **Yellow warning** — real VPN exit, but it geolocates elsewhere than requested (common with provider "virtual locations"). You stay connected and the speed test still runs.
 - **Red / leak** — traffic still exits via your bare connection (or no IP could be read); the speed test is skipped.
 
-Swaps additionally exclude the previous exit IP from acceptance, so a failed swap that silently keeps routing through the old server is reported as `no reconnect` rather than mistaken for success. IP echo services report ISO 3166-1 alpha-2 codes (`AU`), normalized to full names before comparing. Country is advisory only: it never gates success — the IP change does.
+Swaps additionally exclude the previous exit IP from acceptance, so a failed swap that silently keeps routing through the old server is reported as `no reconnect` rather than mistaken for success. IP echo services report ISO 3166-1 alpha-2 codes (`AU`), normalized to full names before comparing. Country is advisory only: it never gates success — the IP change does. `vpn status` and a flag-free `vpn up` on an already-running instance compare against the instance's *running* country, so a drifting exit (e.g. after a virtual-location server was removed) shows as a yellow geo warning instead of a blind green.
 
 ## Speed test
 
@@ -193,7 +193,7 @@ vpn 0.2 runs several independent Gluetun containers side by side, each its own *
 - an optional `--env-file` replacing `.env` for that instance;
 - a registry record `~/.cache/vpn/instances/<instance>.json` (control port + env file).
 
-Every command accepts `--instance NAME`. Resolution: `--instance` → `GLUETUN_INSTANCE` → default `gluetun`. The default instance is exactly the historical single-container behaviour, so nothing breaks for existing usage.
+Every command requires an instance. Resolution order: `--instance NAME` → `GLUETUN_INSTANCE` env var → error. Always specify one or export the env var.
 
 Container names are **exact matches only**: vpn never touches a container other than the one named after the instance, so a shared gluetun owned by another tool is never matched.
 
@@ -203,15 +203,15 @@ Each instance publishes the control server on `127.0.0.1:<port>`. `vpn up` resol
 
 1. `--ctl-port HOST_PORT`
 2. `GLUETUN_CTL_PORT` (from the instance's env)
-3. a free port in `[8000, 9000]` is auto-allocated on first creation and persisted in the registry for later reuse
+3. All instances use a free port in `[8000, 9000]`, auto-allocated on first creation and persisted for later reuse.
 
-The default instance keeps `8000`. `bench -c N` temporary one-off containers never publish host ports.
+`bench -c N` temporary one-off containers never publish host ports.
 
 All control-server traffic (hot-swap `GET/PUT /v1/vpn/settings`, DNS, updater, status) targets the instance's own published port — never a hardcoded `8000`.
 
 ### Per-instance env files
 
-The shared `.env` stays the default for every instance. For a dedicated instance, pass `--env-file <path>`: that file **replaces** `.env` for the instance (compose `--env-file` semantics), while the process environment still fills anything it doesn't set. This lets different instances use different providers/credentials.
+Every instance reads its env from `./.env` by default. For a dedicated instance, pass `--env-file <path>`: that file **replaces** `.env` for the instance (compose `--env-file` semantics), while the process environment still fills anything it doesn't set. This lets different instances use different providers/credentials.
 
 ### Listing instances
 
@@ -225,13 +225,12 @@ gluetun    running  8000     surfshark/wireguard → Germany         firefox-app
 
 ## Configuration
 
-Secrets live in `.env` (copy `.env.sample`; located next to your compose file). Other settings are overridable via environment variables:
+Secrets live in `.env` in the working directory (copy `.env.sample` to get started). Other settings are overridable via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GLUETUN_INSTANCE` | `gluetun` | Default instance name when `--instance` is absent |
+| `GLUETUN_INSTANCE` | *(required)* | Instance name; pass `--instance` or set this. Omitting both is an error. |
 | `GLUETUN_CTL_PORT` | unset | Control-server host port for the resolved instance (equivalent to `--ctl-port`) |
-| `GLUETUN_COMPOSE_FILE` | bundled `vpn.yml` | Path to compose file, default instance only (a `./vpn.yml` in the working directory takes precedence) |
 | `GLUETUN_CACHE_TTL` | `3600` | Server cache TTL (seconds) |
 | `VPN_DEBUG` | unset | Set to enable debug output (same as `--debug`) |
 
@@ -276,14 +275,14 @@ Other non-zero codes are unspecified. `vpn up` and `vpn connect` return `1` when
 
 | Purpose | Command |
 |---------|---------|
-| Ensure shared gluetun is running (idempotent; verify-only when already up) | `vpn up` |
+| Ensure shared gluetun is running (idempotent; verify-only when already up) | `vpn up --instance gluetun` |
 | Shared gluetun health probe | `vpn status --json` |
 | Capability probe (is vpn 0.2+ implemented?) | `vpn ls --json` (or `vpn --version` for the exact version) |
 | Create a dedicated instance (creds from `.env`) | `vpn up --instance <plan>-gluetun --provider P [--protocol T] [--country C] [--city Ci]` |
 | Verify a dedicated instance after create | `vpn status --instance <plan>-gluetun --json` |
 | Tear down when the plan container is removed | `vpn down --instance <plan>-gluetun` |
 
-dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag, treat vpn as pre-0.2 and hide the *dedicated* gluetun option (shared-only falls back to plain `vpn up`). dockerstrator keeps its own container inventory from `docker ps`; `vpn ls` is used only for instance/control-port/selection state.
+dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag, treat vpn as pre-0.2 and hide the *dedicated* gluetun option (shared-only falls back to plain `vpn up`). Since 0.2.4 every call names its instance explicitly (`--instance` or `GLUETUN_INSTANCE`) — there is no default instance anymore. dockerstrator keeps its own container inventory from `docker ps`; `vpn ls` is used only for instance/control-port/selection state.
 
 `--json` output is deterministic single-line JSON on stdout (no colors, no progress). `--instance` filters `vpn ls` output to one instance.
 
@@ -316,7 +315,6 @@ dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag
 
 ```json
 {
-  "default": "gluetun",
   "instances": [
     {
       "instance": "gluetun",
@@ -330,5 +328,4 @@ dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag
 }
 ```
 
-- `default` — the default instance name (`GLUETUN_INSTANCE`, else `gluetun`).
 - `instances` — one entry per known instance; `state` uses the same values as `status --json`. `selection` and `control_server` are `null` when unknown. `consumers` lists containers sharing the instance's network (`NetworkMode == container:<container_name>`).
