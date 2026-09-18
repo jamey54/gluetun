@@ -54,6 +54,26 @@ def test_consumers_of(monkeypatch):
     assert discovery.consumers_of("other") == []
 
 
+def test_consumers_of_sorted_across_many(monkeypatch):
+    def fake_run(*args, **kwargs):
+        return _proc(
+            "z-app\tcontainer:gluetun\n"
+            "a-app\tcontainer:gluetun\n"
+            "b-app\tcontainer:gluetun\n"
+        )
+
+    monkeypatch.setattr(discovery, "run", fake_run)
+    assert discovery.consumers_of("gluetun") == ["a-app", "b-app", "z-app"]
+
+
+def test_consumers_of_missing_docker_reads_as_empty(monkeypatch):
+    monkeypatch.setattr(
+        discovery, "run", lambda *a, **kw: CompletedProcess(a, 127, stderr="no docker")
+    )
+    assert discovery.consumers_of("gluetun") == []
+    assert discovery._compose_projects() == []
+
+
 def test_docker_ps_calls_are_bounded(monkeypatch):
     from vpn import config
 
@@ -157,6 +177,21 @@ def test_ls_human_prints_table(monkeypatch):
     assert result.exit_code == 0
     assert "plan-a" in result.output
     assert "INSTANCE" in result.output
+
+
+def test_ls_human_no_instances_message(monkeypatch):
+    monkeypatch.setattr(cli, "instance_records", lambda: [])
+    result = CliRunner().invoke(cli.main, ["ls"], catch_exceptions=False)
+    assert result.exit_code == 0
+    assert "(no instances)" in result.output
+
+
+def test_ls_human_filters_by_instance(monkeypatch):
+    monkeypatch.setattr(cli, "instance_records", lambda: [_record()])
+    result = CliRunner().invoke(cli.main, ["ls", "--instance", "other"], catch_exceptions=False)
+    assert "(no instances)" in result.output
+    result = CliRunner().invoke(cli.main, ["ls", "--instance", "plan-a"], catch_exceptions=False)
+    assert "plan-a" in result.output
 
 
 def _record() -> dict[str, object]:

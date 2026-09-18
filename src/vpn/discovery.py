@@ -33,19 +33,16 @@ def _state(name: str) -> str:
 
 def _compose_projects() -> list[str]:
     """Compose project names of all containers (empty when docker is unavailable)."""
-    try:
-        result = run(
-            "docker",
-            "ps",
-            "-a",
-            "--format",
-            PROJECT_LABEL,
-            capture=True,
-            check=False,
-            timeout=CONTAINER_OP_TIMEOUT_S,
-        )
-    except OSError:
-        return []
+    result = run(
+        "docker",
+        "ps",
+        "-a",
+        "--format",
+        PROJECT_LABEL,
+        capture=True,
+        check=False,
+        timeout=CONTAINER_OP_TIMEOUT_S,
+    )
     return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
 
 
@@ -89,19 +86,16 @@ def selection_doc(sel: Selection) -> dict[str, str | None]:
 
 def consumers_of(name: str) -> list[str]:
     """Containers sharing this instance's network, sorted."""
-    try:
-        result = run(
-            "docker",
-            "ps",
-            "-a",
-            "--format",
-            NETWORK_FORMAT,
-            capture=True,
-            check=False,
-            timeout=CONTAINER_OP_TIMEOUT_S,
-        )
-    except OSError:
-        return []
+    result = run(
+        "docker",
+        "ps",
+        "-a",
+        "--format",
+        NETWORK_FORMAT,
+        capture=True,
+        check=False,
+        timeout=CONTAINER_OP_TIMEOUT_S,
+    )
     target = f"container:{name}"
     consumers = []
     for line in (result.stdout or "").splitlines():

@@ -225,6 +225,18 @@ def test_up_recreate_works_with_unreachable_control_server(monkeypatch, compose_
     assert compose_calls[0][0] == ("up", "-d", "--force-recreate")
 
 
+def test_logs_tails_container_by_default(monkeypatch, compose_calls):
+    result = invoke(["logs"])
+    assert result.exit_code == 0
+    assert compose_calls[0][0] == ("logs", "--tail", "50", "gluetun")
+
+
+def test_logs_follows_and_tails_custom(monkeypatch, compose_calls):
+    result = invoke(["logs", "--follow", "-n", "200"])
+    assert result.exit_code == 0
+    assert compose_calls[0][0] == ("logs", "-f", "--tail", "200", "gluetun")
+
+
 def test_up_explicit_protocol_requires_its_own_creds(monkeypatch, compose_calls, swaps):
     running(monkeypatch)
     result = invoke(["up", "--protocol", "openvpn"])

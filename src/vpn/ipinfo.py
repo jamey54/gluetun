@@ -168,25 +168,22 @@ class _Probe:
 
 def _probe_provider(container: str, url: str) -> str:
     """One echo fetch from inside the container; '' on failure."""
-    try:
-        result = run(
-            "docker",
-            "exec",
-            container,
-            "timeout",
-            str(PROBE_TIMEOUT),
-            "wget",
-            "-q",
-            "-T",
-            str(PROBE_TIMEOUT),
-            "-O-",
-            url,
-            capture=True,
-            check=False,
-            timeout=PROBE_EXEC_TIMEOUT_S,
-        )
-    except OSError:
-        return ""  # docker unavailable: treat the provider as failed
+    result = run(
+        "docker",
+        "exec",
+        container,
+        "timeout",
+        str(PROBE_TIMEOUT),
+        "wget",
+        "-q",
+        "-T",
+        str(PROBE_TIMEOUT),
+        "-O-",
+        url,
+        capture=True,
+        check=False,
+        timeout=PROBE_EXEC_TIMEOUT_S,
+    )
     return result.stdout if result.returncode == 0 else ""
 
 
