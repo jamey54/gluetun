@@ -150,6 +150,20 @@ def test_run_timeout_with_check_raises_system_exit():
         docker.run("sleep", "60", timeout=0.3)
 
 
+def test_run_missing_command_check_false_returns_127(capsys):
+    result = docker.run("no-such-binary-xyz", capture=True, check=False)
+    assert result.returncode == 127
+    assert "no-such-binary-xyz" in result.stderr
+    assert capsys.readouterr().err == ""  # non-fatal path stays quiet
+
+
+def test_run_missing_command_check_true_exits_127(capsys):
+    with pytest.raises(SystemExit) as ei:
+        docker.run("no-such-binary-xyz")
+    assert ei.value.code == 127
+    assert "no-such-binary-xyz" in capsys.readouterr().err
+
+
 def test_inspect_container_bounds_stalled_daemon(monkeypatch):
     from subprocess import CompletedProcess
 

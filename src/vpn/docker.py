@@ -4,6 +4,7 @@ import contextlib
 import json
 import os
 import subprocess
+import sys
 
 from vpn.config import CONTAINER_OP_TIMEOUT_S
 from vpn.instance import current_instance
@@ -32,6 +33,12 @@ def run(
         if check:
             raise SystemExit(f"Error: {msg}") from None
         return subprocess.CompletedProcess(tuple(args), 124, stdout="", stderr=msg)
+    except OSError as exc:
+        msg = f"Cannot run {args[0] if args else 'command'}: {exc}"
+        if check:
+            print(msg, file=sys.stderr)
+            raise SystemExit(127) from None
+        return subprocess.CompletedProcess(tuple(args), 127, stdout="", stderr=msg)
     if check and result.returncode != 0:
         msg = (result.stderr or result.stdout or "").strip()
         raise SystemExit(f"Error: {msg}" if msg else f"Command failed ({result.returncode})")
