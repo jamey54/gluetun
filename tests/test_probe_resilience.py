@@ -8,6 +8,7 @@ can no longer stall the verification retry loop.
 from subprocess import CompletedProcess
 
 from vpn import ipinfo
+from vpn.config import PROBE_EXEC_TIMEOUT_S
 
 _URLS = {
     "ipinfo": "https://ipinfo.io/",
@@ -244,3 +245,26 @@ def test_probe_uses_explicit_container(monkeypatch):
     assert ipinfo._probe("plan-a") is None
     assert all(args[:3] == ("docker", "exec", "plan-a") for args in seen)
     assert len(seen) == len(ipinfo._PROVIDERS)
+
+
+def test_probe_provider_bounds_the_docker_exec(monkeypatch):
+    """A stalled docker exec must time out rather than hang the probe forever."""
+    seen: dict[str, object] = {}
+
+    def fake_run(*args, **kwargs):
+        seen.update(kwargs)
+        return CompletedProcess(args, 0, stdout="5.6.7.8")
+
+    monkeypatch.setattr(ipinfo, "run", fake_run)
+    assert ipinfo._probe_provider("gluetun", "https://echo/") == "5.6.7.8"
+    assert seen["timeout"] == PROBE_EXEC_TIMEOUT_S
+
+
+def test_probe_provider_timeout_counts_as_provider_failure(monkeypatch):
+    """A timed-out exec (returncode 124) is absorbed, not a crash."""
+
+    def fake_run(*args, **kwargs):
+        return CompletedProcess(args, 124, stdout="", stderr="timed out after 20s")
+
+    monkeypatch.setattr(ipinfo, "run", fake_run)
+    assert ipinfo._probe_provider("gluetun", "https://echo/") == ""

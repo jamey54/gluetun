@@ -36,6 +36,8 @@ def measure(
         "/dev/null",
         SPEEDTEST_URL.format(n=nbytes),
         check=False,
+        # Bound the docker exec itself, not just the in-container wget.
+        timeout=timeout + 10,
     )
     seconds = time.monotonic() - start
     if result.returncode != 0:

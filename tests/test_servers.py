@@ -24,6 +24,18 @@ def _fake_run(stdout: str) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess([], 0, stdout, "")
 
 
+def test_server_fetch_bounds_docker_run(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_run(*args, **kwargs):
+        seen.update(kwargs)
+        return _fake_run("")
+
+    monkeypatch.setattr(servers, "run", fake_run)
+    servers._fetch_servers("surfshark")
+    assert seen["timeout"] == config.SERVER_FETCH_TIMEOUT_S
+
+
 SAMPLE_MD = """\
 ## Surfshark servers
 

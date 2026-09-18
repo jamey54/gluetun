@@ -26,6 +26,7 @@ from vpn.config import (
     IP_FETCH_DELAY,
     IP_FETCH_RETRIES,
     IP_INFO_URL,
+    PROBE_EXEC_TIMEOUT_S,
     PROBE_TIMEOUT,
     REAL_IP_TIMEOUT_S,
 )
@@ -182,6 +183,7 @@ def _probe_provider(container: str, url: str) -> str:
             url,
             capture=True,
             check=False,
+            timeout=PROBE_EXEC_TIMEOUT_S,
         )
     except OSError:
         return ""  # docker unavailable: treat the provider as failed

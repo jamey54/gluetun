@@ -7,7 +7,14 @@ from concurrent.futures import ThreadPoolExecutor
 from rich.console import Console
 from rich.table import Table
 
-from vpn.config import CACHE_DIR, CACHE_FILE, CACHE_TTL, CACHE_VERSION, DEFAULT_PROTOCOL
+from vpn.config import (
+    CACHE_DIR,
+    CACHE_FILE,
+    CACHE_TTL,
+    CACHE_VERSION,
+    DEFAULT_PROTOCOL,
+    SERVER_FETCH_TIMEOUT_S,
+)
 from vpn.docker import GLUETUN_IMAGE, run
 from vpn.providers import PROVIDERS, get_active_providers
 from vpn.textutil import fold
@@ -96,6 +103,7 @@ def _fetch_servers(provider: str) -> list[ServerRow]:
         f"-{provider}",
         capture=True,
         check=False,
+        timeout=SERVER_FETCH_TIMEOUT_S,
     )
     if result.returncode != 0:
         return []
@@ -127,6 +135,7 @@ def _fetch_all_servers(providers: list[str]) -> dict[str, list[ServerRow]] | Non
         loop,
         capture=True,
         check=False,
+        timeout=SERVER_FETCH_TIMEOUT_S,
     )
     if result.returncode != 0:
         return None

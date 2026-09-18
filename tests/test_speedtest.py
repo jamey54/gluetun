@@ -41,6 +41,31 @@ def test_measure_failure_returns_none(monkeypatch):
     assert speedtest.measure() is None
 
 
+def test_measure_bounds_the_docker_exec(monkeypatch):
+    """A stalled docker exec must time out rather than hang the speed test."""
+    times = iter([100.0, 101.0])
+    monkeypatch.setattr("time.monotonic", lambda: next(times))
+    seen: dict[str, object] = {}
+
+    def fake_run(*args, **kwargs):
+        seen.update(kwargs)
+        return CompletedProcess(args, 0)
+
+    monkeypatch.setattr(speedtest, "run", fake_run)
+    speedtest.measure(size_mb=25, timeout=120)
+    assert seen["timeout"] == 130  # inner wget bound + exec overhead buffer
+
+
+def test_measure_timeout_is_failure(monkeypatch):
+    monkeypatch.setattr("time.monotonic", lambda: 100.0)
+
+    def fake_run(*args, **kwargs):
+        return CompletedProcess(args, 124, stdout="", stderr="timed out")
+
+    monkeypatch.setattr(speedtest, "run", fake_run)
+    assert speedtest.measure() is None
+
+
 def test_same_country_code_vs_name():
     assert _same_country("DE", "Germany")
     assert _same_country("United States", "US")
