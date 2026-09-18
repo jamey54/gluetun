@@ -42,4 +42,6 @@ def measure(
     seconds = time.monotonic() - start
     if result.returncode != 0:
         return None
+    if seconds <= 0:
+        seconds = 1e-9  # never divide by zero; an instant exit is still a valid download
     return {"mbits": mbps(nbytes, seconds), "seconds": seconds, "mbytes": float(size_mb)}

@@ -66,6 +66,20 @@ def test_measure_timeout_is_failure(monkeypatch):
     assert speedtest.measure() is None
 
 
+def test_measure_instant_exec_never_divide_by_zero(monkeypatch):
+    times = iter([100.0, 100.0])  # zero elapsed time
+    monkeypatch.setattr("time.monotonic", lambda: next(times))
+
+    def fake_run(*args, **kwargs):
+        return CompletedProcess(args, 0)
+
+    monkeypatch.setattr(speedtest, "run", fake_run)
+    result = speedtest.measure(size_mb=25)
+    assert result is not None
+    assert result["seconds"] > 0  # clamped, not a divide-by-zero crash
+    assert result["mbits"] > 0 and result["mbits"] != float("inf")
+
+
 def test_same_country_code_vs_name():
     assert _same_country("DE", "Germany")
     assert _same_country("United States", "US")
