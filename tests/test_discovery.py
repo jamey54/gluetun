@@ -39,8 +39,12 @@ def creds(monkeypatch):
 
 
 def test_state_mapping(monkeypatch):
-    for status, expected in [("running", "running"), ("restarting", "starting"),
-                             ("exited", "stopped"), ("created", "stopped")]:
+    for status, expected in [
+        ("running", "running"),
+        ("restarting", "starting"),
+        ("exited", "stopped"),
+        ("created", "stopped"),
+    ]:
         monkeypatch.setattr(discovery, "container_status", lambda n, status=status: status)
         assert discovery._state("gluetun") == expected
     monkeypatch.setattr(discovery, "container_status", lambda n: None)
@@ -57,9 +61,7 @@ def test_consumers_of(monkeypatch):
 def test_consumers_of_sorted_across_many(monkeypatch):
     def fake_run(*args, **kwargs):
         return _proc(
-            "z-app\tcontainer:gluetun\n"
-            "a-app\tcontainer:gluetun\n"
-            "b-app\tcontainer:gluetun\n"
+            "z-app\tcontainer:gluetun\na-app\tcontainer:gluetun\nb-app\tcontainer:gluetun\n"
         )
 
     monkeypatch.setattr(discovery, "run", fake_run)
@@ -81,7 +83,7 @@ def test_docker_ps_calls_are_bounded(monkeypatch):
     monkeypatch.setattr(
         discovery,
         "run",
-        lambda *args, **kw: (seen.update(kw) or _proc("")),
+        lambda *args, **kw: seen.update(kw) or _proc(""),
     )
     discovery.consumers_of("gluetun")
     assert seen["timeout"] == config.CONTAINER_OP_TIMEOUT_S
@@ -90,6 +92,7 @@ def test_docker_ps_calls_are_bounded(monkeypatch):
 def test_known_names_from_registry_and_projects(monkeypatch):
     _stub_docker(None, monkeypatch)
     from vpn import config
+
     (config.INSTANCES_DIR / "from-registry.json").parent.mkdir(parents=True, exist_ok=True)
     (config.INSTANCES_DIR / "from-registry.json").write_text("{}")
     assert discovery._known_names() == {"gluetun", "plan-a", "from-registry"}
@@ -101,8 +104,7 @@ def test_instance_records_schema(monkeypatch):
     monkeypatch.setattr(discovery, "container_control_port", lambda n: 8123)
     monkeypatch.setattr(
         "vpn.control.get_settings",
-        lambda: {"type": "wireguard", "provider": {"name": "surfshark"},
-                 "server_selection": {}},
+        lambda: {"type": "wireguard", "provider": {"name": "surfshark"}, "server_selection": {}},
     )
     records = discovery.instance_records()
     assert [r["instance"] for r in records] == ["gluetun", "plan-a"]
@@ -141,8 +143,7 @@ def test_record_without_control_port_has_null_control_server(monkeypatch):
     monkeypatch.setattr(discovery, "container_control_port", lambda n: None)
     monkeypatch.setattr(
         "vpn.control.get_settings",
-        lambda: {"type": "wireguard", "provider": {"name": "surfshark"},
-                 "server_selection": {}},
+        lambda: {"type": "wireguard", "provider": {"name": "surfshark"}, "server_selection": {}},
     )
     record = next(r for r in discovery.instance_records() if r["instance"] == "plan-a")
     assert record["control_server"] is None
@@ -152,14 +153,16 @@ def test_ls_json_envelope(monkeypatch):
     monkeypatch.setattr(
         cli,
         "instance_records",
-        lambda: [{
-            "instance": "plan-a",
-            "container_name": "plan-a",
-            "state": "stopped",
-            "selection": None,
-            "control_server": {"port": 8123, "enabled": False},
-            "consumers": [],
-        }],
+        lambda: [
+            {
+                "instance": "plan-a",
+                "container_name": "plan-a",
+                "state": "stopped",
+                "selection": None,
+                "control_server": {"port": 8123, "enabled": False},
+                "consumers": [],
+            }
+        ],
     )
     result = CliRunner().invoke(cli.main, ["ls", "--json"], catch_exceptions=False)
     assert result.exit_code == 0
@@ -172,14 +175,16 @@ def test_ls_json_filters_by_instance(monkeypatch):
     monkeypatch.setattr(
         cli,
         "instance_records",
-        lambda: [{
-            "instance": "plan-a",
-            "container_name": "plan-a",
-            "state": "stopped",
-            "selection": None,
-            "control_server": {"port": 8123, "enabled": False},
-            "consumers": [],
-        }],
+        lambda: [
+            {
+                "instance": "plan-a",
+                "container_name": "plan-a",
+                "state": "stopped",
+                "selection": None,
+                "control_server": {"port": 8123, "enabled": False},
+                "consumers": [],
+            }
+        ],
     )
     result = CliRunner().invoke(
         cli.main, ["ls", "--json", "--instance", "other"], catch_exceptions=False

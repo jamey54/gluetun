@@ -114,9 +114,7 @@ def test_launch_container_builds_docker_run_args(monkeypatch):
 def test_launch_container_failure_reported(monkeypatch):
     from subprocess import CompletedProcess
 
-    monkeypatch.setattr(
-        docker, "run", lambda *args, **kw: CompletedProcess(args, 1)
-    )
+    monkeypatch.setattr(docker, "run", lambda *args, **kw: CompletedProcess(args, 1))
     assert docker.launch_container("x", {}) is False
 
 
@@ -127,7 +125,7 @@ def test_remove_container_best_effort(monkeypatch):
     monkeypatch.setattr(
         docker,
         "run",
-        lambda *args, **kw: (seen.update({"args": args, "kw": kw}) or CompletedProcess(args, 1)),
+        lambda *args, **kw: seen.update({"args": args, "kw": kw}) or CompletedProcess(args, 1),
     )
     docker.remove_container("whatever")  # must not raise on failure
     assert seen["args"] == ("docker", "rm", "-f", "whatever")
@@ -178,7 +176,7 @@ def test_inspect_container_bounds_stalled_daemon(monkeypatch):
     monkeypatch.setattr(
         docker,
         "run",
-        lambda *args, **kw: (seen.update(kw) or CompletedProcess(args, 0)),
+        lambda *args, **kw: seen.update(kw) or CompletedProcess(args, 0),
     )
     docker.container_status("gluetun")
     assert seen["timeout"] == config.CONTAINER_OP_TIMEOUT_S

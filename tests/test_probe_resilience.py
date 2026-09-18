@@ -24,9 +24,7 @@ def stub_run(monkeypatch, results: dict[str, tuple[int, str]]) -> None:
     def fake_run(*args, **kwargs):
         url = args[-1]
         code, payload = results.get(url, (1, ""))
-        return CompletedProcess(
-            ("docker", "exec", url), code, stdout=payload, stderr=""
-        )
+        return CompletedProcess(("docker", "exec", url), code, stdout=payload, stderr="")
 
     monkeypatch.setattr(ipinfo, "run", fake_run)
 

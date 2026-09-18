@@ -149,6 +149,7 @@ def print_ls_table(records: list[dict[str, object]]) -> None:
         consumers = ", ".join(cast(list[str], record.get("consumers") or [])) or "-"
         rows.append([str(record["instance"]), str(record["state"]), control, selection, consumers])
     widths = [max(len(cell) for cell in column) for column in zip(*[header, *rows], strict=True)]
+
     def dump(row: list[str]) -> None:
         click.echo("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)).rstrip())
 

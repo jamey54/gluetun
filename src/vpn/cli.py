@@ -106,9 +106,7 @@ def _log_env(overrides: dict[str, str]) -> None:
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-def add_instance_options(
-    ctl_port: bool = False, env_file: bool = False
-) -> Callable[[F], F]:
+def add_instance_options(ctl_port: bool = False, env_file: bool = False) -> Callable[[F], F]:
     """Option decorator for the shared per-instance switches.
 
     Apply it as the outermost option decorator (directly under the @command
@@ -401,9 +399,7 @@ def up(
             name = provider or (current.provider if current else None)
             if not name:
                 raise SystemExit("--provider is required to start the container.")
-            name, proto = resolve_provider(
-                name, protocol, current.protocol if current else None
-            )
+            name, proto = resolve_provider(name, protocol, current.protocol if current else None)
             overrides = get_provider_env(name, proto)
             _log_env(overrides)
             compose(
@@ -547,9 +543,7 @@ def _kv(label: str, value: str, color: str | None = None) -> None:
     is_flag=True,
     help="Machine-readable status (single-line JSON)",
 )
-def status(
-    instance: str | None, size: int, no_speedtest: bool, json_output: bool
-) -> None:
+def status(instance: str | None, size: int, no_speedtest: bool, json_output: bool) -> None:
     """Show container state, effective selection, public IP, and speed test."""
     with instance_context(_resolve_for_command(instance)):
         if json_output:

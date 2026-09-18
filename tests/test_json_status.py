@@ -81,8 +81,16 @@ def test_status_json_schema_running(monkeypatch):
     assert result.exit_code == 0
     doc = json.loads(result.output)
     assert set(doc) == {
-        "instance", "container_name", "image", "state", "selection", "drift",
-        "control_server", "exit_ip", "leak", "last_error",
+        "instance",
+        "container_name",
+        "image",
+        "state",
+        "selection",
+        "drift",
+        "control_server",
+        "exit_ip",
+        "leak",
+        "last_error",
     }
     assert doc["instance"] == "gluetun"
     assert doc["container_name"] == "gluetun"

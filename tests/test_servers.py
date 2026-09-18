@@ -353,9 +353,7 @@ def test_fetch_all_servers_returns_none_when_nothing_parsed(monkeypatch):
     monkeypatch.setattr(
         servers,
         "run",
-        lambda *args, **kwargs: _fake_run(
-            f"{servers._PROVIDER_MARKER}surfshark\nno table here\n"
-        ),
+        lambda *args, **kwargs: _fake_run(f"{servers._PROVIDER_MARKER}surfshark\nno table here\n"),
     )
     assert servers._fetch_all_servers(["surfshark"]) is None
 

@@ -102,12 +102,8 @@ def test_registry_records_env_file():
 
 
 def test_compose_file_for_always_generated(tmp_path, monkeypatch):
-    assert compose_file_for("gluetun") == str(
-        config.INSTANCES_DIR / "gluetun" / "compose.yml"
-    )
-    assert compose_file_for("plan-a") == str(
-        config.INSTANCES_DIR / "plan-a" / "compose.yml"
-    )
+    assert compose_file_for("gluetun") == str(config.INSTANCES_DIR / "gluetun" / "compose.yml")
+    assert compose_file_for("plan-a") == str(config.INSTANCES_DIR / "plan-a" / "compose.yml")
 
 
 def test_render_compose_swaps_name_and_port():

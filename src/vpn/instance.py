@@ -52,9 +52,7 @@ def required_name(instance: str | None) -> str:
     """An explicit instance name wins; else GLUETUN_INSTANCE; else a usage error."""
     name = instance or os.getenv(INSTANCE_ENV_VAR)
     if not name:
-        raise click.UsageError(
-            "No instance selected: pass --instance or set GLUETUN_INSTANCE."
-        )
+        raise click.UsageError("No instance selected: pass --instance or set GLUETUN_INSTANCE.")
     return parse_instance_name(name)
 
 
@@ -137,11 +135,7 @@ def build_env(env_file: Path | None) -> dict[str, str]:
     .env``). The process environment is the fallback for everything a source
     doesn't set.
     """
-    base = (
-        read_env_file(env_file)
-        if env_file is not None
-        else read_env_file(Path.cwd() / ".env")
-    )
+    base = read_env_file(env_file) if env_file is not None else read_env_file(Path.cwd() / ".env")
     return {**os.environ, **base}
 
 

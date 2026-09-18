@@ -80,14 +80,12 @@ def test_up_non_default_instance_reuses_registered_port(compose_calls, cold, mon
 
 def test_up_ctl_port_wins_over_allocation(compose_calls, cold, monkeypatch):
     monkeypatch.setattr("vpn.cli.allocate_free_port", lambda: pytest.fail("must not allocate"))
-    result = invoke(
-        ["up", "--instance", "plan-b", "--ctl-port", "8300", "--provider", "surfshark"]
-    )
+    result = invoke(["up", "--instance", "plan-b", "--ctl-port", "8300", "--provider", "surfshark"])
     assert result.exit_code == 0
     assert read_registry("plan-b")["control_port"] == 8300
-    assert "127.0.0.1:8300:8000/tcp" in (
-        config.INSTANCES_DIR / "plan-b" / "compose.yml"
-    ).read_text()
+    assert (
+        "127.0.0.1:8300:8000/tcp" in (config.INSTANCES_DIR / "plan-b" / "compose.yml").read_text()
+    )
 
 
 def test_up_gluetun_ctl_port_env_honored(compose_calls, cold, monkeypatch):

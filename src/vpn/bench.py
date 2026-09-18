@@ -335,9 +335,7 @@ def _test_one(candidate: Candidate, name: str, size_mb: int, timeout: int) -> _P
         remove_container(name)
 
 
-def _test_batch(
-    candidates: list[Candidate], size_mb: int, timeout: int
-) -> list[_ParallelResult]:
+def _test_batch(candidates: list[Candidate], size_mb: int, timeout: int) -> list[_ParallelResult]:
     """Run each candidate on a disposable container, in parallel.
 
     An interrupt aborts promptly: every disposable container is removed and

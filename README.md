@@ -245,11 +245,11 @@ A provider/protocol pair only appears in listings and can only be started when a
 | ProtonVPN | WireGuard | `PROTONVPN_WIREGUARD_PRIVATE_KEY`, `PROTONVPN_WIREGUARD_ADDRESSES` (always `10.2.0.2/32`) | both |
 | ProtonVPN | OpenVPN | `PROTONVPN_OPENVPN_USER`, `PROTONVPN_OPENVPN_PASSWORD` | both |
 
-`HTTP_CONTROL_SERVER_API_KEY` (any random string) is **required** — it authenticates gluetun's HTTP control server, which the CLI exposes on `127.0.0.1:8000` only. Every command except `down` and `logs` refuses to run without it.
+`HTTP_CONTROL_SERVER_API_KEY` (any random string) is **required** — it authenticates gluetun's HTTP control server, which the CLI exposes on `127.0.0.1:8000` only. The commands that mutate or select the runtime config (`up`, `connect`, `bench`) refuse to run without it; read-only commands (`status`, `logs`, `ls`, `dns`, `update`, `down`) don't gate on it.
 
 ### Set automatically
 
-These are managed by the CLI at container creation time — never define them yourself: `VPN_SERVICE_PROVIDER`, `VPN_TYPE`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `OPENVPN_USER`, `OPENVPN_PASSWORD` (mapped from your provider credentials). Location is *not* baked into env vars: after creation, all selection changes happen through the control server.
+These are managed by the CLI at container creation time — never define them yourself: `VPN_SERVICE_PROVIDER`, `VPN_TYPE`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `OPENVPN_USER`, `OPENVPN_PASSWORD` (mapped from your provider credentials). A location may be baked via `.env` `SERVER_COUNTRIES`/`SERVER_CITIES` (the compose template interpolates them); after creation, all *runtime* selection changes happen through the control server, and `vpn up` verifies a fresh start against the baked location when present.
 
 ## Consumer API (dockerstrator)
 
@@ -259,7 +259,7 @@ This is the contract `dockerstrator` consumes from `vpn`. Stable schemas — add
 
 Instance names follow docker-safe rules (`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`); anything else is a usage error (exit `2`). The container name is **always** the instance name and is never derived from the compose project. The compose project is pinned to `vpn-<instance>` via `docker compose -p`, independent of the file location.
 
-Resolution order for every command: `--instance NAME` → `GLUETUN_INSTANCE` → `gluetun`.
+Resolution order for every command: `--instance NAME` → `GLUETUN_INSTANCE` → error. There is no default instance; omitting both is a usage error (exit `2`).
 
 ### Exit codes
 

@@ -195,8 +195,11 @@ def test_run_bench_connects_winner_when_requested(monkeypatch, happy_path):
 
     def fake_measure(size_mb: int, timeout: int = 120) -> dict[str, float]:
         counter["n"] += 1
-        return {"mbits": 30.0 - 10.0 * ((counter["n"] - 1) % 2), "seconds": 1.0,
-                "mbytes": float(size_mb)}
+        return {
+            "mbits": 30.0 - 10.0 * ((counter["n"] - 1) % 2),
+            "seconds": 1.0,
+            "mbytes": float(size_mb),
+        }
 
     monkeypatch.setattr(bench, "measure", fake_measure)
 
@@ -685,7 +688,7 @@ def test_cli_bench_concurrency_flag_passes_through(monkeypatch):
     monkeypatch.setattr(
         cli,
         "run_bench",
-        lambda _candidates, **kw: (seen.update(kw) or bench.BenchReport(results=[])),
+        lambda _candidates, **kw: seen.update(kw) or bench.BenchReport(results=[]),
     )
     monkeypatch.setattr(bench, "probe_hosts", Recorder([{}]))
 

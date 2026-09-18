@@ -145,9 +145,7 @@ def launch_container(name: str, env: dict[str, str]) -> bool:
     for key, value in env.items():
         args += ["-e", f"{key}={value}"]
     args.append(GLUETUN_IMAGE)
-    result = run(
-        *args, capture=True, check=False, timeout=CONTAINER_OP_TIMEOUT_S
-    )
+    result = run(*args, capture=True, check=False, timeout=CONTAINER_OP_TIMEOUT_S)
     return result.returncode == 0
 
 

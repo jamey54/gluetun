@@ -354,8 +354,7 @@ def print_ip_status(
         backup = ", ".join(sources) or "unknown"
         click.echo(
             click.style(
-                f"  Public IP confirmed via {backup} — "
-                "ipinfo.io was rate-limited or unreachable",
+                f"  Public IP confirmed via {backup} — ipinfo.io was rate-limited or unreachable",
                 fg="yellow",
             )
         )

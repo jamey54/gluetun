@@ -420,15 +420,19 @@ def test_status_flags_running_country_mismatch(monkeypatch, verified):
 
 def test_status_does_not_probe_when_not_running(monkeypatch):
     """A stopped container must not stall the 15x2s verification retry loop."""
-    calls: list[tuple[str, object]] = []
+    calls: list[tuple[dict[str, object], bool]] = []
 
     def boom():
         raise ControlError(None, "no")
 
+    def record_connection(**kw):
+        calls.append((kw, True))
+        return True
+
     monkeypatch.setattr(cli, "container_status", lambda: "exited")
     monkeypatch.setattr(cli, "effective_selection", lambda: None)
     monkeypatch.setattr("vpn.control.get_vpn_status", boom)
-    monkeypatch.setattr(cli, "finish_connection", lambda **kw: (calls.append((kw, True)), True)[1])
+    monkeypatch.setattr(cli, "finish_connection", record_connection)
     result = invoke(["status", "--no-speedtest"])
     assert result.exit_code == 0
     assert calls == []
