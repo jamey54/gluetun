@@ -6,7 +6,6 @@ lives in vpn.instance.
 """
 
 import os
-from importlib.resources import files as resource_files
 from pathlib import Path
 
 # --- Paths ---------------------------------------------------------------
@@ -27,7 +26,7 @@ LOCK_FILE_PERMS = 0o600
 
 # --- HTTP / Control server -----------------------------------------------
 
-DEFAULT_CONTROL_PORT = 8000
+BASE_CONTROL_PORT = 8000
 GET_TIMEOUT_S = 10
 PUT_TIMEOUT_S = 60
 DOWN_TIMEOUT_S = 3
@@ -38,6 +37,7 @@ HTTP_NOT_FOUND = 404
 COMPOSE_TIMEOUT_S = 300  # compose up/down; a stalled daemon must not hang forever
 PULL_TIMEOUT_S = 600  # docker pull of the gluetun image
 CONTAINER_OP_TIMEOUT_S = 60  # disposable container launch/removal
+SERVER_FETCH_TIMEOUT_S = 120  # docker run format-servers server fetch
 
 # --- Provider ------------------------------------------------------------
 
@@ -49,6 +49,7 @@ IP_INFO_URL = "https://ipinfo.io"
 IP_FETCH_RETRIES = 15
 IP_FETCH_DELAY = 2
 PROBE_TIMEOUT = 8
+PROBE_EXEC_TIMEOUT_S = 20  # bound the docker exec itself, not just the in-container wget
 REAL_IP_TIMEOUT_S = 5
 CURRENT_EXIT_IP_RETRIES = 1
 
@@ -68,20 +69,6 @@ LATENCY_TIMEOUT_S = 2.0
 DEFAULT_SCAN_SIZE_MB = 10
 SCAN_TIMEOUT_S = 90
 DEFAULT_TEST_CONCURRENCY = 1
-
-
-# --- Compose file resolution ---------------------------------------------
-
-
-def resolve_compose_file() -> str:
-    """Locate vpn.yml: env override, then cwd, then the packaged copy."""
-    override = os.getenv("GLUETUN_COMPOSE_FILE")
-    if override:
-        return override
-    local = Path.cwd() / "vpn.yml"
-    if local.exists():
-        return str(local)
-    return str(resource_files("vpn").joinpath("vpn.yml"))
 
 
 # --- .env loading --------------------------------------------------------

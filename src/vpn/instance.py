@@ -1,10 +1,12 @@
 """Per-instance identity: name, control port, env, compose file, lock, registry.
 
 An *instance* is one Gluetun container fully owned by vpn, identified by its
-docker container name (== instance name). The default instance is ``gluetun``
-and keeps the historical single-container behaviour. Commands resolve an
-instance up front and run inside ``instance_context``; everything else reads
-the active instance through ``current_instance()``.
+docker container name (== instance name). Commands resolve an instance up front
+and run inside ``instance_context``; everything else reads the active instance
+through ``current_instance()``.
+
+An instance name comes from ``--instance`` or else ``GLUETUN_INSTANCE``; with
+neither, resolution is a usage error — there is no hidden default instance.
 
 Isolation invariants:
 - container name is always the instance name (never derived from the compose
@@ -29,16 +31,11 @@ from pathlib import Path
 import click
 
 from vpn import config
-from vpn.config import (
-    DEFAULT_CONTROL_PORT,
-    read_env_file,
-    resolve_compose_file,
-)
+from vpn.config import BASE_CONTROL_PORT, read_env_file
 
-DEFAULT_INSTANCE = "gluetun"
 INSTANCE_ENV_VAR = "GLUETUN_INSTANCE"
 INSTANCE_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
-PORT_RANGE = range(DEFAULT_CONTROL_PORT, 9001)
+PORT_RANGE = range(BASE_CONTROL_PORT, 9001)
 
 
 def parse_instance_name(name: str) -> str:
@@ -51,9 +48,14 @@ def parse_instance_name(name: str) -> str:
     return name
 
 
-def resolve_default_name() -> str:
-    """Default instance name: the GLUETUN_INSTANCE env alias, else 'gluetun'."""
-    return os.getenv(INSTANCE_ENV_VAR, DEFAULT_INSTANCE)
+def required_name(instance: str | None) -> str:
+    """An explicit instance name wins; else GLUETUN_INSTANCE; else a usage error."""
+    name = instance or os.getenv(INSTANCE_ENV_VAR)
+    if not name:
+        raise click.UsageError(
+            "No instance selected: pass --instance or set GLUETUN_INSTANCE."
+        )
+    return parse_instance_name(name)
 
 
 @dataclass(frozen=True)
@@ -130,15 +132,16 @@ def list_registry() -> list[str]:
 def build_env(env_file: Path | None) -> dict[str, str]:
     """Merged env for an instance: its env source wins over the process env.
 
-    The shared ``.env`` (next to the default instance's compose file) is the
-    default source for every instance; ``--env-file`` replaces it for that
-    instance (compose-style). The process environment is the fallback for
-    everything a non-secret source doesn't set.
+    ``--env-file`` replaces the shared default; otherwise every instance reads
+    the shared ``.env`` in the current working directory (``cp .env.sample
+    .env``). The process environment is the fallback for everything a source
+    doesn't set.
     """
-    if env_file is not None:
-        base = read_env_file(env_file)
-    else:
-        base = read_env_file(Path(resolve_compose_file()).parent / ".env")
+    base = (
+        read_env_file(env_file)
+        if env_file is not None
+        else read_env_file(Path.cwd() / ".env")
+    )
     return {**os.environ, **base}
 
 
@@ -153,9 +156,7 @@ def env_lookup(name: str) -> str | None:
 
 
 def compose_file_for(name: str) -> str:
-    """Default instance honors GLUETUN_COMPOSE_FILE/./vpn.yml; others generate one."""
-    if name == DEFAULT_INSTANCE:
-        return resolve_compose_file()
+    """Every instance uses a generated compose file from the bundled template."""
     return str(config.INSTANCES_DIR / name / "compose.yml")
 
 
@@ -172,9 +173,7 @@ def render_compose(name: str, port: int) -> str:
 
 
 def ensure_compose_file(instance: Instance) -> None:
-    """Write the generated per-instance compose file (default uses its own)."""
-    if instance.name == DEFAULT_INSTANCE:
-        return
+    """Write the generated per-instance compose file."""
     path = Path(instance.compose_file)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_compose(instance.name, instance.control_port))
@@ -186,10 +185,14 @@ def ensure_compose_file(instance: Instance) -> None:
 
 
 def resolve_instance(
-    name: str, control_port: int | None = None, env_file: str | None = None
+    name: str | None, control_port: int | None = None, env_file: str | None = None
 ) -> Instance:
-    """Build an instance, applying explicit values over persisted registry state."""
-    name = parse_instance_name(name)
+    """Build an instance, applying explicit values over persisted registry state.
+
+    ``name`` may be None: it then resolves via ``required_name`` (env, else
+    error).
+    """
+    name = required_name(name)
     registry = read_registry(name)
 
     env_file_path = Path(env_file) if env_file else None
@@ -203,7 +206,7 @@ def resolve_instance(
         if isinstance(registry_port, int):
             control_port = registry_port
     if control_port is None:
-        control_port = DEFAULT_CONTROL_PORT
+        control_port = BASE_CONTROL_PORT
 
     return Instance(
         name=name,
@@ -215,7 +218,7 @@ def resolve_instance(
 
 
 def default_instance() -> Instance:
-    return resolve_instance(resolve_default_name())
+    return resolve_instance(None)
 
 
 _active: ContextVar[Instance | None] = ContextVar("vpn_active_instance", default=None)

@@ -44,7 +44,6 @@ from vpn.docker import (
     run,
 )
 from vpn.instance import (
-    DEFAULT_INSTANCE,
     Instance,
     allocate_free_port,
     current_instance,
@@ -52,7 +51,6 @@ from vpn.instance import (
     env_lookup,
     instance_context,
     read_registry,
-    resolve_default_name,
     resolve_instance,
     write_registry,
 )
@@ -60,8 +58,8 @@ from vpn.ipinfo import _probe, current_exit_ip, print_ip_status, real_ip
 from vpn.picker import select_server
 from vpn.providers import (
     PROVIDERS,
-    choose_protocol,
     get_provider_env,
+    resolve_provider,
     validate_provider,
 )
 from vpn.servers import (
@@ -136,7 +134,7 @@ def add_instance_options(
         func = click.option(
             "--instance",
             default=None,
-            help=f"Instance name (default: '{DEFAULT_INSTANCE}')",
+            help="Instance name (default: $GLUETUN_INSTANCE; required when unset)",
         )(func)
         return func
 
@@ -148,9 +146,9 @@ def _resolve_for_command(
     ctl_port: int | None = None,
     env_file: str | None = None,
 ) -> Instance:
-    """Resolve the target instance: --instance > app env > default; honor GLUETUN_CTL_PORT."""
-    name = instance or resolve_default_name()
-    base = resolve_instance(name, env_file=env_file)
+    """Resolve the target instance: --instance > GLUETUN_INSTANCE > usage error,
+    honoring GLUETUN_CTL_PORT."""
+    base = resolve_instance(instance, env_file=env_file)
     port = ctl_port
     if port is None:
         env_port = base.env.get("GLUETUN_CTL_PORT")
@@ -352,11 +350,11 @@ def up(
     Selections are runtime-only: --pull/--recreate revert to compose/.env config.
     """
     inst = _resolve_for_command(instance, ctl_port, env_file)
-    # A fresh non-default instance gets a free host port allocated and
+    # A fresh, registry-less instance gets a free host port allocated and
     # persisted, so its registry survives restarts without ever colliding with
-    # the default instance's 8000. A registry-less but running instance instead
-    # adopts its published control port, so an imported/legacy container stays
-    # addressable even though its registry record is gone.
+    # another instance. A registry-less but running instance instead adopts its
+    # published control port, so an imported/legacy container stays addressable
+    # even though its registry record is gone.
     if (
         ctl_port is None
         and inst.env.get("GLUETUN_CTL_PORT") is None
@@ -366,7 +364,7 @@ def up(
             published = container_control_port(name=inst.name)
             if published is not None and published != inst.control_port:
                 inst = replace(inst, control_port=published)
-        elif inst.name != DEFAULT_INSTANCE:
+        else:
             inst = replace(inst, control_port=allocate_free_port())
     ensure_compose_file(inst)
     with instance_context(inst):
@@ -397,8 +395,9 @@ def up(
             name = provider or (current.provider if current else None)
             if not name:
                 raise SystemExit("--provider is required to start the container.")
-            proto = choose_protocol(name, protocol, current.protocol if current else None)
-            name, proto = validate_provider(name, proto)
+            name, proto = resolve_provider(
+                name, protocol, current.protocol if current else None
+            )
             overrides = get_provider_env(name, proto)
             _log_env(overrides)
             compose(
@@ -425,7 +424,7 @@ def up(
             target = current
 
         verified = finish_connection(
-            expected_country=target.country if (swapped or (requested and not recreate)) else None,
+            expected_country=target.country or None,
             speedtest=not no_speedtest,
             exclude_ips={prev_ip} if (prev_ip and swapped) else None,
         )
@@ -590,7 +589,11 @@ def status(
             _kv("Provider", "unknown — is gluetun's control server reachable?")
 
         click.echo()
-        finish_connection(speedtest=not no_speedtest, size=size)
+        finish_connection(
+            expected_country=current.country if current and current.country else None,
+            speedtest=not no_speedtest,
+            size=size,
+        )
 
 
 @main.command()
@@ -712,7 +715,7 @@ def ls(instance: str | None, json_output: bool) -> None:
     if instance:
         records = [r for r in records if r["instance"] == instance]
     if json_output:
-        click.echo(json.dumps({"default": resolve_default_name(), "instances": records}))
+        click.echo(json.dumps({"instances": records}))
         return
     print_ls_table(records)
 

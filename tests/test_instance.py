@@ -16,7 +16,7 @@ from vpn.instance import (
     parse_instance_name,
     read_registry,
     render_compose,
-    resolve_default_name,
+    required_name,
     resolve_instance,
     write_registry,
 )
@@ -33,10 +33,21 @@ def test_parse_instance_name_rejects_unsafe_names():
             parse_instance_name(bad)
 
 
-def test_resolve_default_name_env_alias(monkeypatch):
-    assert resolve_default_name() == "gluetun"
+def test_required_name_from_explicit(monkeypatch):
+    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    assert required_name("plan-a") == "plan-a"
+
+
+def test_required_name_from_env(monkeypatch):
     monkeypatch.setenv("GLUETUN_INSTANCE", "plan-a")
-    assert resolve_default_name() == "plan-a"
+    assert required_name(None) == "plan-a"
+
+
+def test_required_name_without_source_exits(monkeypatch):
+    """No --instance and no GLUETUN_INSTANCE is a usage error, not a hidden default."""
+    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    with pytest.raises(click.UsageError, match="GLUETUN_INSTANCE"):
+        required_name(None)
 
 
 def test_instance_properties():
@@ -58,9 +69,9 @@ def test_build_env_env_file_overrides_process(tmp_path, monkeypatch):
     assert inst.env["BAZ"] == "z"
 
 
-def test_non_default_instances_share_the_default_env_file(tmp_path, monkeypatch):
-    """Section 4: dedicated instances still read credentials from the shared .env."""
-    monkeypatch.setenv("GLUETUN_COMPOSE_FILE", str(tmp_path / "compose.yml"))
+def test_every_instance_shares_the_cwd_env_file(tmp_path, monkeypatch):
+    """The shared credential source is ./.env for every instance."""
+    monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("SURFSHARK_WIREGUARD_PRIVATE_KEY=shared-key\n")
     inst = resolve_instance("plan-a", control_port=8123)
     assert inst.env["SURFSHARK_WIREGUARD_PRIVATE_KEY"] == "shared-key"
@@ -86,10 +97,10 @@ def test_registry_records_env_file():
     assert reported is not None and str(reported) == "/tmp/plan.env"
 
 
-def test_compose_file_for(tmp_path, monkeypatch):
-    custom = tmp_path / "custom-compose.yml"
-    monkeypatch.setenv("GLUETUN_COMPOSE_FILE", str(custom))
-    assert compose_file_for("gluetun") == str(custom)
+def test_compose_file_for_always_generated(tmp_path, monkeypatch):
+    assert compose_file_for("gluetun") == str(
+        config.INSTANCES_DIR / "gluetun" / "compose.yml"
+    )
     assert compose_file_for("plan-a") == str(
         config.INSTANCES_DIR / "plan-a" / "compose.yml"
     )
@@ -102,11 +113,10 @@ def test_render_compose_swaps_name_and_port():
     assert "container_name: gluetun" not in body
 
 
-def test_ensure_compose_file_only_generates_for_non_default(tmp_path, monkeypatch):
-    monkeypatch.setenv("GLUETUN_COMPOSE_FILE", str(tmp_path / "cf.yml"))
+def test_ensure_compose_file_generates_for_every_instance():
     default = resolve_instance("gluetun")
     ensure_compose_file(default)
-    assert not (config.INSTANCES_DIR / "gluetun" / "compose.yml").exists()
+    assert (config.INSTANCES_DIR / "gluetun" / "compose.yml").exists()
 
     named = resolve_instance("plan-a", control_port=8123)
     ensure_compose_file(named)

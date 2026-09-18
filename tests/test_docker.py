@@ -58,7 +58,12 @@ def test_compose_merges_env_without_tempfile(monkeypatch):
     monkeypatch.setattr(docker, "run", fake_run)
     docker.compose("up", "-d", env_overrides={"WIREGUARD_PRIVATE_KEY": "secret"})
 
-    assert seen_args[:4] == ("docker", "compose", "-f", config.resolve_compose_file())
+    assert seen_args[:4] == (
+        "docker",
+        "compose",
+        "-f",
+        str(config.INSTANCES_DIR / "gluetun" / "compose.yml"),
+    )
     assert seen_args[4] == "-p"
     assert seen_args[5] == "vpn-gluetun"
     assert seen_env is not None
@@ -143,3 +148,25 @@ def test_run_timeout_surfaces_as_exit_code_124():
 def test_run_timeout_with_check_raises_system_exit():
     with pytest.raises(SystemExit):
         docker.run("sleep", "60", timeout=0.3)
+
+
+def test_inspect_container_bounds_stalled_daemon(monkeypatch):
+    from subprocess import CompletedProcess
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        docker,
+        "run",
+        lambda *args, **kw: (seen.update(kw) or CompletedProcess(args, 0)),
+    )
+    docker.container_status("gluetun")
+    assert seen["timeout"] == config.CONTAINER_OP_TIMEOUT_S
+
+
+def test_inspect_container_timeout_reads_as_absent(monkeypatch):
+    from subprocess import CompletedProcess
+
+    monkeypatch.setattr(
+        docker, "run", lambda *args, **kw: CompletedProcess(args, 124, stdout="", stderr="timeout")
+    )
+    assert docker.container_status("gluetun") is None

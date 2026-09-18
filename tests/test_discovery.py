@@ -54,6 +54,19 @@ def test_consumers_of(monkeypatch):
     assert discovery.consumers_of("other") == []
 
 
+def test_docker_ps_calls_are_bounded(monkeypatch):
+    from vpn import config
+
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        discovery,
+        "run",
+        lambda *args, **kw: (seen.update(kw) or _proc("")),
+    )
+    discovery.consumers_of("gluetun")
+    assert seen["timeout"] == config.CONTAINER_OP_TIMEOUT_S
+
+
 def test_known_names_from_registry_and_projects(monkeypatch):
     _stub_docker(None, monkeypatch)
     from vpn import config
@@ -115,8 +128,7 @@ def test_ls_json_envelope(monkeypatch):
     result = CliRunner().invoke(cli.main, ["ls", "--json"], catch_exceptions=False)
     assert result.exit_code == 0
     doc = json.loads(result.output)
-    assert set(doc) == {"default", "instances"}
-    assert doc["default"] == "gluetun"
+    assert set(doc) == {"instances"}
     assert doc["instances"][0]["instance"] == "plan-a"
 
 
@@ -136,7 +148,7 @@ def test_ls_json_filters_by_instance(monkeypatch):
     result = CliRunner().invoke(
         cli.main, ["ls", "--json", "--instance", "other"], catch_exceptions=False
     )
-    assert json.loads(result.output) == {"default": "gluetun", "instances": []}
+    assert json.loads(result.output) == {"instances": []}
 
 
 def test_ls_human_prints_table(monkeypatch):

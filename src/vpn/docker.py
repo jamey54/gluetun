@@ -50,6 +50,7 @@ def inspect_container(format_string: str, name: str | None = None) -> str | None
             container,
             capture=True,
             check=False,
+            timeout=CONTAINER_OP_TIMEOUT_S,
         )
     except OSError:
         return None  # docker unavailable: treat as absent for read-only probes

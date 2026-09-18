@@ -1,6 +1,6 @@
-"""Tests for .env file parsing and configuration resolution."""
+"""Tests for .env file parsing."""
 
-from vpn.config import read_env_file, resolve_compose_file
+from vpn.config import read_env_file
 
 
 def test_read_env_file_missing(tmp_path):
@@ -41,23 +41,3 @@ def test_read_env_file_tolerates_export_prefix(tmp_path):
     path = tmp_path / ".env"
     path.write_text("export SURFSHARK_KEY=abc-cba\n")
     assert read_env_file(path) == {"SURFSHARK_KEY": "abc-cba"}
-
-
-def test_resolve_prefers_env_override(monkeypatch, tmp_path):
-    override = tmp_path / "custom.yml"
-    monkeypatch.setenv("GLUETUN_COMPOSE_FILE", str(override))
-    assert resolve_compose_file() == str(override)
-
-
-def test_resolve_prefers_local_vpn_yml(monkeypatch, tmp_path):
-    monkeypatch.delenv("GLUETUN_COMPOSE_FILE", raising=False)
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "vpn.yml").write_text("services: {}\n")
-    assert resolve_compose_file() == str(tmp_path / "vpn.yml")
-
-
-def test_resolve_falls_back_to_packaged_copy(monkeypatch, tmp_path):
-    monkeypatch.delenv("GLUETUN_COMPOSE_FILE", raising=False)
-    monkeypatch.chdir(tmp_path)
-    resolved = resolve_compose_file()
-    assert resolved.endswith("vpn.yml") and resolved != str(tmp_path / "vpn.yml")

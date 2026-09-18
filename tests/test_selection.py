@@ -115,6 +115,21 @@ def test_up_running_no_flags_only_verifies(monkeypatch, compose_calls, swaps):
     assert compose_calls == [] and swaps == []
 
 
+def test_up_running_no_flags_verifies_against_running_country(monkeypatch, verified):
+    """A plain `vpn up` must still flag a geo mismatch (yellow), not blind green."""
+    running(monkeypatch)
+    result = invoke(["up"])
+    assert result.exit_code == 0
+    assert verified[0]["expected_country"] == "Germany"
+
+
+def test_up_running_already_on_verifies_against_target_country(monkeypatch, verified):
+    running(monkeypatch)
+    result = invoke(["up", "--country", "Germany"])
+    assert result.exit_code == 0
+    assert verified[0]["expected_country"] == "Germany"
+
+
 def test_up_running_country_hot_swaps(monkeypatch, compose_calls, swaps, verified):
     running(monkeypatch)
     result = invoke(["up", "--country", "Japan"])
@@ -360,6 +375,15 @@ def test_status_shows_vpn_and_dns(monkeypatch):
     assert "Port fwd    5914" in result.output
     assert "Provider    surfshark" in result.output
     assert "Protocol    wireguard" in result.output
+
+
+def test_status_flags_running_country_mismatch(monkeypatch, verified):
+    """`vpn status` must pass the running country so a geo mismatch shows yellow."""
+    monkeypatch.setattr(cli, "container_status", lambda: "running")
+    monkeypatch.setattr(cli, "effective_selection", lambda: RUNNING)
+    result = invoke(["status", "--no-speedtest"])
+    assert result.exit_code == 0
+    assert verified and verified[0]["expected_country"] == "Germany"
 
 
 def test_status_hides_dns_and_port_when_unreachable(monkeypatch):

@@ -10,6 +10,7 @@ from typing import cast
 
 from vpn import control
 from vpn.apply import Selection
+from vpn.config import CONTAINER_OP_TIMEOUT_S
 from vpn.docker import container_control_port, container_status, run
 from vpn.instance import instance_context, list_registry, read_registry, resolve_instance
 
@@ -34,7 +35,14 @@ def _compose_projects() -> list[str]:
     """Compose project names of all containers (empty when docker is unavailable)."""
     try:
         result = run(
-            "docker", "ps", "-a", "--format", PROJECT_LABEL, capture=True, check=False
+            "docker",
+            "ps",
+            "-a",
+            "--format",
+            PROJECT_LABEL,
+            capture=True,
+            check=False,
+            timeout=CONTAINER_OP_TIMEOUT_S,
         )
     except OSError:
         return []
@@ -82,7 +90,16 @@ def selection_doc(sel: Selection) -> dict[str, str | None]:
 def consumers_of(name: str) -> list[str]:
     """Containers sharing this instance's network, sorted."""
     try:
-        result = run("docker", "ps", "-a", "--format", NETWORK_FORMAT, capture=True, check=False)
+        result = run(
+            "docker",
+            "ps",
+            "-a",
+            "--format",
+            NETWORK_FORMAT,
+            capture=True,
+            check=False,
+            timeout=CONTAINER_OP_TIMEOUT_S,
+        )
     except OSError:
         return []
     target = f"container:{name}"

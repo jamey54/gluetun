@@ -80,12 +80,29 @@ def choose_protocol(provider: str, requested: str | None = None, current: str | 
     return next((p for p in (DEFAULT_PROTOCOL, *active) if p in active), DEFAULT_PROTOCOL)
 
 
+def resolve_provider(
+    provider: str, requested: str | None = None, current: str | None = None
+) -> tuple[str, str]:
+    """Pick and validate a provider/protocol for a create/recreate path.
+
+    Unknown providers get a friendly error (never a KeyError); the protocol is
+    chosen, then validated against required env vars.
+    """
+    name = provider.lower()
+    if name not in PROVIDERS:
+        valid = ", ".join(sorted(PROVIDERS))
+        raise SystemExit(f"Unknown provider '{name}'. Available: {valid}")
+    proto = choose_protocol(name, requested, current)
+    return validate_provider(name, proto)
+
+
 def validate_provider(name: str, protocol: str = DEFAULT_PROTOCOL) -> tuple[str, str]:
     """Validate provider/protocol and check required env vars.
 
-    Returns (lowercase name, protocol).
+    Returns (lowercase name, lowercase protocol).
     """
     name = name.lower()
+    protocol = protocol.lower()
     if name not in PROVIDERS:
         valid = ", ".join(sorted(PROVIDERS))
         raise SystemExit(f"Unknown provider '{name}'. Available: {valid}")

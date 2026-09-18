@@ -156,6 +156,25 @@ def test_connect_exit_1_when_not_verified(monkeypatch):
     assert result.exit_code == 1
 
 
+def test_up_unknown_provider_is_friendly_not_traceback(compose_calls, cold):
+    """A provider typo must produce the friendly error, never a KeyError traceback."""
+    result = invoke(["up", "--provider", "sufshark"])
+    assert result.exit_code == 1
+    assert "Unknown provider 'sufshark'" in result.output
+    assert "Available: protonvpn, surfshark" in result.output
+    assert "Traceback" not in result.output
+    assert compose_calls == []
+
+
+def test_commands_require_instance_or_env(compose_calls, cold, monkeypatch):
+    """No --instance and no GLUETUN_INSTANCE is a usage error, not a hidden default."""
+    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    result = invoke(["up", "--provider", "surfshark"])
+    assert result.exit_code == 2
+    assert "GLUETUN_INSTANCE" in result.output
+    assert compose_calls == []
+
+
 def test_version_flag_reports_exact_package_version():
     result = invoke(["--version"])
     assert result.exit_code == 0
