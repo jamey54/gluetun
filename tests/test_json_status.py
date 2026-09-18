@@ -76,8 +76,8 @@ def invoke_status(
     return CliRunner().invoke(cli.main, ["status", "--json"], catch_exceptions=False)
 
 
-def test_status_json_schema_running():
-    result = invoke_status(pytest.MonkeyPatch())
+def test_status_json_schema_running(monkeypatch):
+    result = invoke_status(monkeypatch)
     assert result.exit_code == 0
     doc = json.loads(result.output)
     assert set(doc) == {
@@ -96,16 +96,16 @@ def test_status_json_schema_running():
     assert doc["last_error"] is None
 
 
-def test_status_json_exit_1_on_leak():
-    result = invoke_status(pytest.MonkeyPatch(), leak=True)
+def test_status_json_exit_1_on_leak(monkeypatch):
+    result = invoke_status(monkeypatch, leak=True)
     assert result.exit_code == 1
     doc = json.loads(result.output)
     assert doc["leak"] is True
     assert doc["exit_ip"] == {"ip": "1.1.1.1", "country": "Germany"}
 
 
-def test_status_json_absent_container():
-    result = invoke_status(pytest.MonkeyPatch(), state="absent")
+def test_status_json_absent_container(monkeypatch):
+    result = invoke_status(monkeypatch, state="absent")
     assert result.exit_code == 0
     doc = json.loads(result.output)
     assert doc["state"] == "absent"
@@ -116,8 +116,8 @@ def test_status_json_absent_container():
     assert doc["leak"] is False
 
 
-def test_status_json_control_server_down():
-    result = invoke_status(pytest.MonkeyPatch(), control_error="boom")
+def test_status_json_control_server_down(monkeypatch):
+    result = invoke_status(monkeypatch, control_error="boom")
     assert result.exit_code == 0
     doc = json.loads(result.output)
     assert doc["selection"] is None
@@ -125,9 +125,9 @@ def test_status_json_control_server_down():
     assert doc["last_error"] == "control server unreachable (HTTP 500): boom"
 
 
-def test_status_json_drift_when_hot_swapped():
+def test_status_json_drift_when_hot_swapped(monkeypatch):
     result = invoke_status(
-        pytest.MonkeyPatch(),
+        monkeypatch,
         baked_provider="protonvpn",
         runtime=_settings(provider="surfshark", country="Japan"),
     )
@@ -136,23 +136,23 @@ def test_status_json_drift_when_hot_swapped():
     assert doc["selection"]["country"] == "Japan"
 
 
-def test_status_json_deterministic_single_line():
-    result = invoke_status(pytest.MonkeyPatch())
+def test_status_json_deterministic_single_line(monkeypatch):
+    result = invoke_status(monkeypatch)
     assert result.output.strip().count("\n") == 0
 
 
-def test_status_json_probe_totally_failed_is_leak():
+def test_status_json_probe_totally_failed_is_leak(monkeypatch):
     """All echo providers down on the single-shot probe -> honest leak, exit 1."""
-    result = invoke_status(pytest.MonkeyPatch(), probe_fail=True)
+    result = invoke_status(monkeypatch, probe_fail=True)
     assert result.exit_code == 1
     doc = json.loads(result.output)
     assert doc["leak"] is True
     assert doc["exit_ip"] is None
 
 
-def test_status_json_unknown_country_is_null_not_empty():
+def test_status_json_unknown_country_is_null_not_empty(monkeypatch):
     """valid echo-only IP with no geo info reports null country, not ''."""
-    result = invoke_status(pytest.MonkeyPatch(), probe_geo=False)
+    result = invoke_status(monkeypatch, probe_geo=False)
     assert result.exit_code == 0
     doc = json.loads(result.output)
     assert doc["exit_ip"] == {"ip": "9.9.9.9", "country": None}
