@@ -209,6 +209,16 @@ def test_cache_corrupt_json(cache_path):
     assert _read_cache() is None
 
 
+def test_cache_servers_not_a_dict_is_ignored(cache_path):
+    """A cache whose 'servers' key is not a mapping must not crash callers."""
+    _write_cache({"s": []})
+    data = json.loads(cache_path.read_text())
+    data["servers"] = []
+    data["ts"] = time.time()
+    cache_path.write_text(json.dumps(data))
+    assert _read_cache() is None
+
+
 def test_cache_missing_file():
     assert _read_cache() is None
 

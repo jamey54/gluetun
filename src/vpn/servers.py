@@ -162,8 +162,10 @@ def _read_cache() -> dict[str, list[ServerRow]] | None:
         data = json.loads(CACHE_FILE.read_text())
         if data.get("v") != CACHE_VERSION:
             return None
+        servers = data["servers"]
+        if not isinstance(servers, dict):
+            return None
         if time.time() - data["ts"] < CACHE_TTL:
-            servers: dict[str, list[ServerRow]] = data["servers"]
             return servers
     except (json.JSONDecodeError, KeyError, TypeError):
         pass
