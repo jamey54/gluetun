@@ -6,7 +6,7 @@ from subprocess import CompletedProcess
 import pytest
 from click.testing import CliRunner
 
-from vpn import cli, discovery
+from vpn import cli, config, discovery
 from vpn.apply import Selection
 
 
@@ -130,6 +130,22 @@ def test_selection_doc_schema():
         "country": "Japan",
         "city": "Tokyo",
     }
+
+
+def test_record_without_control_port_has_null_control_server(monkeypatch):
+    """A running container with no registered or published port reports None,
+    not a crash or a misleading port."""
+    (config.INSTANCES_DIR / "plan-a.json").parent.mkdir(parents=True, exist_ok=True)
+    (config.INSTANCES_DIR / "plan-a.json").write_text('{"instance": "plan-a"}')
+    monkeypatch.setattr(discovery, "container_status", lambda n: "running")
+    monkeypatch.setattr(discovery, "container_control_port", lambda n: None)
+    monkeypatch.setattr(
+        "vpn.control.get_settings",
+        lambda: {"type": "wireguard", "provider": {"name": "surfshark"},
+                 "server_selection": {}},
+    )
+    record = next(r for r in discovery.instance_records() if r["instance"] == "plan-a")
+    assert record["control_server"] is None
 
 
 def test_ls_json_envelope(monkeypatch):
