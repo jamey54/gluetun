@@ -33,6 +33,10 @@ def test_parse_instance_name_rejects_unsafe_names():
             parse_instance_name(bad)
 
 
+def test_parse_instance_name_trims_padding():
+    assert parse_instance_name("  plan-a  ") == "plan-a"
+
+
 def test_required_name_from_explicit(monkeypatch):
     monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
     assert required_name("plan-a") == "plan-a"
@@ -133,6 +137,18 @@ def test_allocate_free_port_returns_bindable_port():
     assert 8000 <= port <= 9000
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", port))
+
+
+def test_allocate_free_port_prefers_lowest_free(monkeypatch):
+    taken = {7999, 8000, 8001}  # 8000/8001 busy -> first free is 8002
+    monkeypatch.setattr("vpn.instance._port_in_use", lambda p: p in taken)
+    assert allocate_free_port() == 8002
+
+
+def test_allocate_free_port_full_range_is_friendly_error(monkeypatch):
+    monkeypatch.setattr("vpn.instance._port_in_use", lambda p: True)
+    with pytest.raises(SystemExit, match="--ctl-port"):
+        allocate_free_port()
 
 
 def test_registry_json_matches_documented_schema():
