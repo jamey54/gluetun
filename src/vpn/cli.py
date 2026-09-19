@@ -7,13 +7,15 @@ stop) and logs.
 
 import contextlib
 import json
+import os
+import sys
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any, TypeVar
+from typing import Any, NoReturn, TypeVar
 
 import click
 
-from vpn import control
+from vpn import control, discovery
 from vpn.apply import Selection, apply_location
 from vpn.bench import (
     DEFAULT_FINAL_SIZE_MB,
@@ -44,6 +46,7 @@ from vpn.docker import (
     run,
 )
 from vpn.instance import (
+    INSTANCE_ENV_VAR,
     Instance,
     allocate_free_port,
     current_instance,
@@ -55,7 +58,7 @@ from vpn.instance import (
     write_registry,
 )
 from vpn.ipinfo import _probe, current_exit_ip, print_ip_status, real_ip
-from vpn.picker import select_server
+from vpn.picker import select_instance, select_server
 from vpn.providers import (
     PROVIDERS,
     get_provider_env,
@@ -140,15 +143,49 @@ def add_instance_options(ctl_port: bool = False, env_file: bool = False) -> Call
     return decorate
 
 
+def _no_instance_error() -> NoReturn:
+    """The documented no-target error: --instance or GLUETUN_INSTANCE required."""
+    raise click.UsageError("No instance selected: pass --instance or set GLUETUN_INSTANCE.")
+
+
+def _stdin_is_tty() -> bool:
+    """True when the CLI can ask the user interactively."""
+    return sys.stdin.isatty()
+
+
+def _choose_instance_name() -> str:
+    """Resolve the target when neither --instance nor GLUETUN_INSTANCE is set.
+
+    Interactive terminals pick among the known instances (auto-selecting the
+    sole instance without prompting); scripts keep the documented usage error —
+    automation must always name its instance explicitly.
+    """
+    if not _stdin_is_tty():
+        _no_instance_error()
+    names = sorted(discovery._known_names())
+    if not names:
+        _no_instance_error()
+    if len(names) == 1:
+        return names[0]
+    chosen = select_instance([(name, _state(name)) for name in names])
+    if chosen is None:
+        raise click.ClickException("No instance selected.")
+    return chosen
+
+
 def _resolve_for_command(
     instance: str | None,
     ctl_port: int | None = None,
     env_file: str | None = None,
 ) -> Instance:
-    """Resolve the target instance: --instance > GLUETUN_INSTANCE > usage error,
-    honoring GLUETUN_CTL_PORT. A registry-less instance falls back to its
-    published control port so imported/shared containers stay addressable."""
-    base = resolve_instance(instance, env_file=env_file)
+    """Resolve the target instance: --instance > GLUETUN_INSTANCE > interactive
+    choice > usage error, honoring GLUETUN_CTL_PORT. A registry-less instance
+    falls back to its published control port so imported/shared containers stay
+    addressable."""
+    name = instance or os.getenv(INSTANCE_ENV_VAR)
+    if name is None:
+        name = _choose_instance_name()
+    base = resolve_instance(name, env_file=env_file)
     port = ctl_port
     if port is None:
         env_port = base.env.get("GLUETUN_CTL_PORT")

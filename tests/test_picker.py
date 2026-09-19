@@ -2,7 +2,7 @@
 
 from itertools import pairwise
 
-from vpn.picker import _ServerPicker, select_server
+from vpn.picker import _InstancePicker, _ServerPicker, select_instance, select_server
 from vpn.textutil import fold_mapped as _fold
 
 ROWS = [
@@ -276,3 +276,41 @@ def test_values_carry_provider_and_protocol():
 
 def test_select_server_empty_returns_none():
     assert select_server({}) is None
+
+
+# ---------------------------------------------------------------------------
+# instance picker
+# ---------------------------------------------------------------------------
+
+INSTANCES = [("gluetun", "running"), ("plan-a", "stopped"), ("plan-b", "running")]
+
+
+def make_instance_picker():
+    return _InstancePicker(INSTANCES, prompt="Select instance: ")
+
+
+def test_instance_picker_lines_show_name_and_state():
+    p = make_instance_picker()
+    assert p.lines == ["gluetun (running)", "plan-a (stopped)", "plan-b (running)"]
+
+
+def test_instance_picker_values_are_bare_names():
+    p = make_instance_picker()
+    assert p.values == ["gluetun", "plan-a", "plan-b"]
+
+
+def test_instance_picker_filters_by_name():
+    p = make_instance_picker()
+    p._set_query("plan")
+    assert p.matches == [1, 2]
+    p._set_query("plan-a")
+    assert p.matches == [1]
+
+
+def test_instance_picker_no_state_renders_name_only():
+    p = _InstancePicker([("plan-a", "")], prompt="")
+    assert p.lines == ["plan-a"]
+
+
+def test_select_instance_empty_returns_none():
+    assert select_instance([]) is None

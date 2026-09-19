@@ -193,7 +193,7 @@ vpn 0.2 runs several independent Gluetun containers side by side, each its own *
 - an optional `--env-file` replacing `.env` for that instance;
 - a registry record `~/.cache/vpn/instances/<instance>.json` (control port + env file).
 
-Every command requires an instance. Resolution order: `--instance NAME` → `GLUETUN_INSTANCE` env var → error. Always specify one or export the env var.
+Every command requires an instance. Resolution order: `--instance NAME` → `GLUETUN_INSTANCE` env var → interactive choice → error. On an interactive terminal with no `--instance` and no env var, commands that target an instance (`status`, `down`, `connect`, `logs`, `bench`, `dns`, `update`, `up`) ask you to pick one: the sole known instance is used automatically, otherwise a picker lists them by name and state. Non-interactive runs (pipes, scripts) keep the usage error — automation must always name its instance explicitly. `vpn ls` always lists everything and never prompts.
 
 Container names are **exact matches only**: vpn never touches a container other than the one named after the instance, so a shared gluetun owned by another tool is never matched.
 
@@ -233,7 +233,7 @@ Secrets live in `.env` in the working directory (copy `.env.sample` to get start
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GLUETUN_INSTANCE` | *(required)* | Instance name; pass `--instance` or set this. Omitting both is an error. |
+| `GLUETUN_INSTANCE` | *(required for scripts)* | Instance name; pass `--instance` or set this. Omitting both asks interactively on a terminal (pick from the known instances); non-interactive runs fail with a usage error. |
 | `GLUETUN_CTL_PORT` | unset | Control-server host port for the resolved instance (equivalent to `--ctl-port`) |
 | `GLUETUN_CACHE_TTL` | `3600` | Server cache TTL (seconds) |
 | `VPN_DEBUG` | unset | Set to enable debug output (same as `--debug`) |
@@ -263,7 +263,7 @@ This is the contract `dockerstrator` consumes from `vpn`. Stable schemas — add
 
 Instance names follow docker-safe rules (`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`); anything else is a usage error (exit `2`). The container name is **always** the instance name and is never derived from the compose project. The compose project is pinned to `vpn-<instance>` via `docker compose -p`, independent of the file location.
 
-Resolution order for every command: `--instance NAME` → `GLUETUN_INSTANCE` → error. There is no default instance; omitting both is a usage error (exit `2`).
+Resolution order for every command: `--instance NAME` → `GLUETUN_INSTANCE` → interactive choice (TTY only) → error. There is no default instance; a non-interactive run with neither flag is a usage error (exit `2`).
 
 ### Exit codes
 

@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 from subprocess import CompletedProcess
 
+import click
 import pytest
 from click.testing import CliRunner
 
-from vpn import cli, config
+from vpn import cli, config, discovery
 from vpn.apply import Selection
+from vpn.instance import current_instance
 from vpn.version import __version__
 
 
@@ -167,10 +169,101 @@ def test_up_unknown_provider_is_friendly_not_traceback(compose_calls, cold):
 def test_commands_require_instance_or_env(compose_calls, cold, monkeypatch):
     """No --instance and no GLUETUN_INSTANCE is a usage error, not a hidden default."""
     monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: False)
     result = invoke(["up", "--provider", "surfshark"])
     assert result.exit_code == 2
     assert "GLUETUN_INSTANCE" in result.output
     assert compose_calls == []
+
+
+# ---------------------------------------------------------------------------
+# interactive instance choice (no --instance, no env, TTY)
+# ---------------------------------------------------------------------------
+
+
+def _multi_instance(monkeypatch):
+    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: True)
+    monkeypatch.setattr(discovery, "_known_names", lambda: {"plan-a", "plan-b"})
+    monkeypatch.setattr(cli, "_state", lambda name: "running")
+
+
+def test_choose_instance_non_tty_is_usage_error(monkeypatch):
+    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: False)
+    with pytest.raises(click.UsageError, match="GLUETUN_INSTANCE"):
+        cli._choose_instance_name()
+
+
+def test_choose_instance_zero_known_is_usage_error(monkeypatch):
+    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: True)
+    monkeypatch.setattr(discovery, "_known_names", lambda: set())
+    with pytest.raises(click.UsageError, match="GLUETUN_INSTANCE"):
+        cli._choose_instance_name()
+
+
+def test_choose_instance_auto_uses_sole_instance(monkeypatch):
+    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: True)
+    monkeypatch.setattr(discovery, "_known_names", lambda: {"plan-a"})
+    assert cli._choose_instance_name() == "plan-a"
+
+
+def test_choose_instance_prompts_when_multiple(monkeypatch):
+    _multi_instance(monkeypatch)
+    picked: list[list[tuple[str, str]]] = []
+
+    def fake_pick(instances: list[tuple[str, str]], **kw: object) -> str:
+        picked.append(instances)
+        return "plan-b"
+
+    monkeypatch.setattr(cli, "select_instance", fake_pick)
+    assert cli._choose_instance_name() == "plan-b"
+    assert picked == [[("plan-a", "running"), ("plan-b", "running")]]
+
+
+def test_choose_instance_cancel_is_error(monkeypatch):
+    _multi_instance(monkeypatch)
+    monkeypatch.setattr(cli, "select_instance", lambda instances, **kw: None)
+    with pytest.raises(click.ClickException, match="No instance selected"):
+        cli._choose_instance_name()
+
+
+def test_down_picks_instance_when_multiple(monkeypatch):
+    """The chosen instance flows through instance_context: down targets its project."""
+    _multi_instance(monkeypatch)
+    monkeypatch.setattr(cli, "select_instance", lambda instances, **kw: "plan-a")
+    monkeypatch.setattr("vpn.control.set_vpn_status", lambda *a, **kw: None)
+    projects: list[str] = []
+
+    def fake_compose(*args: str, env_overrides=None, timeout=None) -> CompletedProcess[str]:
+        projects.append(current_instance().project)
+        return CompletedProcess((), 0)
+
+    monkeypatch.setattr("vpn.cli.compose", fake_compose)
+    result = invoke(["down"])
+    assert result.exit_code == 0
+    assert projects == ["vpn-plan-a"]
+
+
+def test_gluetun_instance_env_still_wins_over_picker(monkeypatch):
+    """GLUETUN_INSTANCE must be honored without prompting or auto-selection."""
+    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: pytest.fail("must not prompt"))
+    monkeypatch.setattr(
+        discovery, "_known_names", lambda: pytest.fail("must not discover")
+    )
+    projects: list[str] = []
+
+    def fake_compose(*args: str, env_overrides=None, timeout=None) -> CompletedProcess[str]:
+        projects.append(current_instance().project)
+        return CompletedProcess((), 0)
+
+    monkeypatch.setattr("vpn.cli.compose", fake_compose)
+    monkeypatch.setattr("vpn.control.set_vpn_status", lambda *a, **kw: None)
+    result = invoke(["down"])  # GLUETUN_INSTANCE=gluetun from conftest
+    assert result.exit_code == 0
+    assert projects == ["vpn-gluetun"]
 
 
 def test_version_flag_reports_exact_package_version():

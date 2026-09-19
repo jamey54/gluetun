@@ -356,3 +356,43 @@ def select_server(
     if not rows:
         return None
     return _ServerPicker(rows, prompt).run(input=input, output=output)
+
+
+class _InstancePicker(_ServerPicker):
+    """Compact picker over instances, sharing the server picker's engine.
+
+    Rows render as ``name (state)`` and selection returns the bare instance
+    name. The column-scoped filtering machinery is inherited but unused here.
+    """
+
+    def __init__(self, instances: list[tuple[str, str]], prompt: str) -> None:
+        rows: list[PickerRow] = []
+        for name, state in instances:
+            rows.append((name, "", "", "", state))
+        super().__init__(rows, prompt)
+        self.values = [name for name, _ in instances]
+
+    def _line(self, row: PickerRow) -> str:
+        name, _, _, _, state = row
+        return f"{name} ({state})" if state else name
+
+    def _footer(self) -> StyleAndTextTuples:
+        hits = len(self.matches)
+        status = "class:hits" if hits else "class:none"
+        return [
+            ("class:dim", f"{hits}/{len(self.rows)} · "),
+            ("class:dim", "/"),
+            (status, self.query),
+        ]
+
+
+def select_instance(
+    instances: list[tuple[str, str]],
+    prompt: str = "Select instance: ",
+    input: Input | None = None,
+    output: Output | None = None,
+) -> str | None:
+    """Interactive instance selection returning the chosen name (None on cancel)."""
+    if not instances:
+        return None
+    return _InstancePicker(instances, prompt).run(input=input, output=output)
