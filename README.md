@@ -62,10 +62,10 @@ You only need to set credentials for providers you actually use.
 | Command | Description |
 |---------|-------------|
 | `vpn --version` | Print the exact version (e.g. `vpn 0.2.7`) and exit `0` — derived from `src/vpn/version.py`, kept in sync with `pyproject.toml` |
-| `vpn up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate]` | Start (or verify) the VPN; apply any requested location via hot-swap |
-| `vpn connect [--instance NAME] [--provider --protocol --country --city] [--list]` | Hot-swap to another server; no arguments opens the picker |
+| `vpn up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest]` | Start (or verify) the VPN; apply any requested location via hot-swap |
+| `vpn connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
 | `vpn status [--instance NAME] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
-| `vpn ls [--instance NAME] [--json]` | List instances (registry + `vpn-*` compose containers) and their consumers |
+| `vpn ls [--instance NAME] [--json]` | List instances (registry + `vpn-*` compose containers): state, selection, control port, consumers, start time |
 | `vpn down [--instance NAME]` | Stop the VPN container |
 | `vpn logs [--instance NAME] [-f] [-n N]` | Show container logs |
 | `vpn bench [--instance NAME] [--connect]` | Benchmark locations and report the fastest (keeps current unless `--connect`) |
@@ -125,7 +125,7 @@ vpn up --provider protonvpn --protocol openvpn
 
 `vpn connect` with no arguments opens an interactive picker showing the same columns, with live filtering and keyboard navigation:
 
-- **Filtering** — type to filter, matching any column (accent-insensitive). `Tab`/`Shift-Tab` cycle an active filter *column* (Provider, Protocol, Country, City); while one is active, typing matches only within it and `←`/`→` cycle through that column's distinct values (e.g. `Tab`, `Tab`, `→` picks Surfshark→ProtonVPN; no typing needed). `Esc` exits column mode (or clears the query).
+- **Filtering** — type to filter, matching any column (accent-insensitive). `Tab`/`Shift-Tab` cycle an active filter *column* (Provider, Protocol, Country, City); while one is active, typing matches only within it and `←`/`→` cycle through that column's distinct values (e.g. `Tab`, `→` — one `Tab` activates the Provider column, then `→` cycles ProtonVPN → Surfshark; no typing needed). `Esc` exits column mode (or clears the query).
 - **Navigation** — `↑`/`↓` or `Ctrl-N`/`Ctrl-P` to move, `PgUp`/`PgDn` for pages, `Home`/`End` for first/last, `Enter` to select, `Ctrl-C`/`Ctrl-Q` to cancel.
 
 The selected row's provider *and* protocol are hot-swapped immediately.
@@ -135,7 +135,7 @@ The selected row's provider *and* protocol are hot-swapped immediately.
 Selections made through the control server live at **runtime only** — `.env` stays secrets-only. Consequences:
 
 - A hot-swapped location survives container restarts (`restart: always`) but is lost when the container is recreated (`vpn up --pull`, `vpn up --recreate`) or removed (`vpn down`); recreation reverts to whatever the compose file interpolates from `.env`.
-- `vpn status` shows the effective selection and prints a yellow **drift warning** when it differs from the container's configured environment.
+- `vpn status` shows the effective (runtime) selection; when it differs from the selection baked into the container's env at create time, `vpn status --json` reports `"drift": true`.
 
 ## Connection verification
 
@@ -145,7 +145,7 @@ After connecting (and after every swap), the CLI probes the public IP from insid
 
 - **Green** — real VPN exit in the requested country.
 - **Yellow warning** — real VPN exit, but it geolocates elsewhere than requested (common with provider "virtual locations"). You stay connected and the speed test still runs.
-- **Red / leak** — traffic still exits via your bare connection (or no IP could be read); the speed test is skipped.
+- **Red / leak** — the exit IP equals your bare connection's IP; the speed test is skipped. When no exit IP can be read at all the connection is treated as unverified (no leak marker) and the speed test is skipped too.
 
 Swaps additionally exclude the previous exit IP from acceptance, so a failed swap that silently keeps routing through the old server is reported as `no reconnect` rather than mistaken for success. IP echo services report ISO 3166-1 alpha-2 codes (`AU`), normalized to full names before comparing. Country is advisory only: it never gates success — the IP change does. `vpn status` and a flag-free `vpn up` on an already-running instance compare against the instance's *running* country, so a drifting exit (e.g. after a virtual-location server was removed) shows as a yellow geo warning instead of a blind green.
 
@@ -313,7 +313,7 @@ dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag
 - `drift` — `true` when the runtime selection differs from the selection baked into the container's env at create time (i.e. it was hot-swapped).
 - `control_server` — the instance's *resolved* host port (registry record, else the container's published port when the instance has no registry record) and whether the control server responded.
 - `exit_ip` — `{ip, country}` observed from inside the container, or `null` (probed only while `running`).
-- `leak` — `true` when the instance is `running` but no exit IP could be read, or the exit IP equals the host's bare public IP.
+- `leak` — `true` when the instance is `running` and the observed exit IP equals the host's bare public IP; `false` otherwise. A probe that reads no exit IP at all is probe health, not a leak: it is reported in `last_error` with `leak: false`.
 - `verified` — `true` when the exit verifiably differs from the host's bare IP (or matches the requested country while the bare IP is unknown); `false` otherwise, including when the tunnel is merely stopped or the probe failed.
 - `last_error` — human-readable failure detail (e.g. control server unreachable), else `null`.
 
