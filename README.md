@@ -171,7 +171,7 @@ How it runs:
 1. **Latency prescreen** — parallel TCP-connect probes (port 443, host-side) rank every candidate location; unreachable ones sort last.
 2. **Screening** — the top `--top` (default 12) locations are tested with a `--scan-size` MB (default 10) download. Each must prove an IP change (exit IP must differ from your bare IP *and* the previous exit — leaks and failed swaps are marked `leak` / `no reconnect`). Exits that geolocate outside the requested country are flagged `geo: <country>` but still tested.
 3. **Finals** — the best 3 are re-tested with the full `-s/--size` MB (default 25) download.
-4. **Result** — without `--connect` the pre-bench settings are restored and the table reports the winner. With `--connect` the winner is adopted after a final re-check of the exit IP. In either case Ctrl-C at any point restores the pre-bench settings.
+4. **Result** — without `--connect` the pre-bench settings are restored and the table reports the winner. With `--connect` the winner is adopted after a final re-check of the exit IP — unless it is already the active location, in which case nothing is re-swapped (it is kept and re-checked in place). In either case Ctrl-C at any point restores the pre-bench settings.
 
 The default `-c/--concurrency 1` hot-swaps the running container for every test. Raise it (e.g. `-c 4`) to run the screening and final stages as batches of concurrent tests, each candidate on its own **temporary one-off container**; your live connection is then left untouched until the winner is connected. All temporary containers are removed after each batch, and aborted runs tear them down too.
 
@@ -199,11 +199,15 @@ Container names are **exact matches only**: vpn never touches a container other 
 
 ### Control port
 
-Each instance publishes the control server on `127.0.0.1:<port>`. `vpn up` resolves the port in this order:
+Each instance publishes the control server on `127.0.0.1:<port>`. **Every** command resolves the port in this order:
 
 1. `--ctl-port HOST_PORT`
 2. `GLUETUN_CTL_PORT` (from the instance's env)
-3. All instances use a free port in `[8000, 9000]`, auto-allocated on first creation and persisted for later reuse.
+3. the registry record (`~/.cache/vpn/instances/<instance>.json`)
+4. a registry-less instance's *actually published* host port, read live from Docker — i.e. an imported or shared container vpn never created
+5. `8000` — only when the container has no published port
+
+`vpn up` on a brand-new instance auto-allocates a free port in `[8000, 9000]`, persists it to the registry, and writes it into the compose file. A registry-less container keeps its own port: `up` adopts it and every other command targets it, so a shared gluetun created outside vpn stays addressable — `vpn status --json` on such an instance reports its real `control_server.port` instead of a blind `8000`.
 
 `bench -c N` temporary one-off containers never publish host ports.
 
@@ -249,7 +253,7 @@ A provider/protocol pair only appears in listings and can only be started when a
 
 ### Set automatically
 
-These are managed by the CLI at container creation time — never define them yourself: `VPN_SERVICE_PROVIDER`, `VPN_TYPE`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `OPENVPN_USER`, `OPENVPN_PASSWORD` (mapped from your provider credentials). A location may be baked via `.env` `SERVER_COUNTRIES`/`SERVER_CITIES` (the compose template interpolates them); after creation, all *runtime* selection changes happen through the control server, and `vpn up` verifies a fresh start against the baked location when present.
+These are managed by the CLI at container creation time — never define them yourself: `VPN_SERVICE_PROVIDER`, `VPN_TYPE`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `OPENVPN_USER`, `OPENVPN_PASSWORD` (mapped from your provider credentials). A location may be baked via `.env` `SERVER_COUNTRIES`/`SERVER_CITIES` (the compose template interpolates them); after creation, all *runtime* selection changes happen through the control server, and `vpn up` verifies a fresh start — or a `--recreate` — against the baked location when present.
 
 ## Consumer API (dockerstrator)
 
@@ -269,7 +273,7 @@ Resolution order for every command: `--instance NAME` → `GLUETUN_INSTANCE` →
 | `1`  | scripted error / VPN failed / leak (verdict in JSON under `--json`) |
 | `2`  | usage error |
 
-Other non-zero codes are unspecified. `vpn up` and `vpn connect` return `1` when the connection cannot be verified; `vpn status --json` returns `1` when `leak` is `true`; `vpn status --json` returns `0` for any other emitted JSON.
+Other non-zero codes are unspecified. `vpn up` and `vpn connect` return `1` when the connection cannot be verified; `vpn status --json` returns `1` when `leak` is `true`; `vpn status --json` returns `0` for any other emitted JSON. `vpn bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run.
 
 ### The calls dockerstrator makes
 
@@ -306,7 +310,7 @@ dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag
 - `state` — `running` | `starting` | `stopped` | `absent`.
 - `selection` — the runtime selection (control server) or `null` when the server is unreachable or the instance isn't up.
 - `drift` — `true` when the runtime selection differs from the selection baked into the container's env at create time (i.e. it was hot-swapped).
-- `control_server` — the instance's published host port and whether the control server responded.
+- `control_server` — the instance's *resolved* host port (registry record, else the container's published port when the instance has no registry record) and whether the control server responded.
 - `exit_ip` — `{ip, country}` observed from inside the container, or `null` (probed only while `running`).
 - `leak` — `true` when the instance is `running` but no exit IP could be read, or the exit IP equals the host's bare public IP.
 - `last_error` — human-readable failure detail (e.g. control server unreachable), else `null`.
