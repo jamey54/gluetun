@@ -2,8 +2,8 @@
 
 Discovery only ever matches exact container names — it never reaches for "any
 gluetun container" (that is what would let vpn touch a foreign gluetun).
-Consumers are containers sharing the instance's network bridge
-(``NetworkMode == container:<name>``).
+Consumers are containers sharing the instance's network namespace
+(``NetworkMode == container:<instance>``, referenced by name or container ID).
 """
 
 from typing import cast
@@ -11,7 +11,7 @@ from typing import cast
 from vpn import control
 from vpn.apply import Selection
 from vpn.config import CONTAINER_OP_TIMEOUT_S
-from vpn.docker import container_control_port, container_status, run
+from vpn.docker import container_control_port, container_id, container_status, run
 from vpn.instance import instance_context, list_registry, read_registry, resolve_instance
 from vpn.statusdoc import control_server_doc
 from vpn.statusdoc import selection_doc as _selection_doc
@@ -82,7 +82,19 @@ def selection_doc(sel: Selection | None) -> dict[str, str | None] | None:
 
 
 def consumers_of(name: str) -> list[str]:
-    """Containers sharing this instance's network, sorted."""
+    """Containers sharing this instance's network namespace, sorted.
+
+    Consumers attach with ``--network container:<instance>`` (or compose
+    ``network_mode: container:/service:<instance>``). Docker resolves that
+    reference to the container *ID* at attach time, so a consumer's
+    ``HostConfig.NetworkMode`` may be ``container:<name>`` or
+    ``container:<id>`` — match the instance's name, full ID, and short ID.
+    """
+    refs = {name}
+    full_id = container_id(name)
+    if full_id:
+        refs.add(full_id)
+        refs.add(full_id[:12])
     result = run(
         "docker",
         "ps",
@@ -93,11 +105,15 @@ def consumers_of(name: str) -> list[str]:
         check=False,
         timeout=CONTAINER_OP_TIMEOUT_S,
     )
-    target = f"container:{name}"
+    prefix = "container:"
     consumers = []
     for line in (result.stdout or "").splitlines():
         parts = line.split("\t")
-        if len(parts) == 2 and parts[1].strip() == target:
+        if (
+            len(parts) == 2
+            and (net := parts[1].strip()).startswith(prefix)
+            and net[len(prefix) :] in refs
+        ):
             consumers.append(parts[0].strip())
     return sorted(consumers)
 

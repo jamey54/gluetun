@@ -219,7 +219,7 @@ Every instance reads its env from `./.env` by default. For a dedicated instance,
 
 ### Listing instances
 
-`vpn ls [--json]` enumerates instances from the registry and from containers whose compose project starts with `vpn-`, reporting per-instance state, selection, control-server port, and *consumers* — containers sharing the instance's network (`NetworkMode == container:<instance>`).
+`vpn ls [--json]` enumerates instances from the registry and from containers whose compose project starts with `vpn-`, reporting per-instance state, selection, control-server port, and *consumers* — containers sharing the instance's network namespace (`NetworkMode == container:<instance>`; Docker records the reference as the container's name or its ID, both are matched).
 
 ```text
 $ vpn ls
@@ -334,4 +334,4 @@ dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag
 }
 ```
 
-- `instances` — one entry per known instance; `state` uses the same values as `status --json`. `selection` and `control_server` are `null` when unknown. `consumers` lists containers sharing the instance's network (`NetworkMode == container:<container_name>`).
+- `instances` — one entry per known instance; `state` uses the same values as `status --json`. `selection` and `control_server` are `null` when unknown. `consumers` lists containers sharing the instance's network (`NetworkMode == container:<container_name>`; containers attached by name or by the instance's container ID are matched).

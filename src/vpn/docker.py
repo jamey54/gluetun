@@ -69,6 +69,12 @@ def container_status(name: str | None = None) -> str | None:
     return out.strip() if out else None
 
 
+def container_id(name: str | None = None) -> str | None:
+    """The container's full 64-hex ID, or None when absent."""
+    out = inspect_container("{{.Id}}", name=name)
+    return out.strip() if out else None
+
+
 def container_running(name: str | None = None) -> bool:
     """True only when the container exists and is running."""
     return container_status(name=name) == "running"

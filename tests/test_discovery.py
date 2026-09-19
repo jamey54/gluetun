@@ -14,8 +14,12 @@ def _proc(stdout: str) -> CompletedProcess[str]:
     return CompletedProcess((), 0, stdout=stdout)
 
 
+_STUB_ID = "c0f2a1b3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+
+
 def _stub_docker(runner, monkeypatch):
     """Return a runner for vpn.discovery.run keyed on its --format argument."""
+    monkeypatch.setattr(discovery, "container_id", lambda name: _STUB_ID)
 
     def fake_run(*args, **kwargs):
         fmt = args[args.index("--format") + 1]
@@ -66,6 +70,34 @@ def test_consumers_of_sorted_across_many(monkeypatch):
 
     monkeypatch.setattr(discovery, "run", fake_run)
     assert discovery.consumers_of("gluetun") == ["a-app", "b-app", "z-app"]
+
+
+def test_consumers_of_matches_instance_by_full_and_short_id(monkeypatch):
+    """Docker records ``container:<name>`` as ``container:<id>`` at attach time,
+    so consumers must also match the instance's full and short container ID."""
+    full = "c0f2a1b3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+    monkeypatch.setattr(discovery, "container_id", lambda name: full)
+    monkeypatch.setattr(
+        discovery,
+        "run",
+        lambda *args, **kwargs: _proc(
+            f"app-full\tcontainer:{full}\n"
+            f"app-short\tcontainer:{full[:12]}\n"
+            "other\tcontainer:deadbeef\n"
+        ),
+    )
+    assert discovery.consumers_of("plan-a") == ["app-full", "app-short"]
+
+
+def test_consumers_of_absent_container_matches_name_only(monkeypatch):
+    """No container -> no IDs; consumers (if any) can only match by name."""
+    monkeypatch.setattr(discovery, "container_id", lambda name: None)
+    monkeypatch.setattr(
+        discovery,
+        "run",
+        lambda *args, **kwargs: _proc("app-a\tcontainer:plan-a\n"),
+    )
+    assert discovery.consumers_of("plan-a") == ["app-a"]
 
 
 def test_consumers_of_missing_docker_reads_as_empty(monkeypatch):
