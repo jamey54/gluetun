@@ -32,7 +32,7 @@ from vpn.config import (
     PULL_TIMEOUT_S,
 )
 from vpn.countries import resolve_country
-from vpn.discovery import _state, instance_records, print_ls_table, selection_doc
+from vpn.discovery import _state, instance_records, print_ls_table
 from vpn.docker import (
     GLUETUN_IMAGE,
     compose,
@@ -69,6 +69,7 @@ from vpn.servers import (
     print_servers_table,
 )
 from vpn.speedtest import format_result, measure
+from vpn.statusdoc import classify_verdict, control_server_doc, selection_doc
 from vpn.textutil import fold
 from vpn.version import __version__
 
@@ -85,7 +86,7 @@ def require_api_key() -> None:
     """Fail closed: the control server must never run with an empty API key (M2)."""
     if not env_lookup("HTTP_CONTROL_SERVER_API_KEY"):
         port = current_instance().control_port
-        raise SystemExit(
+        raise click.ClickException(
             "HTTP_CONTROL_SERVER_API_KEY is not set.\n"
             f"It authenticates gluetun's control server (port {port}) "
             "— add any random string to .env."
@@ -189,16 +190,24 @@ def finish_connection(
 
 def effective_selection() -> Selection | None:
     """Runtime selection from the control server; None when unreachable or blank."""
+    return _runtime_selection_or_error()[0]
+
+
+def _runtime_selection_or_error() -> tuple[Selection | None, bool]:
+    """(selection, reachable): the live selection, plus whether the control
+    server responded at all (None/-False when unreachable or blank)."""
     try:
-        return Selection.from_doc(control.get_settings())
+        return Selection.from_doc(control.get_settings()), True
     except control.ControlError:
-        return None
+        return None, False
 
 
 def _require_selection() -> Selection:
     sel = effective_selection()
     if sel is None or not sel.provider:
-        raise SystemExit("Cannot read runtime settings — is gluetun's control server reachable?")
+        raise click.ClickException(
+            "Cannot read runtime settings — is gluetun's control server reachable?"
+        )
     return sel
 
 
@@ -217,7 +226,14 @@ def _baked_selection() -> Selection | None:
 
 
 def _status_doc() -> dict[str, object]:
-    """Stable status document (status --json). Called inside the instance context."""
+    """Stable status document (status --json). Called inside the instance context.
+
+    Contract (README §"Machine-readable output"): exit code is 0 for a healthy
+    or simply-stopped instance, 1 when the tunnel verifiably leaks or the
+    control server is unreachable while the container runs/restarts. Probe
+    failure is probe health, never a leak: it is reported in ``last_error``
+    with ``leak: false`` and exit 0 (C8).
+    """
     inst = current_instance()
     state = _state(inst.name)
     sel: Selection | None = None
@@ -236,20 +252,29 @@ def _status_doc() -> dict[str, object]:
 
     exit_ip: dict[str, str | None] | None = None
     leak = False
+    verified = False
     if state == "running":
         result = _probe()
         if result is None:
-            leak = True
+            if last_error is None:
+                last_error = "could not determine the exit IP (all echo services failed)"
         else:
             info = result.info
             ip = str(info.get("ip") or "")
-            exit_ip = {
-                "ip": ip,
-                "country": resolve_country(str(info.get("country") or "")) or None,
-            }
-            bare = real_ip()
-            if bare and ip == bare:
-                leak = True
+            if not ip:
+                if last_error is None:
+                    last_error = "could not determine the exit IP (empty observation)"
+            else:
+                exit_ip = {
+                    "ip": ip,
+                    "country": _clean_country(info.get("country")),
+                }
+                verdict, verified = classify_verdict(real_ip(), ip)
+                leak = verdict == "leak"
+                if verdict == "unknown" and last_error is None:
+                    last_error = (
+                        "could not determine the host's bare IP — tunnel unverified"
+                    )
     return {
         "instance": inst.name,
         "container_name": inst.name,
@@ -257,11 +282,20 @@ def _status_doc() -> dict[str, object]:
         "state": state,
         "selection": selection_doc(sel) if sel and sel.provider else None,
         "drift": drift,
-        "control_server": {"port": inst.control_port, "enabled": enabled},
+        "control_server": control_server_doc(inst.control_port, enabled),
         "exit_ip": exit_ip,
         "leak": leak,
+        "verified": verified,
         "last_error": last_error,
     }
+
+
+def _clean_country(value: object) -> str | None:
+    """Normalize a raw country field: missing/''/'None'/'null' become None (C3)."""
+    text = str(value or "").strip()
+    if not text or text.lower() in ("none", "null"):
+        return None
+    return resolve_country(text) or None
 
 
 def _print_target(sel: Selection) -> str:
@@ -297,7 +331,7 @@ def _apply_request(
         target_country, target_city = base.country, base.city
 
     if city is not None and not target_country:
-        raise SystemExit(
+        raise click.UsageError(
             "--city needs a country to search within: pass --country, or connect "
             "to a country first."
         )
@@ -309,7 +343,9 @@ def _apply_request(
     try:
         apply_location(target)
     except control.ControlError as exc:
-        raise SystemExit(f"Could not switch to {_print_target(target)} — {exc.message}") from exc
+        raise click.ClickException(
+            f"Could not switch to {_print_target(target)} — {exc.message}"
+        ) from exc
     return target, True
 
 
@@ -393,7 +429,7 @@ def up(
         if created:
             requested = country is not None or city is not None
         if was_running and requested and current is None and not recreate:
-            raise SystemExit(
+            raise click.ClickException(
                 "Cannot read runtime settings — is gluetun's control server reachable?"
             )
 
@@ -403,7 +439,7 @@ def up(
         if created:
             name = provider or (current.provider if current else None)
             if not name:
-                raise SystemExit("--provider is required to start the container.")
+                raise click.UsageError("--provider is required to start the container.")
             name, proto = resolve_provider(name, protocol, current.protocol if current else None)
             overrides = get_provider_env(name, proto)
             _log_env(overrides)
@@ -461,14 +497,14 @@ def connect(
     if list_servers:
         by_provider = listable_servers(get_servers())
         if not any(by_provider.values()):
-            raise SystemExit("No servers found. Is Docker running?")
+            raise click.ClickException("No servers found. Is Docker running?")
         print_servers_table(by_provider)
         return
     inst = _resolve_for_command(instance)
     with instance_context(inst):
         require_api_key()
         if not container_running():
-            raise SystemExit(
+            raise click.ClickException(
                 f"Container '{current_instance().container}' is not running. Use 'vpn up' first."
             )
         current = _require_selection()
@@ -476,10 +512,10 @@ def connect(
         if not any(v is not None for v in (provider, protocol, country, city)):
             by_provider = listable_servers(get_servers())
             if not any(by_provider.values()):
-                raise SystemExit("No servers found. Is Docker running?")
+                raise click.ClickException("No servers found. Is Docker running?")
             selection = select_server(by_provider)
             if not selection:
-                raise SystemExit("No selection.")
+                raise click.ClickException("No selection.")
             picked_provider, picked_protocol, country, city = parse_server_selection(selection)
             provider, protocol = picked_provider, picked_protocol
 
@@ -549,18 +585,34 @@ def _kv(label: str, value: str, color: str | None = None) -> None:
     help="Machine-readable status (single-line JSON)",
 )
 def status(instance: str | None, size: int, no_speedtest: bool, json_output: bool) -> None:
-    """Show container state, effective selection, public IP, and speed test."""
+    """Show container state, effective selection, public IP, and speed test.
+
+    Exit codes (M9): 0 healthy/stopped · 1 leak, unreachable control server
+    (while the container runs/restarts), or verification failure (human mode)
+    · 2 usage. ``--json`` exits 0 on an inconclusive probe — probe health is
+    reported in ``last_error``, never conflated with a leak.
+    """
     with instance_context(_resolve_for_command(instance)):
         if json_output:
             doc = _status_doc()
             click.echo(json.dumps(doc))
+            control_doc = doc["control_server"]
             if doc["leak"]:
+                raise SystemExit(1)
+            if (
+                doc["state"] in ("running", "starting")
+                and isinstance(control_doc, dict)
+                and not control_doc.get("enabled")
+                and doc["last_error"]
+            ):
                 raise SystemExit(1)
             return
         state = container_status()
         if not state:
             click.echo(f"Container '{current_instance().container}' not found.")
-            return
+            raise click.ClickException(
+                f"Container '{current_instance().container}' is not running."
+            )
 
         container = current_instance().container
         _kv("Container", f"{container} ({state})")
@@ -582,7 +634,7 @@ def status(instance: str | None, size: int, no_speedtest: bool, json_output: boo
         except control.ControlError:
             pass
 
-        current = effective_selection()
+        current, reachable = _runtime_selection_or_error()
         if current and current.provider:
             click.echo()
             _kv("Provider", current.provider)
@@ -596,11 +648,15 @@ def status(instance: str | None, size: int, no_speedtest: bool, json_output: boo
 
         if state == "running":
             click.echo()
-            finish_connection(
+            verified = finish_connection(
                 expected_country=current.country if current and current.country else None,
                 speedtest=not no_speedtest,
                 size=size,
             )
+            if not verified:
+                raise SystemExit(1)
+        if state in ("running", "starting") and not reachable:
+            raise SystemExit(1)
 
 
 @main.command()
@@ -676,19 +732,23 @@ def bench(
     with instance_context(_resolve_for_command(instance)):
         require_api_key()
         if not container_running():
-            raise SystemExit(f"Container '{current_instance().container}' is not running.")
+            raise click.ClickException(
+                f"Container '{current_instance().container}' is not running."
+            )
         by_provider = listable_servers(get_servers())
         if not any(by_provider.values()):
-            raise SystemExit("No servers found. Is Docker running?")
+            raise click.ClickException("No servers found. Is Docker running?")
 
         try:
             control.get_settings()
         except control.ControlError as exc:
-            raise SystemExit(f"Cannot reach the gluetun control server: {exc}") from None
+            raise click.ClickException(
+                f"Cannot reach the gluetun control server: {exc.message}"
+            ) from None
 
         candidates = build_candidates(by_provider, provider, protocol, country)
         if not candidates:
-            raise SystemExit("No matching locations for the given filters.")
+            raise click.ClickException("No matching locations for the given filters.")
 
         try:
             report = run_bench(
@@ -703,7 +763,9 @@ def bench(
         except KeyboardInterrupt:
             raise SystemExit(130) from None
         except control.ControlError as exc:
-            raise SystemExit(f"Cannot reach the gluetun control server: {exc}") from None
+            raise click.ClickException(
+                f"Cannot reach the gluetun control server: {exc.message}"
+            ) from None
 
         print_report(report)
         if report.action:
@@ -740,13 +802,17 @@ def dns(instance: str | None, action: str | None) -> None:
                 status = control.get_dns_status()
                 click.echo(f"DNS: {status}")
             except control.ControlError as exc:
-                raise SystemExit(f"Cannot reach control server: {exc}") from None
+                raise click.ClickException(
+                    f"Cannot reach control server: {exc.message}"
+                ) from None
             return
         target = "running" if action == "on" else "stopped"
         try:
             control.set_dns_status(target)
         except control.ControlError as exc:
-            raise SystemExit(f"Cannot reach control server: {exc}") from None
+            raise click.ClickException(
+                f"Cannot reach control server: {exc.message}"
+            ) from None
         click.echo(f"DNS {target}.")
 
 
@@ -758,5 +824,7 @@ def update(instance: str | None) -> None:
         try:
             control.trigger_updater()
         except control.ControlError as exc:
-            raise SystemExit(f"Cannot reach control server: {exc}") from None
+            raise click.ClickException(
+                f"Cannot reach control server: {exc.message}"
+            ) from None
         click.echo("Server list update triggered.")

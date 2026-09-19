@@ -13,6 +13,8 @@ from vpn.apply import Selection
 from vpn.config import CONTAINER_OP_TIMEOUT_S
 from vpn.docker import container_control_port, container_status, run
 from vpn.instance import instance_context, list_registry, read_registry, resolve_instance
+from vpn.statusdoc import control_server_doc
+from vpn.statusdoc import selection_doc as _selection_doc
 
 PROJECT_PREFIX = "vpn-"
 PROJECT_LABEL = '{{.Label "com.docker.compose.project"}}'
@@ -74,14 +76,9 @@ def _runtime_selection(name: str, port: int | None) -> Selection | None:
     return sel if sel.provider else None
 
 
-def selection_doc(sel: Selection) -> dict[str, str | None]:
-    """Stable selection document shared by status --json and ls --json."""
-    return {
-        "provider": sel.provider,
-        "protocol": sel.protocol,
-        "country": sel.country,
-        "city": sel.city,
-    }
+def selection_doc(sel: Selection | None) -> dict[str, str | None] | None:
+    """Selection document shared by status --json and ls --json (statusdoc)."""
+    return _selection_doc(sel)
 
 
 def consumers_of(name: str) -> list[str]:
@@ -117,10 +114,8 @@ def instance_records() -> list[dict[str, object]]:
                 "instance": name,
                 "container_name": name,
                 "state": state,
-                "selection": selection_doc(sel) if sel else None,
-                "control_server": (
-                    {"port": port, "enabled": state == "running"} if port is not None else None
-                ),
+                "selection": selection_doc(sel),
+                "control_server": control_server_doc(port, sel is not None),
                 "consumers": consumers_of(name),
             }
         )

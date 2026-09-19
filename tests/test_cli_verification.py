@@ -226,19 +226,24 @@ def test_same_country_used_for_verification():
 # ---------------------------------------------------------------------------
 
 
-def test_print_ip_status_verifies_from_backup_sources(monkeypatch, capsys):
+def test_print_ip_status_fail_closed_when_bare_unknown_from_backup_sources(
+    monkeypatch, capsys
+):
+    """Backup echo sources work, but with no country match and an unknown host
+    bare IP the verdict is fail-closed: never a silent green (C2)."""
     probe = ipinfo._Probe({"ip": "5.6.7.8"}, sources=("cloudflare",))
     monkeypatch.setattr(ipinfo, "_probe", lambda container=None: probe)
-    assert ipinfo.print_ip_status() is True
+    assert ipinfo.print_ip_status() is False
     out = capsys.readouterr().out
     assert "Public IP confirmed via cloudflare" in out
     assert "ipinfo.io was rate-limited or unreachable" in out
+    assert "Cannot verify: could not determine the host's bare IP (fail-closed)" in out
 
 
 def test_print_ip_status_no_note_when_ipinfo_served(monkeypatch, capsys):
     probe = ipinfo._Probe({"ip": "1.2.3.4", "country": "US"}, sources=("ipinfo",))
     monkeypatch.setattr(ipinfo, "_probe", lambda container=None: probe)
-    assert ipinfo.print_ip_status() is True
+    assert ipinfo.print_ip_status() is False  # bare IP unknown -> fail-closed
     assert "Public IP confirmed via" not in capsys.readouterr().out
 
 

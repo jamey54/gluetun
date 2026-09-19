@@ -33,6 +33,7 @@ from vpn.config import (
 from vpn.countries import COUNTRY_NAMES, resolve_country, to_code
 from vpn.docker import run
 from vpn.instance import current_instance
+from vpn.statusdoc import classify_verdict
 from vpn.textutil import fold
 
 _real_ip_cache: str | None = None
@@ -328,7 +329,9 @@ def print_ip_status(
 ) -> bool:
     """Fetch and display VPN and host IP info side by side with a tri-state verdict.
 
-    Returns True only when traffic verifiably exits through the VPN.
+    Returns True only when traffic verifiably exits through the VPN. Fail-closed
+    (C2): an empty observation is never success, and an unknown host bare IP
+    degrades only to a loudly-warned country match — never a silent green.
     """
     bare = real_ip()
     outcome = fetch_ip_info(
@@ -359,21 +362,58 @@ def print_ip_status(
             )
         )
 
-    if bare and vpn_ip == bare:
-        vpn_color = "red"
-    elif expected_country and not outcome.result.matched:
-        vpn_color = "yellow"
-    else:
-        vpn_color = "green"
+    if not vpn_ip:
+        click.echo("Could not fetch public IP.")
+        return False
 
-    _fmt_table(info, vpn_color, host)
-    if bare and vpn_ip == bare:
+    state, _ = classify_verdict(
+        bare, vpn_ip, matched=outcome.result.matched, expected_country=expected_country
+    )
+
+    if state == "leak":
+        _fmt_table(info, "red", host)
         click.echo(click.style("  LEAK: VPN exit matches your bare connection", fg="red"))
-    return vpn_ip != bare if bare else True
+        return False
+    if state == "unknown":
+        _fmt_table(info, "yellow", host)
+        if bare is None:
+            click.echo(
+                click.style(
+                    "  Cannot verify: could not determine the host's bare IP (fail-closed)",
+                    fg="yellow",
+                )
+            )
+        else:
+            click.echo(click.style("  Could not verify the tunnel exit.", fg="yellow"))
+        return False
+    if expected_country and not outcome.result.matched:
+        _fmt_table(info, "yellow", host)
+        click.echo(
+            click.style(
+                f"  Note: exit country differs from the requested {expected_country}",
+                fg="yellow",
+            )
+        )
+    elif bare is None and expected_country:
+        # Degraded-but-accepted: the country heuristic vouches for the exit
+        # while the host IP stays unknown. Warn loudly (never a silent green).
+        _fmt_table(info, "yellow", host)
+        click.echo(
+            click.style(
+                "  Verified via country match only (the host's bare IP is unknown).",
+                fg="yellow",
+            )
+        )
+    else:
+        _fmt_table(info, "green", host)
+    return True
 
 
 def current_exit_ip(retries: int = CURRENT_EXIT_IP_RETRIES) -> str | None:
     """Best-effort single-shot read of the container's current exit IP."""
     outcome = fetch_ip_info(retries=retries)
     info = (outcome.result.info if outcome.result else None) or outcome.last_info
-    return str(info.get("ip")) if info else None
+    if not info:
+        return None
+    ip = info.get("ip")
+    return str(ip) if ip else None

@@ -38,6 +38,27 @@ def verified(monkeypatch):
 RUNNING = Selection("surfshark", "wireguard", "Germany")
 
 
+def _settings(sel: Selection) -> dict[str, object]:
+    """Settings doc the control server would return for a Selection."""
+    return {
+        "type": sel.protocol,
+        "provider": {
+            "name": sel.provider,
+            "server_selection": {
+                "countries": [sel.country] if sel.country else [],
+                "cities": [sel.city] if sel.city else [],
+            },
+        },
+    }
+
+
+def _control_down(monkeypatch) -> None:
+    def boom(*args: object, **kwargs: object) -> None:
+        raise ControlError(None, "no")
+
+    monkeypatch.setattr("vpn.control.get_settings", boom)
+
+
 def running(monkeypatch, sel: Selection | None = RUNNING):
     monkeypatch.setattr(cli, "container_running", lambda name=None: sel is not None)
     monkeypatch.setattr(cli, "effective_selection", lambda: sel)
@@ -401,22 +422,22 @@ def _stub_server_rows(monkeypatch) -> None:
 
 def test_status_unknown_when_control_server_down(monkeypatch):
     monkeypatch.setattr(cli, "container_status", lambda: "running")
-    monkeypatch.setattr(cli, "effective_selection", lambda: None)
+    monkeypatch.setattr(cli, "_runtime_selection_or_error", lambda: (None, False))
     result = invoke(["status", "--no-speedtest"])
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "unknown" in result.output
 
 
 def test_status_missing_container(monkeypatch):
     monkeypatch.setattr(cli, "container_status", lambda: None)
     result = invoke(["status"])
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "not found" in result.output
 
 
 def test_status_shows_vpn_and_dns(monkeypatch):
     monkeypatch.setattr(cli, "container_status", lambda: "running")
-    monkeypatch.setattr(cli, "effective_selection", lambda: RUNNING)
+    monkeypatch.setattr(cli, "_runtime_selection_or_error", lambda: (RUNNING, True))
     monkeypatch.setattr("vpn.control.get_vpn_status", lambda: "running")
     monkeypatch.setattr("vpn.control.get_dns_status", lambda: "running")
     monkeypatch.setattr("vpn.control.get_port_forward", lambda: 5914)
@@ -432,7 +453,7 @@ def test_status_shows_vpn_and_dns(monkeypatch):
 def test_status_flags_running_country_mismatch(monkeypatch, verified):
     """`vpn status` must pass the running country so a geo mismatch shows yellow."""
     monkeypatch.setattr(cli, "container_status", lambda: "running")
-    monkeypatch.setattr(cli, "effective_selection", lambda: RUNNING)
+    monkeypatch.setattr(cli, "_runtime_selection_or_error", lambda: (RUNNING, True))
     result = invoke(["status", "--no-speedtest"])
     assert result.exit_code == 0
     assert verified and verified[0]["expected_country"] == "Germany"
@@ -482,7 +503,7 @@ def test_status_hides_dns_and_port_when_unreachable(monkeypatch):
         raise ControlError(None, "no")
 
     monkeypatch.setattr(cli, "container_status", lambda: "running")
-    monkeypatch.setattr(cli, "effective_selection", lambda: RUNNING)
+    monkeypatch.setattr(cli, "_runtime_selection_or_error", lambda: (RUNNING, True))
     monkeypatch.setattr("vpn.control.get_vpn_status", _control_error_noarg)
     monkeypatch.setattr("vpn.control.get_dns_status", _control_error_noarg)
     monkeypatch.setattr("vpn.control.get_port_forward", _control_error_noarg)

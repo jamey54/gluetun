@@ -273,7 +273,7 @@ Resolution order for every command: `--instance NAME` → `GLUETUN_INSTANCE` →
 | `1`  | scripted error / VPN failed / leak (verdict in JSON under `--json`) |
 | `2`  | usage error |
 
-Other non-zero codes are unspecified. `vpn up` and `vpn connect` return `1` when the connection cannot be verified; `vpn status --json` returns `1` when `leak` is `true`; `vpn status --json` returns `0` for any other emitted JSON. `vpn bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run.
+Other non-zero codes are unspecified. `vpn up` and `vpn connect` return `1` when the connection cannot be verified; `vpn status --json` returns `1` when `leak` is `true` or the control server is unreachable while the container is running/restarting; it returns `0` for any other emitted JSON (probe health failures are reported in `last_error`, never as a leak). `vpn bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run.
 
 ### The calls dockerstrator makes
 
@@ -303,6 +303,7 @@ dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag
   "control_server": { "port": 8000, "enabled": true },
   "exit_ip": { "ip": "1.2.3.4", "country": "Japan" },
   "leak": false,
+  "verified": true,
   "last_error": null
 }
 ```
@@ -313,6 +314,7 @@ dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag
 - `control_server` — the instance's *resolved* host port (registry record, else the container's published port when the instance has no registry record) and whether the control server responded.
 - `exit_ip` — `{ip, country}` observed from inside the container, or `null` (probed only while `running`).
 - `leak` — `true` when the instance is `running` but no exit IP could be read, or the exit IP equals the host's bare public IP.
+- `verified` — `true` when the exit verifiably differs from the host's bare IP (or matches the requested country while the bare IP is unknown); `false` otherwise, including when the tunnel is merely stopped or the probe failed.
 - `last_error` — human-readable failure detail (e.g. control server unreachable), else `null`.
 
 ### `vpn ls --json`

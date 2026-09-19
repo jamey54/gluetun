@@ -90,6 +90,7 @@ def test_status_json_schema_running(monkeypatch):
         "control_server",
         "exit_ip",
         "leak",
+        "verified",
         "last_error",
     }
     assert doc["instance"] == "gluetun"
@@ -101,6 +102,7 @@ def test_status_json_schema_running(monkeypatch):
     assert doc["control_server"] == {"port": 8000, "enabled": True}
     assert doc["exit_ip"] == {"ip": "9.9.9.9", "country": "Germany"}
     assert doc["leak"] is False
+    assert doc["verified"] is True
     assert doc["last_error"] is None
 
 
@@ -125,8 +127,9 @@ def test_status_json_absent_container(monkeypatch):
 
 
 def test_status_json_control_server_down(monkeypatch):
+    """Unreachable control server while the container runs -> exit 1 (M9)."""
     result = invoke_status(monkeypatch, control_error="boom")
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     doc = json.loads(result.output)
     assert doc["selection"] is None
     assert doc["control_server"] == {"port": 8000, "enabled": False}
@@ -149,13 +152,16 @@ def test_status_json_deterministic_single_line(monkeypatch):
     assert result.output.strip().count("\n") == 0
 
 
-def test_status_json_probe_totally_failed_is_leak(monkeypatch):
-    """All echo providers down on the single-shot probe -> honest leak, exit 1."""
+def test_status_json_probe_totally_failed_is_not_leak(monkeypatch):
+    """All echo providers down is probe health, not a leak (C8): reported in
+    ``last_error`` with ``leak: false`` and exit 0."""
     result = invoke_status(monkeypatch, probe_fail=True)
-    assert result.exit_code == 1
+    assert result.exit_code == 0
     doc = json.loads(result.output)
-    assert doc["leak"] is True
+    assert doc["leak"] is False
+    assert doc["verified"] is False
     assert doc["exit_ip"] is None
+    assert doc["last_error"] == "could not determine the exit IP (all echo services failed)"
 
 
 def test_status_json_uses_published_port_without_registry(monkeypatch):
