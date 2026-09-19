@@ -61,7 +61,7 @@ You only need to set credentials for providers you actually use.
 
 | Command | Description |
 |---------|-------------|
-| `vpn --version` | Print the exact version (e.g. `vpn 0.2.6`) and exit `0` — derived from `src/vpn/version.py`, kept in sync with `pyproject.toml` |
+| `vpn --version` | Print the exact version (e.g. `vpn 0.2.7`) and exit `0` — derived from `src/vpn/version.py`, kept in sync with `pyproject.toml` |
 | `vpn up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `vpn connect [--instance NAME] [--provider --protocol --country --city] [--list]` | Hot-swap to another server; no arguments opens the picker |
 | `vpn status [--instance NAME] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
@@ -219,12 +219,12 @@ Every instance reads its env from `./.env` by default. For a dedicated instance,
 
 ### Listing instances
 
-`vpn ls [--json]` enumerates instances from the registry and from containers whose compose project starts with `vpn-`, reporting per-instance state, selection, control-server port, and *consumers* — containers sharing the instance's network namespace (`NetworkMode == container:<instance>`; Docker records the reference as the container's name or its ID, both are matched).
+`vpn ls [--json]` enumerates instances from the registry and from containers whose compose project starts with `vpn-`, reporting per-instance state, selection, control-server port, *consumers* — containers sharing the instance's network namespace (`NetworkMode == container:<instance>`; Docker records the reference as the container's name or its ID, both are matched) — and when each instance was started. Rows are ordered by start time, oldest instance first; instances without a start time (absent, or never started) sort last. `STARTED` is rendered in local time; under `--json` it is the raw RFC3339 timestamp (`"started_at"`), or `null` when unknown.
 
 ```text
 $ vpn ls
-INSTANCE   STATE    CONTROL  SELECTION                             CONSUMERS
-gluetun    running  8000     surfshark/wireguard → Germany         firefox-app, squiz-dev
+INSTANCE   STATE    CONTROL  SELECTION                             CONSUMERS        STARTED
+gluetun    running  8000     surfshark/wireguard → Germany         firefox-app      2026-09-19 09:00:00
 ```
 
 ## Configuration
@@ -328,10 +328,11 @@ dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag
       "state": "running",
       "selection": { "provider": "surfshark", "protocol": "wireguard", "country": "Japan", "city": "Tokyo" },
       "control_server": { "port": 8000, "enabled": true },
-      "consumers": ["firefox-app", "squiz-dev"]
+      "consumers": ["firefox-app", "squiz-dev"],
+      "started_at": "2026-09-19T09:00:00.123456789Z"
     }
   ]
 }
 ```
 
-- `instances` — one entry per known instance; `state` uses the same values as `status --json`. `selection` and `control_server` are `null` when unknown. `consumers` lists containers sharing the instance's network (`NetworkMode == container:<container_name>`; containers attached by name or by the instance's container ID are matched).
+- `instances` — one entry per known instance; `state` uses the same values as `status --json`. `selection` and `control_server` are `null` when unknown. `consumers` lists containers sharing the instance's network (`NetworkMode == container:<container_name>`; containers attached by name or by the instance's container ID are matched). `started_at` is the instance's last start time (Docker `State.StartedAt`, RFC3339), or `null` when the instance is absent or has never started; records are ordered by `started_at`, oldest first, unknown last.

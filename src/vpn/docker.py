@@ -97,6 +97,15 @@ def container_image(name: str | None = None) -> str | None:
     return out.strip() if out else None
 
 
+def container_started_at(name: str | None = None) -> str | None:
+    """RFC3339 time the container was last started, or None (absent/never started)."""
+    out = inspect_container("{{.State.StartedAt}}", name=name)
+    value = out.strip() if out else ""
+    if not value or value.startswith("0001-01-01"):
+        return None
+    return value
+
+
 def container_control_port(name: str | None = None) -> int | None:
     """Host port published for the container's control server (8000/tcp), if any."""
     out = inspect_container("{{json .NetworkSettings.Ports}}", name=name)

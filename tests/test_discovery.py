@@ -15,11 +15,13 @@ def _proc(stdout: str) -> CompletedProcess[str]:
 
 
 _STUB_ID = "c0f2a1b3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+_STUB_STARTED = "2026-09-19T09:00:00.123456789Z"
 
 
 def _stub_docker(runner, monkeypatch):
     """Return a runner for vpn.discovery.run keyed on its --format argument."""
     monkeypatch.setattr(discovery, "container_id", lambda name: _STUB_ID)
+    monkeypatch.setattr(discovery, "container_started_at", lambda name: _STUB_STARTED)
 
     def fake_run(*args, **kwargs):
         fmt = args[args.index("--format") + 1]
@@ -153,6 +155,7 @@ def test_instance_records_schema(monkeypatch):
         },
         "control_server": {"port": 8123, "enabled": True},
         "consumers": ["plan-app"],
+        "started_at": _STUB_STARTED,
     }
 
 
@@ -193,6 +196,7 @@ def test_ls_json_envelope(monkeypatch):
                 "selection": None,
                 "control_server": {"port": 8123, "enabled": False},
                 "consumers": [],
+                "started_at": _STUB_STARTED,
             }
         ],
     )
@@ -201,6 +205,7 @@ def test_ls_json_envelope(monkeypatch):
     doc = json.loads(result.output)
     assert set(doc) == {"instances"}
     assert doc["instances"][0]["instance"] == "plan-a"
+    assert doc["instances"][0]["started_at"] == _STUB_STARTED
 
 
 def test_ls_json_filters_by_instance(monkeypatch):
@@ -215,6 +220,7 @@ def test_ls_json_filters_by_instance(monkeypatch):
                 "selection": None,
                 "control_server": {"port": 8123, "enabled": False},
                 "consumers": [],
+                "started_at": _STUB_STARTED,
             }
         ],
     )
@@ -230,6 +236,8 @@ def test_ls_human_prints_table(monkeypatch):
     assert result.exit_code == 0
     assert "plan-a" in result.output
     assert "INSTANCE" in result.output
+    assert "STARTED" in result.output
+    assert discovery._local_started(_STUB_STARTED) in result.output
 
 
 def test_ls_human_no_instances_message(monkeypatch):
@@ -260,4 +268,62 @@ def _record() -> dict[str, object]:
         },
         "control_server": {"port": 8123, "enabled": True},
         "consumers": ["plan-app"],
+        "started_at": _STUB_STARTED,
     }
+
+
+def test_instance_records_ordered_oldest_first(monkeypatch):
+    """ls records are ordered by start time (older instance first)."""
+    times = {
+        "gluetun": "2026-01-01T08:00:00Z",
+        "plan-b": "2026-05-01T08:00:00Z",
+        "plan-a": "2026-03-01T08:00:00Z",
+    }
+    monkeypatch.setattr(discovery, "_known_names", lambda: set(times))
+    monkeypatch.setattr(discovery, "_state", lambda name: "running")
+    monkeypatch.setattr(discovery, "_control_port", lambda name: 8000)
+    monkeypatch.setattr(discovery, "_runtime_selection", lambda name, port: None)
+    monkeypatch.setattr(discovery, "container_started_at", lambda name: times[name])
+    monkeypatch.setattr(discovery, "consumers_of", lambda name: [])
+    records = discovery.instance_records()
+    assert [r["instance"] for r in records] == ["gluetun", "plan-a", "plan-b"]
+    assert [r["started_at"] for r in records] == [
+        "2026-01-01T08:00:00Z",
+        "2026-03-01T08:00:00Z",
+        "2026-05-01T08:00:00Z",
+    ]
+
+
+def test_instance_records_unknown_started_sorts_last(monkeypatch):
+    """Absent/never-started instances (no start time) sort after started ones."""
+    monkeypatch.setattr(discovery, "_known_names", lambda: {"new-one", "old-one"})
+    monkeypatch.setattr(
+        discovery, "_state", lambda name: "running" if name == "old-one" else "absent"
+    )
+    monkeypatch.setattr(discovery, "_control_port", lambda name: 8000)
+    monkeypatch.setattr(discovery, "_runtime_selection", lambda name, port: None)
+    monkeypatch.setattr(
+        discovery,
+        "container_started_at",
+        lambda name: "2026-01-01T08:00:00Z" if name == "old-one" else None,
+    )
+    monkeypatch.setattr(discovery, "consumers_of", lambda name: [])
+    records = discovery.instance_records()
+    assert [r["instance"] for r in records] == ["old-one", "new-one"]
+    assert [r["started_at"] for r in records] == ["2026-01-01T08:00:00Z", None]
+
+
+def test_instance_records_absent_instance_reports_null_start(monkeypatch):
+    """Absent containers carry no start time (registry-only records stay clean)."""
+    monkeypatch.setattr(discovery, "_known_names", lambda: {"plan-a"})
+    monkeypatch.setattr(discovery, "_state", lambda name: "absent")
+    monkeypatch.setattr(discovery, "container_started_at", lambda name: pytest.fail("not called"))
+    monkeypatch.setattr(discovery, "consumers_of", lambda name: [])
+    record = discovery.instance_records()[0]
+    assert record["started_at"] is None
+
+
+def test_local_started_formats_utc_to_local():
+    rendered = discovery._local_started("2026-09-19T09:00:00Z")
+    assert rendered.endswith(" 09:00:00")
+    assert discovery._local_started("not-a-time") == "not-a-time"

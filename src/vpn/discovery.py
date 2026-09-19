@@ -6,12 +6,19 @@ Consumers are containers sharing the instance's network namespace
 (``NetworkMode == container:<instance>``, referenced by name or container ID).
 """
 
+from datetime import datetime
 from typing import cast
 
 from vpn import control
 from vpn.apply import Selection
 from vpn.config import CONTAINER_OP_TIMEOUT_S
-from vpn.docker import container_control_port, container_id, container_status, run
+from vpn.docker import (
+    container_control_port,
+    container_id,
+    container_started_at,
+    container_status,
+    run,
+)
 from vpn.instance import instance_context, list_registry, read_registry, resolve_instance
 from vpn.statusdoc import control_server_doc
 from vpn.statusdoc import selection_doc as _selection_doc
@@ -119,7 +126,12 @@ def consumers_of(name: str) -> list[str]:
 
 
 def instance_records() -> list[dict[str, object]]:
-    """One record per known instance, aligned with the ls --json schema."""
+    """One record per known instance, aligned with the ls --json schema.
+
+    Records are ordered by start time (oldest first); instances without a
+    start time (absent, never started) sort last, tie-broken by name for
+    determinism.
+    """
     records: list[dict[str, object]] = []
     for name in sorted(_known_names()):
         state = _state(name)
@@ -133,9 +145,22 @@ def instance_records() -> list[dict[str, object]]:
                 "selection": selection_doc(sel),
                 "control_server": control_server_doc(port, sel is not None),
                 "consumers": consumers_of(name),
+                "started_at": container_started_at(name) if state != "absent" else None,
             }
         )
-    return records
+    return sorted(
+        records,
+        key=lambda r: (r["started_at"] is None, str(r["started_at"] or ""), str(r["instance"])),
+    )
+
+
+def _local_started(value: str) -> str:
+    """RFC3339 (UTC) value -> local 'YYYY-MM-DD HH:MM:SS' for the human table."""
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone()
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return value
 
 
 def print_ls_table(records: list[dict[str, object]]) -> None:
@@ -145,7 +170,7 @@ def print_ls_table(records: list[dict[str, object]]) -> None:
     if not records:
         click.echo("(no instances)")
         return
-    header = ["INSTANCE", "STATE", "CONTROL", "SELECTION", "CONSUMERS"]
+    header = ["INSTANCE", "STATE", "CONTROL", "SELECTION", "CONSUMERS", "STARTED"]
     rows: list[list[str]] = []
     for record in records:
         server = record.get("control_server")
@@ -158,7 +183,10 @@ def print_ls_table(records: list[dict[str, object]]) -> None:
             if location:
                 selection += f" → {location}"
         consumers = ", ".join(cast(list[str], record.get("consumers") or [])) or "-"
-        rows.append([str(record["instance"]), str(record["state"]), control, selection, consumers])
+        started = _local_started(str(record["started_at"])) if record.get("started_at") else "-"
+        rows.append(
+            [str(record["instance"]), str(record["state"]), control, selection, consumers, started]
+        )
     widths = [max(len(cell) for cell in column) for column in zip(*[header, *rows], strict=True)]
 
     def dump(row: list[str]) -> None:

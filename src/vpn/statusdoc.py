@@ -37,6 +37,7 @@ RECORD_FIELDS = (
     "selection",
     "control_server",
     "consumers",
+    "started_at",
 )
 
 Verdict = Literal["ok", "leak", "unknown"]
