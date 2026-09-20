@@ -130,7 +130,7 @@ def test_up_invalid_instance_name_exits_2():
 
 
 def test_instance_options_present_on_commands():
-    for name in ["status", "connect", "down", "logs", "bench", "dns", "update"]:
+    for name in ["status", "connect", "down", "rm", "logs", "bench", "dns", "update"]:
         cmd = cli.main.commands[name]
         assert any(p.name == "instance" for p in cmd.params), name
     up_params = {p.name for p in cli.main.commands["up"].params}
