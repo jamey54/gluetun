@@ -20,8 +20,10 @@ Isolation invariants:
 import json
 import os
 import re
+import shutil
 import socket
 from collections.abc import Iterator
+import contextlib
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -120,6 +122,21 @@ def list_registry() -> list[str]:
     if not config.INSTANCES_DIR.is_dir():
         return []
     return sorted(p.stem for p in config.INSTANCES_DIR.iterdir() if p.suffix == ".json")
+
+
+def delete_instance_state(name: str) -> None:
+    """Delete persisted state: registry record, generated compose dir, lockfile.
+
+    Never raises: missing files are skipped, and the compose dir is only
+    removed when it is exactly ``INSTANCES_DIR/<name>``.
+    """
+    with contextlib.suppress(OSError):
+        registry_path(name).unlink(missing_ok=True)
+    compose_dir = Path(compose_file_for(name)).parent
+    if compose_dir.name == name and compose_dir.parent == config.INSTANCES_DIR:
+        shutil.rmtree(compose_dir, ignore_errors=True)
+    with contextlib.suppress(OSError):
+        (config.LOCKS_DIR / f"{name}.lock").unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
