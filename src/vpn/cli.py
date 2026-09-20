@@ -627,13 +627,27 @@ def connect(
 
 @main.command()
 @add_instance_options()
-def down(instance: str | None) -> None:
+@all_option
+def down(instance: str | None, all_instances: bool) -> None:
     """Stop the VPN container."""
-    with instance_context(_resolve_for_command(instance)):
-        with contextlib.suppress(Exception):
-            control.set_vpn_status("stopped", timeout=DOWN_TIMEOUT_S)
-        compose("down", timeout=COMPOSE_TIMEOUT_S)
-        click.echo("VPN stopped.")
+    targets = _resolve_targets(instance, all_instances)
+    if not targets:
+        click.echo("(no instances)")
+        return
+    failures = 0
+    for inst in targets:
+        with instance_context(inst):
+            try:
+                with contextlib.suppress(Exception):
+                    control.set_vpn_status("stopped", timeout=DOWN_TIMEOUT_S)
+                compose("down", timeout=COMPOSE_TIMEOUT_S)
+            except (Exception, SystemExit) as exc:  # per-instance: report and continue
+                _record_failure(inst.name, exc)
+                failures += 1
+                continue
+            click.echo(f"{inst.name}: VPN stopped." if all_instances else "VPN stopped.")
+    if failures:
+        raise SystemExit(1)
 
 
 @main.command()
@@ -669,16 +683,33 @@ def rm(instance: str | None, force: bool) -> None:
 
 @main.command()
 @add_instance_options()
+@all_option
 @click.option("-f", "--follow", is_flag=True, help="Follow log output")
 @click.option("-n", "--tail", default="50", help="Number of lines to show")
-def logs(instance: str | None, follow: bool, tail: str) -> None:
+def logs(instance: str | None, all_instances: bool, follow: bool, tail: str) -> None:
     """Show container logs."""
-    with instance_context(_resolve_for_command(instance)):
-        args: list[str] = ["logs"]
-        if follow:
-            args.append("-f")
-        args.extend(["--tail", tail, current_instance().container])
-        compose(*args)
+    if all_instances and follow:
+        raise click.UsageError("--follow cannot be used with --all.")
+    targets = _resolve_targets(instance, all_instances)
+    if not targets:
+        click.echo("(no instances)")
+        return
+    failures = 0
+    for inst in targets:
+        with instance_context(inst):
+            try:
+                args: list[str] = ["logs"]
+                if follow:
+                    args.append("-f")
+                args.extend(["--tail", tail, current_instance().container])
+                if all_instances:
+                    click.echo(f"== {inst.name} ==")
+                compose(*args)
+            except (Exception, SystemExit) as exc:  # per-instance: report and continue
+                _record_failure(inst.name, exc)
+                failures += 1
+    if failures:
+        raise SystemExit(1)
 
 
 def _kv(label: str, value: str, color: str | None = None) -> None:
@@ -690,8 +721,75 @@ def _kv(label: str, value: str, color: str | None = None) -> None:
         click.echo(text)
 
 
+def _status_json_failed(doc: dict[str, object]) -> bool:
+    """Whether a status document trips the exit-1 rules: leak, or unreachable
+    control server while the container runs/restarts."""
+    if doc["leak"]:
+        return True
+    control_doc = doc["control_server"]
+    return (
+        doc["state"] in ("running", "starting")
+        and isinstance(control_doc, dict)
+        and not control_doc.get("enabled")
+        and bool(doc["last_error"])
+    )
+
+
+def _print_human_status(size: int, no_speedtest: bool) -> None:
+    """Human status body for the active instance (raises on failure, as before)."""
+    state = container_status()
+    if not state:
+        click.echo(f"Container '{current_instance().container}' not found.")
+        raise click.ClickException(f"Container '{current_instance().container}' is not running.")
+
+    container = current_instance().container
+    _kv("Container", f"{container} ({state})")
+
+    try:
+        vpn = control.get_vpn_status()
+        _kv("Tunnel", vpn, "red" if vpn == "stopped" else None)
+    except control.ControlError:
+        pass
+    try:
+        dns = control.get_dns_status()
+        _kv("DNS", dns, "red" if dns == "stopped" else None)
+    except control.ControlError:
+        pass
+    try:
+        port = control.get_port_forward()
+        if port:
+            _kv("Port fwd", str(port))
+    except control.ControlError:
+        pass
+
+    current, reachable = _runtime_selection_or_error()
+    if current and current.provider:
+        click.echo()
+        _kv("Provider", current.provider)
+        _kv("Protocol", current.protocol or "?")
+        if current.country:
+            loc = ", ".join(filter(None, [current.city, current.country]))
+            _kv("Location", loc)
+    else:
+        click.echo()
+        _kv("Provider", "unknown — is gluetun's control server reachable?")
+
+    if state == "running":
+        click.echo()
+        verified = finish_connection(
+            expected_country=current.country if current and current.country else None,
+            speedtest=not no_speedtest,
+            size=size,
+        )
+        if not verified:
+            raise SystemExit(1)
+    if state in ("running", "starting") and not reachable:
+        raise SystemExit(1)
+
+
 @main.command()
 @add_instance_options()
+@all_option
 @click.option(
     "-s",
     "--size",
@@ -707,79 +805,54 @@ def _kv(label: str, value: str, color: str | None = None) -> None:
     is_flag=True,
     help="Machine-readable status (single-line JSON)",
 )
-def status(instance: str | None, size: int, no_speedtest: bool, json_output: bool) -> None:
+def status(
+    instance: str | None, size: int, no_speedtest: bool, json_output: bool, all_instances: bool
+) -> None:
     """Show container state, effective selection, public IP, and speed test.
 
     Exit codes (M9): 0 healthy/stopped · 1 leak, unreachable control server
     (while the container runs/restarts), or verification failure (human mode)
     · 2 usage. ``--json`` exits 0 on an inconclusive probe — probe health is
-    reported in ``last_error``, never conflated with a leak.
+    reported in ``last_error``, never conflated with a leak. With ``--all``,
+    failures are reported per instance and the exit code reflects the worst
+    one; ``--json`` emits an ``{"instances": [...]}`` envelope.
     """
+    targets = _resolve_targets(instance, all_instances)
+    if all_instances:
+        if json_output:
+            docs = []
+            for inst in targets:
+                with instance_context(inst):
+                    docs.append(_status_doc())
+            click.echo(json.dumps({"instances": docs}))
+            if any(_status_json_failed(doc) for doc in docs):
+                raise SystemExit(1)
+            return
+        if not targets:
+            click.echo("(no instances)")
+            return
+        failures = 0
+        for index, inst in enumerate(targets):
+            if index:
+                click.echo()
+            click.echo(f"== {inst.name} ==")
+            with instance_context(inst):
+                try:
+                    _print_human_status(size, no_speedtest)
+                except (Exception, SystemExit) as exc:  # per-instance: report and continue
+                    _record_failure(inst.name, exc)
+                    failures += 1
+        if failures:
+            raise SystemExit(1)
+        return
     with instance_context(_resolve_for_command(instance)):
         if json_output:
             doc = _status_doc()
             click.echo(json.dumps(doc))
-            control_doc = doc["control_server"]
-            if doc["leak"]:
-                raise SystemExit(1)
-            if (
-                doc["state"] in ("running", "starting")
-                and isinstance(control_doc, dict)
-                and not control_doc.get("enabled")
-                and doc["last_error"]
-            ):
+            if _status_json_failed(doc):
                 raise SystemExit(1)
             return
-        state = container_status()
-        if not state:
-            click.echo(f"Container '{current_instance().container}' not found.")
-            raise click.ClickException(
-                f"Container '{current_instance().container}' is not running."
-            )
-
-        container = current_instance().container
-        _kv("Container", f"{container} ({state})")
-
-        try:
-            vpn = control.get_vpn_status()
-            _kv("Tunnel", vpn, "red" if vpn == "stopped" else None)
-        except control.ControlError:
-            pass
-        try:
-            dns = control.get_dns_status()
-            _kv("DNS", dns, "red" if dns == "stopped" else None)
-        except control.ControlError:
-            pass
-        try:
-            port = control.get_port_forward()
-            if port:
-                _kv("Port fwd", str(port))
-        except control.ControlError:
-            pass
-
-        current, reachable = _runtime_selection_or_error()
-        if current and current.provider:
-            click.echo()
-            _kv("Provider", current.provider)
-            _kv("Protocol", current.protocol or "?")
-            if current.country:
-                loc = ", ".join(filter(None, [current.city, current.country]))
-                _kv("Location", loc)
-        else:
-            click.echo()
-            _kv("Provider", "unknown — is gluetun's control server reachable?")
-
-        if state == "running":
-            click.echo()
-            verified = finish_connection(
-                expected_country=current.country if current and current.country else None,
-                speedtest=not no_speedtest,
-                size=size,
-            )
-            if not verified:
-                raise SystemExit(1)
-        if state in ("running", "starting") and not reachable:
-            raise SystemExit(1)
+        _print_human_status(size, no_speedtest)
 
 
 @main.command()
