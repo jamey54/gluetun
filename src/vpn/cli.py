@@ -11,6 +11,7 @@ import os
 import sys
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, NoReturn, TypeVar
 
 import click
@@ -43,6 +44,7 @@ from vpn.docker import (
     container_image,
     container_running,
     container_status,
+    remove_container,
     run,
 )
 from vpn.instance import (
@@ -50,6 +52,7 @@ from vpn.instance import (
     Instance,
     allocate_free_port,
     current_instance,
+    delete_instance_state,
     ensure_compose_file,
     env_lookup,
     instance_context,
@@ -579,6 +582,37 @@ def down(instance: str | None) -> None:
             control.set_vpn_status("stopped", timeout=DOWN_TIMEOUT_S)
         compose("down", timeout=COMPOSE_TIMEOUT_S)
         click.echo("VPN stopped.")
+
+
+@main.command()
+@add_instance_options()
+@click.option(
+    "-f",
+    "--force",
+    is_flag=True,
+    help="Remove even when consumers share the instance's network",
+)
+def rm(instance: str | None, force: bool) -> None:
+    """Remove the instance's container and delete its registry state."""
+    inst = _resolve_for_command(instance)
+    name = inst.name
+    if name not in discovery._known_names():
+        raise click.ClickException(f"Unknown instance '{name}'.")
+    consumers = discovery.consumers_of(name)
+    if consumers and not force:
+        raise click.ClickException(
+            f"Instance '{name}' is shared by: {', '.join(consumers)}. "
+            "Re-run with --force to remove it anyway."
+        )
+    with instance_context(inst):
+        with contextlib.suppress(Exception):
+            control.set_vpn_status("stopped", timeout=DOWN_TIMEOUT_S)
+        if Path(inst.compose_file).exists():
+            compose("down", timeout=COMPOSE_TIMEOUT_S)
+        else:
+            remove_container(name)
+    delete_instance_state(name)
+    click.echo(f"Instance '{name}' removed.")
 
 
 @main.command()

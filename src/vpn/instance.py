@@ -17,13 +17,13 @@ Isolation invariants:
   name explicitly.
 """
 
+import contextlib
 import json
 import os
 import re
 import shutil
 import socket
 from collections.abc import Iterator
-import contextlib
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
