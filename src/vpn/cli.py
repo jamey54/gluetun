@@ -199,13 +199,65 @@ def _resolve_for_command(
                 raise click.UsageError(
                     f"GLUETUN_CTL_PORT must be a port number, got {env_port!r}"
                 ) from None
-    if port is None and read_registry(base.name) is None:
-        published = container_control_port(name=base.name)
-        if published is not None:
-            port = published
-    if port is not None and port != base.control_port:
+    if port is None:
+        return _apply_published_fallback(base)
+    if port != base.control_port:
         base = replace(base, control_port=port)
     return base
+
+
+def all_option(func: F) -> F:
+    """Flag decorator for commands that can act on every known instance.
+
+    Apply it below @add_instance_options so --instance stays listed first in
+    help output. Commands receiving it take an ``all_instances`` parameter.
+    """
+    return click.option(
+        "--all",
+        "all_instances",
+        is_flag=True,
+        help="Act on all known instances instead of one",
+    )(func)
+
+
+def _apply_published_fallback(base: Instance) -> Instance:
+    """Point a registry-less instance at its published control port, if any."""
+    if read_registry(base.name) is None:
+        published = container_control_port(name=base.name)
+        if published is not None and published != base.control_port:
+            return replace(base, control_port=published)
+    return base
+
+
+def _resolve_targets(instance: str | None, all_instances: bool) -> list[Instance]:
+    """Resolve one instance, or every known instance for --all (sorted by name).
+
+    --all conflicts with --instance; it ignores GLUETUN_INSTANCE and never
+    prompts. Registry-less targets fall back to their published control port,
+    mirroring single-instance resolution.
+    """
+    if all_instances:
+        if instance is not None:
+            raise click.UsageError("--instance and --all are mutually exclusive.")
+        names = sorted(discovery._known_names())
+        targets = [_apply_published_fallback(resolve_instance(name)) for name in names]
+        return targets
+    return [_resolve_for_command(instance)]
+
+
+def _record_failure(name: str, exc: BaseException) -> None:
+    """Report one per-instance failure inside an --all loop (never raises).
+
+    String SystemExit codes (e.g. compose errors) carry the message; integer
+    codes (e.g. an unverified status) were already reported inline.
+    """
+    if isinstance(exc, SystemExit):
+        if isinstance(exc.code, str) and exc.code:
+            click.echo(f"{name}: {exc.code}", err=True)
+    elif isinstance(exc, click.ClickException):
+        click.echo(f"{name}: Error: {exc.message}", err=True)
+    else:
+        click.echo(f"{name}: Error: {exc}", err=True)
 
 
 def finish_connection(
