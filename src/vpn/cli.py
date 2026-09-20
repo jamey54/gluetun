@@ -650,17 +650,8 @@ def down(instance: str | None, all_instances: bool) -> None:
         raise SystemExit(1)
 
 
-@main.command()
-@add_instance_options()
-@click.option(
-    "-f",
-    "--force",
-    is_flag=True,
-    help="Remove even when consumers share the instance's network",
-)
-def rm(instance: str | None, force: bool) -> None:
-    """Remove the instance's container and delete its registry state."""
-    inst = _resolve_for_command(instance)
+def _remove_one(inst: Instance, force: bool) -> None:
+    """Remove one resolved instance: guard, stop, compose down, delete state."""
     name = inst.name
     if name not in discovery._known_names():
         raise click.ClickException(f"Unknown instance '{name}'.")
@@ -679,6 +670,35 @@ def rm(instance: str | None, force: bool) -> None:
             remove_container(name)
     delete_instance_state(name)
     click.echo(f"Instance '{name}' removed.")
+
+
+@main.command()
+@add_instance_options()
+@all_option
+@click.option(
+    "-f",
+    "--force",
+    is_flag=True,
+    help="Remove even when consumers share the instance's network",
+)
+def rm(instance: str | None, force: bool, all_instances: bool) -> None:
+    """Remove the instance's container and delete its registry state."""
+    targets = _resolve_targets(instance, all_instances)
+    if not all_instances:
+        _remove_one(targets[0], force)
+        return
+    if not targets:
+        click.echo("(no instances)")
+        return
+    failures = 0
+    for inst in targets:
+        try:
+            _remove_one(inst, force)
+        except (Exception, SystemExit) as exc:  # per-instance: report and continue
+            _record_failure(inst.name, exc)
+            failures += 1
+    if failures:
+        raise SystemExit(1)
 
 
 @main.command()
@@ -989,38 +1009,72 @@ def ls(instance: str | None, json_output: bool) -> None:
 
 @main.command()
 @add_instance_options()
+@all_option
 @click.argument("action", required=False, type=click.Choice(["on", "off"]))
-def dns(instance: str | None, action: str | None) -> None:
+def dns(instance: str | None, all_instances: bool, action: str | None) -> None:
     """Show or toggle the DNS-over-TLS resolver."""
-    with instance_context(_resolve_for_command(instance)):
-        if action is None:
+    targets = _resolve_targets(instance, all_instances)
+    if not targets:
+        click.echo("(no instances)")
+        return
+    failures = 0
+    for inst in targets:
+        with instance_context(inst):
             try:
-                status = control.get_dns_status()
-                click.echo(f"DNS: {status}")
-            except control.ControlError as exc:
-                raise click.ClickException(
-                    f"Cannot reach control server: {exc.message}"
-                ) from None
-            return
-        target = "running" if action == "on" else "stopped"
-        try:
-            control.set_dns_status(target)
-        except control.ControlError as exc:
-            raise click.ClickException(
-                f"Cannot reach control server: {exc.message}"
-            ) from None
-        click.echo(f"DNS {target}.")
+                if action is None:
+                    try:
+                        dns_status = control.get_dns_status()
+                    except control.ControlError as exc:
+                        raise click.ClickException(
+                            f"Cannot reach control server: {exc.message}"
+                        ) from None
+                    click.echo(
+                        f"{inst.name}: DNS: {dns_status}" if all_instances else f"DNS: {dns_status}"
+                    )
+                else:
+                    target = "running" if action == "on" else "stopped"
+                    try:
+                        control.set_dns_status(target)
+                    except control.ControlError as exc:
+                        raise click.ClickException(
+                            f"Cannot reach control server: {exc.message}"
+                        ) from None
+                    click.echo(
+                        f"{inst.name}: DNS {target}." if all_instances else f"DNS {target}."
+                    )
+            except (Exception, SystemExit) as exc:  # per-instance: report and continue
+                _record_failure(inst.name, exc)
+                failures += 1
+    if failures:
+        raise SystemExit(1)
 
 
 @main.command()
 @add_instance_options()
-def update(instance: str | None) -> None:
+@all_option
+def update(instance: str | None, all_instances: bool) -> None:
     """Trigger a server list update."""
-    with instance_context(_resolve_for_command(instance)):
-        try:
-            control.trigger_updater()
-        except control.ControlError as exc:
-            raise click.ClickException(
-                f"Cannot reach control server: {exc.message}"
-            ) from None
-        click.echo("Server list update triggered.")
+    targets = _resolve_targets(instance, all_instances)
+    if not targets:
+        click.echo("(no instances)")
+        return
+    failures = 0
+    for inst in targets:
+        with instance_context(inst):
+            try:
+                try:
+                    control.trigger_updater()
+                except control.ControlError as exc:
+                    raise click.ClickException(
+                        f"Cannot reach control server: {exc.message}"
+                    ) from None
+                click.echo(
+                    f"{inst.name}: Server list update triggered."
+                    if all_instances
+                    else "Server list update triggered."
+                )
+            except (Exception, SystemExit) as exc:  # per-instance: report and continue
+                _record_failure(inst.name, exc)
+                failures += 1
+    if failures:
+        raise SystemExit(1)
