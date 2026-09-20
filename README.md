@@ -64,14 +64,14 @@ You only need to set credentials for providers you actually use.
 | `vpn --version` | Print the exact version (e.g. `vpn 0.2.7`) and exit `0` — derived from `src/vpn/version.py`, kept in sync with `pyproject.toml` |
 | `vpn up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `vpn connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
-| `vpn status [--instance NAME] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
+| `vpn status [--instance NAME] [--all] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
 | `vpn ls [--instance NAME] [--json]` | List instances (registry + `vpn-*` compose containers): state, selection, control port, consumers, start time |
-| `vpn down [--instance NAME]` | Stop the VPN container (registry record kept; shows as `absent` in `vpn ls`) |
-| `vpn rm [--instance NAME] [-f/--force]` | Remove the container/network and delete the registry record, compose file, and lockfile; refuses when consumers share the instance's network unless `--force` |
-| `vpn logs [--instance NAME] [-f] [-n N]` | Show container logs |
+| `vpn down [--instance NAME] [--all]` | Stop the VPN container (registry record kept; shows as `absent` in `vpn ls`) |
+| `vpn rm [--instance NAME] [--all] [-f/--force]` | Remove the container/network and delete the registry record, compose file, and lockfile; refuses when consumers share the instance's network unless `--force` |
+| `vpn logs [--instance NAME] [--all] [-f] [-n N]` | Show container logs |
 | `vpn bench [--instance NAME] [--connect]` | Benchmark locations and report the fastest (keeps current unless `--connect`) |
-| `vpn dns [--instance NAME] [on\|off]` | Show or toggle the DNS-over-TLS resolver |
-| `vpn update [--instance NAME]` | Trigger a server list update |
+| `vpn dns [--instance NAME] [--all] [on\|off]` | Show or toggle the DNS-over-TLS resolver |
+| `vpn update [--instance NAME] [--all]` | Trigger a server list update |
 
 `--instance` is the first option of every command. Set `GLUETUN_INSTANCE` to avoid repeating it. See [Instances](#instances).
 
@@ -227,6 +227,28 @@ $ vpn ls
 INSTANCE   STATE    CONTROL  SELECTION                             CONSUMERS        STARTED
 gluetun    running  8000     surfshark/wireguard → Germany         firefox-app      2026-09-19 09:00:00
 ```
+
+### Acting on all instances
+
+`status`, `down`, `rm`, `logs`, `dns`, and `update` accept `--all` to act on every known instance (alphabetical) instead of one:
+
+```text
+$ vpn status --all --no-speedtest
+== gluetun ==
+  Container   gluetun (running)
+  ...
+== plan-a-gluetun ==
+  Container   plan-a-gluetun (stopped)
+```
+
+Rules:
+
+- `--instance` and `--all` together are a usage error (exit `2`). `--all` ignores `GLUETUN_INSTANCE` and never prompts.
+- `up`, `connect`, and `bench` take no `--all`: applying one selection to every instance is never what you want — target them explicitly. `ls` already lists everything.
+- Failures are per instance: the run continues past a failing instance, reports it as `<name>: <error>`, and exits `1` when any instance failed. With no known instances, commands print `(no instances)` and exit `0`.
+- `status --all --json` emits an `{"instances": [...]}` envelope (one status document per instance, same schema as `status --json`); it exits `1` when any instance trips the single-instance exit-1 rules.
+- `logs --all` prints a `== <name> ==` header per instance; `--follow` cannot be combined with `--all` (exit `2`).
+- `rm --all` applies the consumer guard per instance: shared instances are skipped (reported, exit `1`) unless `--force` is passed.
 
 ## Configuration
 
