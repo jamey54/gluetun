@@ -66,7 +66,8 @@ You only need to set credentials for providers you actually use.
 | `vpn connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
 | `vpn status [--instance NAME] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
 | `vpn ls [--instance NAME] [--json]` | List instances (registry + `vpn-*` compose containers): state, selection, control port, consumers, start time |
-| `vpn down [--instance NAME]` | Stop the VPN container |
+| `vpn down [--instance NAME]` | Stop the VPN container (registry record kept; shows as `absent` in `vpn ls`) |
+| `vpn rm [--instance NAME] [-f/--force]` | Remove the container/network and delete the registry record, compose file, and lockfile; refuses when consumers share the instance's network unless `--force` |
 | `vpn logs [--instance NAME] [-f] [-n N]` | Show container logs |
 | `vpn bench [--instance NAME] [--connect]` | Benchmark locations and report the fastest (keeps current unless `--connect`) |
 | `vpn dns [--instance NAME] [on\|off]` | Show or toggle the DNS-over-TLS resolver |
