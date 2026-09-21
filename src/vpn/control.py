@@ -8,6 +8,7 @@ filters in one shot.
 """
 
 import copy
+import http.client
 import json
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -68,6 +69,12 @@ def _request(
         raise ControlError(exc.code, message or exc.reason.__str__()) from exc
     except URLError as exc:
         raise ControlError(None, str(exc.reason)) from exc
+    except (OSError, http.client.HTTPException) as exc:
+        # urlopen lets raw socket errors (e.g. ConnectionResetError when
+        # gluetun's control server is still booting) and http.client errors
+        # (e.g. RemoteDisconnected, BadStatusLine) escape unwrapped — map
+        # them to ControlError so callers stay friendly (no tracebacks).
+        raise ControlError(None, str(exc) or type(exc).__name__) from exc
 
 
 def _parse_json(body: str, path: str) -> dict[str, Any]:

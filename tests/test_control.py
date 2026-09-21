@@ -1,5 +1,6 @@
 """Tests for the control server client and settings document building."""
 
+import http.client
 import io
 import json
 import urllib.error
@@ -144,6 +145,47 @@ def test_timeout_error_wrapped(monkeypatch):
         control.get_settings()
     assert excinfo.value.status is None
     assert "timed out" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ConnectionResetError(104, "Connection reset by peer"),
+        BrokenPipeError(32, "Broken pipe"),
+        OSError("connection refused"),
+    ],
+)
+def test_raw_os_errors_wrapped_as_control_error(monkeypatch, error):
+    """Raw socket errors (never wrapped by urlopen) must not leak as tracebacks."""
+
+    def boom(request: Any, timeout: float = 10) -> None:
+        raise error
+
+    monkeypatch.setattr(control, "urlopen", boom)
+    with pytest.raises(control.ControlError) as excinfo:
+        control.get_settings()
+    assert excinfo.value.status is None
+    assert str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        http.client.RemoteDisconnected("Remote end closed connection without response"),
+        http.client.BadStatusLine("oops"),
+    ],
+)
+def test_http_client_errors_wrapped_as_control_error(monkeypatch, error):
+    """http.client errors escape urlopen unwrapped — map them too."""
+
+    def boom(request: Any, timeout: float = 10) -> None:
+        raise error
+
+    monkeypatch.setattr(control, "urlopen", boom)
+    with pytest.raises(control.ControlError) as excinfo:
+        control.get_settings()
+    assert excinfo.value.status is None
+    assert str(excinfo.value)
 
 
 def test_get_settings_invalid_json_raises(monkeypatch):
