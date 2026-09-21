@@ -1,8 +1,8 @@
-# vpn
+# epoxy
 
-Small Python CLI for managing a [Gluetun](https://github.com/qdm12/gluetun) VPN container.
+Small Python CLI for managing VPN containers, backed by [Gluetun](https://github.com/qdm12/gluetun) images.
 Container lifecycle goes through docker compose; every selection change (provider, protocol,
-country, city) hot-swaps at runtime through gluetun's control server
+country, city) hot-swaps at runtime through the container's control server
 (`GET/PUT /v1/vpn/settings`) — single-digit-second switches, no container restarts.
 
 ## Supported providers
@@ -12,12 +12,12 @@ country, city) hot-swaps at runtime through gluetun's control server
 | Surfshark | ✓         | ✓       |
 | ProtonVPN | ✓         | ✓       |
 
-All providers can be active simultaneously — their servers appear side by side in `vpn connect --list` and the picker, tagged with their protocol. A provider's protocol is listed only when its credentials are present in `.env`.
+All providers can be active simultaneously — their servers appear side by side in `epoxy connect --list` and the picker, tagged with their protocol. A provider's protocol is listed only when its credentials are present in `.env`.
 
 ## Requirements
 
 - Python 3.10+
-- A current gluetun image (the settings route is mandatory; old images are not supported — run `vpn up --pull` to update)
+- A current Gluetun image (`qmcgaw/gluetun:latest`; the settings route is mandatory; old images are not supported — run `epoxy up --pull` to update)
 - [click](https://click.palletsprojects.com/), [prompt_toolkit](https://python-prompt-toolkit.readthedocs.io/) and [rich](https://rich.readthedocs.io/) — installed automatically via `pip install .`
 
 ## Install
@@ -26,14 +26,14 @@ All providers can be active simultaneously — their servers appear side by side
 pip install .
 ```
 
-This installs the `vpn` command (and its dependencies) into your environment.
+This installs the `epoxy` command (and its dependencies) into your environment.
 
 ## Shell completion
 
 Add to your `.bashrc`:
 
 ```bash
-eval "$(_VPN_COMPLETE=bash_source vpn)"
+eval "$(_EPOXY_COMPLETE=bash_source epoxy)"
 ```
 
 Reload your shell and tab completion works for commands and options.
@@ -61,19 +61,19 @@ You only need to set credentials for providers you actually use.
 
 | Command | Description |
 |---------|-------------|
-| `vpn --version` | Print the exact version (e.g. `vpn 0.2.7`) and exit `0` — derived from `src/vpn/version.py`, kept in sync with `pyproject.toml` |
-| `vpn up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest]` | Start (or verify) the VPN; apply any requested location via hot-swap |
-| `vpn connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
-| `vpn status [--instance NAME] [--all] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
-| `vpn ls [--instance NAME] [--json]` | List instances (registry + `vpn-*` compose containers): state, selection, control port, consumers, start time |
-| `vpn down [--instance NAME] [--all]` | Stop the VPN container (registry record kept; shows as `absent` in `vpn ls`) |
-| `vpn rm [--instance NAME] [--all] [-f/--force]` | Remove the container/network and delete the registry record, compose file, and lockfile; refuses when consumers share the instance's network unless `--force` |
-| `vpn logs [--instance NAME] [--all] [-f] [-n N]` | Show container logs |
-| `vpn bench [--instance NAME] [--connect]` | Benchmark locations and report the fastest (keeps current unless `--connect`) |
-| `vpn dns [--instance NAME] [--all] [on\|off]` | Show or toggle the DNS-over-TLS resolver |
-| `vpn update [--instance NAME] [--all]` | Trigger a server list update |
+| `epoxy --version` | Print the exact version (e.g. `epoxy 0.3.0`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
+| `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest]` | Start (or verify) the VPN; apply any requested location via hot-swap |
+| `epoxy connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
+| `epoxy status [--instance NAME] [--all] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
+| `epoxy ls [--instance NAME] [--json]` | List instances (registry + `epoxy-*` compose containers): state, selection, control port, consumers, start time |
+| `epoxy down [--instance NAME] [--all]` | Stop the VPN container (registry record kept; shows as `absent` in `epoxy ls`) |
+| `epoxy rm [--instance NAME] [--all] [-f/--force]` | Remove the container/network and delete the registry record, compose file, and lockfile; refuses when consumers share the instance's network unless `--force` |
+| `epoxy logs [--instance NAME] [--all] [-f] [-n N]` | Show container logs |
+| `epoxy bench [--instance NAME] [--connect]` | Benchmark locations and report the fastest (keeps current unless `--connect`) |
+| `epoxy dns [--instance NAME] [--all] [on\|off]` | Show or toggle the DNS-over-TLS resolver |
+| `epoxy update [--instance NAME] [--all]` | Trigger a server list update |
 
-`--instance` is the first option of every command. Set `GLUETUN_INSTANCE` to avoid repeating it. See [Instances](#instances).
+`--instance` is the first option of every command. Set `EPOXY_INSTANCE` to avoid repeating it. See [Instances](#instances).
 
 ### up vs connect
 
@@ -95,13 +95,13 @@ Both commands share the same target resolution:
 WireGuard credentials: Surfshark admin panel → Manual setup → WireGuard.
 
 ```bash
-vpn up --provider surfshark
+epoxy up --provider surfshark
 ```
 
 OpenVPN credentials: admin panel → Manual setup → OpenVPN config (service username/password).
 
 ```bash
-vpn connect --protocol openvpn   # switch the running tunnel's protocol
+epoxy connect --protocol openvpn   # switch the running tunnel's protocol
 ```
 
 ### ProtonVPN
@@ -109,22 +109,22 @@ vpn connect --protocol openvpn   # switch the running tunnel's protocol
 WireGuard credentials: generate at [account.proton.me/vpn/WireGuard](https://account.proton.me/vpn/WireGuard).
 
 ```bash
-vpn up --provider protonvpn
+epoxy up --provider protonvpn
 ```
 
 OpenVPN credentials: [account.proton.me/vpn/OpenVPN](https://account.proton.me/vpn/OpenVPN) → OpenVPN username / password.
 
 ```bash
-vpn up --provider protonvpn --protocol openvpn
+epoxy up --provider protonvpn --protocol openvpn
 ```
 
 `--protocol` defaults to the running one, else wireguard. Credentials for whichever pair you pick are injected from `.env` into the settings document, so provider and protocol switches never require a restart.
 
 ## Server selection
 
-`vpn connect --list` lists all servers in an aligned table (provider, protocol, country, city, server) for every provider/protocol pair with valid credentials in `.env`.
+`epoxy connect --list` lists all servers in an aligned table (provider, protocol, country, city, server) for every provider/protocol pair with valid credentials in `.env`.
 
-`vpn connect` with no arguments opens an interactive picker showing the same columns, with live filtering and keyboard navigation:
+`epoxy connect` with no arguments opens an interactive picker showing the same columns, with live filtering and keyboard navigation:
 
 - **Filtering** — type to filter, matching any column (accent-insensitive). `Tab`/`Shift-Tab` cycle an active filter *column* (Provider, Protocol, Country, City); while one is active, typing matches only within it and `←`/`→` cycle through that column's distinct values (e.g. `Tab`, `→` — one `Tab` activates the Provider column, then `→` cycles ProtonVPN → Surfshark; no typing needed). `Esc` exits column mode (or clears the query).
 - **Navigation** — `↑`/`↓` or `Ctrl-N`/`Ctrl-P` to move, `PgUp`/`PgDn` for pages, `Home`/`End` for first/last, `Enter` to select, `Ctrl-C`/`Ctrl-Q` to cancel.
@@ -135,37 +135,37 @@ The selected row's provider *and* protocol are hot-swapped immediately.
 
 Selections made through the control server live at **runtime only** — `.env` stays secrets-only. Consequences:
 
-- A hot-swapped location survives container restarts (`restart: always`) but is lost when the container is recreated (`vpn up --pull`, `vpn up --recreate`) or removed (`vpn down`); recreation reverts to whatever the compose file interpolates from `.env`.
-- `vpn status` shows the effective (runtime) selection; when it differs from the selection baked into the container's env at create time, `vpn status --json` reports `"drift": true`.
-- A fresh `vpn up --country/--city` starts the container first and applies the location via hot-swap, waiting up to ~15s for the just-started control server; a server that never comes up is a friendly `Could not switch to ...` error (exit 1), never a traceback.
+- A hot-swapped location survives container restarts (`restart: always`) but is lost when the container is recreated (`epoxy up --pull`, `epoxy up --recreate`) or removed (`epoxy down`); recreation reverts to whatever the compose file interpolates from `.env`.
+- `epoxy status` shows the effective (runtime) selection; when it differs from the selection baked into the container's env at create time, `epoxy status --json` reports `"drift": true`.
+- A fresh `epoxy up --country/--city` starts the container first and applies the location via hot-swap, waiting up to ~15s for the just-started control server; a server that never comes up is a friendly `Could not switch to ...` error (exit 1), never a traceback.
 
 ## Connection verification
 
-Verification is **leak-first**: a connection counts as up only when the exit IP observed from inside the container differs from the host's bare public IP. The bare IP is fetched host-side once per run (overridable with `VPN_REAL_IP` for testing; when unavailable, leak detection degrades to country heuristics only).
+Verification is **leak-first**: a connection counts as up only when the exit IP observed from inside the container differs from the host's bare public IP. The bare IP is fetched host-side once per run (overridable with `EPOXY_REAL_IP` for testing; when unavailable, leak detection degrades to country heuristics only).
 
-After connecting (and after every swap), the CLI probes the public IP from inside the container and reports one of three verdicts. The probe mirrors gluetun's resilient fetch: four echo services (ipinfo.io, Cloudflare `one.one.one.one/cdn-cgi/trace`, ifconfig.co, ip2location) are queried in parallel from inside the container and the most-agreed result wins, so a rate-limited provider (e.g. ipinfo returning HTTP 429) is absorbed by the rest instead of stalling the retry loop. The verdict notes via yellow when the IP was confirmed by a service other than ipinfo:
+After connecting (and after every swap), the CLI probes the public IP from inside the container and reports one of three verdicts. The probe mirrors the upstream resilient fetch: four echo services (ipinfo.io, Cloudflare `one.one.one.one/cdn-cgi/trace`, ifconfig.co, ip2location) are queried in parallel from inside the container and the most-agreed result wins, so a rate-limited provider (e.g. ipinfo returning HTTP 429) is absorbed by the rest instead of stalling the retry loop. The verdict notes via yellow when the IP was confirmed by a service other than ipinfo:
 
 - **Green** — real VPN exit in the requested country.
 - **Yellow warning** — real VPN exit, but it geolocates elsewhere than requested (common with provider "virtual locations"). You stay connected and the speed test still runs.
 - **Red / leak** — the exit IP equals your bare connection's IP; the speed test is skipped. When no exit IP can be read at all the connection is treated as unverified (no leak marker) and the speed test is skipped too.
 
-Swaps additionally exclude the previous exit IP from acceptance, so a failed swap that silently keeps routing through the old server is reported as `no reconnect` rather than mistaken for success. IP echo services report ISO 3166-1 alpha-2 codes (`AU`), normalized to full names before comparing. Country is advisory only: it never gates success — the IP change does. `vpn status` and a flag-free `vpn up` on an already-running instance compare against the instance's *running* country, so a drifting exit (e.g. after a virtual-location server was removed) shows as a yellow geo warning instead of a blind green.
+Swaps additionally exclude the previous exit IP from acceptance, so a failed swap that silently keeps routing through the old server is reported as `no reconnect` rather than mistaken for success. IP echo services report ISO 3166-1 alpha-2 codes (`AU`), normalized to full names before comparing. Country is advisory only: it never gates success — the IP change does. `epoxy status` and a flag-free `epoxy up` on an already-running instance compare against the instance's *running* country, so a drifting exit (e.g. after a virtual-location server was removed) shows as a yellow geo warning instead of a blind green.
 
 ## Speed test
 
-`up`, `connect` and `status` run a download speed test after a verified connection (green or yellow verdict). It downloads 25 MB from Cloudflare inside the container — all traffic goes through the VPN tunnel. Skip it per invocation with `--no-speedtest`, or change the size with `vpn status -s 100`. On a leak or unreadable IP, the speed test is skipped with a message.
+`up`, `connect` and `status` run a download speed test after a verified connection (green or yellow verdict). It downloads 25 MB from Cloudflare inside the container — all traffic goes through the VPN tunnel. Skip it per invocation with `--no-speedtest`, or change the size with `epoxy status -s 100`. On a leak or unreadable IP, the speed test is skipped with a message.
 
 ## Benchmark
 
-`vpn bench` benchmarks locations across **all credentialed providers/protocols** and reports the fastest. It does **not** connect by default — your current location is kept unless you pass `--connect`:
+`epoxy bench` benchmarks locations across **all credentialed providers/protocols** and reports the fastest. It does **not** connect by default — your current location is kept unless you pass `--connect`:
 
 ```bash
-vpn bench                        # every credentialed provider/protocol; keep current
-vpn bench --country Japan        # one country, every provider
-vpn bench --provider surfshark   # one provider's countries
-vpn bench --protocol openvpn     # one protocol, every provider
-vpn bench --connect              # benchmark, then connect to the fastest
-vpn bench -c 4                   # bench 4 candidates at once on temp containers
+epoxy bench                        # every credentialed provider/protocol; keep current
+epoxy bench --country Japan        # one country, every provider
+epoxy bench --provider surfshark   # one provider's countries
+epoxy bench --protocol openvpn     # one protocol, every provider
+epoxy bench --connect              # benchmark, then connect to the fastest
+epoxy bench -c 4                   # bench 4 candidates at once on temp containers
 ```
 
 How it runs:
@@ -187,29 +187,29 @@ Notes:
 
 ## Instances
 
-vpn 0.2 runs several independent Gluetun containers side by side, each its own *instance*. An instance is identified by a name — its docker container name — and owns:
+epoxy 0.3 runs several independent VPN containers side by side, each its own *instance*. An instance is identified by a name — its docker container name — and owns:
 
-- a container named exactly `<instance>` (compose project `vpn-<instance>`);
+- a container named exactly `<instance>` (compose project `epoxy-<instance>`);
 - a control server published on `127.0.0.1:<port>`;
-- a lockfile `~/.cache/vpn/locks/<instance>.lock` (swaps/benches serialize per instance only; different instances run concurrently);
+- a lockfile `~/.cache/epoxy/locks/<instance>.lock` (swaps/benches serialize per instance only; different instances run concurrently);
 - an optional `--env-file` replacing `.env` for that instance;
-- a registry record `~/.cache/vpn/instances/<instance>.json` (control port + env file).
+- a registry record `~/.cache/epoxy/instances/<instance>.json` (control port + env file).
 
-Every command requires an instance. Resolution order: `--instance NAME` → `GLUETUN_INSTANCE` env var → interactive choice → error. On an interactive terminal with no `--instance` and no env var, commands that target an instance (`status`, `down`, `connect`, `logs`, `bench`, `dns`, `update`, `up`) ask you to pick one: the sole known instance is used automatically, otherwise a picker lists them by name and state. Non-interactive runs (pipes, scripts) keep the usage error — automation must always name its instance explicitly. `vpn ls` always lists everything and never prompts.
+Every command requires an instance. Resolution order: `--instance NAME` → `EPOXY_INSTANCE` env var → interactive choice → error. On an interactive terminal with no `--instance` and no env var, commands that target an instance (`status`, `down`, `connect`, `logs`, `bench`, `dns`, `update`, `up`) ask you to pick one: the sole known instance is used automatically, otherwise a picker lists them by name and state. Non-interactive runs (pipes, scripts) keep the usage error — automation must always name its instance explicitly. `epoxy ls` always lists everything and never prompts.
 
-Container names are **exact matches only**: vpn never touches a container other than the one named after the instance, so a shared gluetun owned by another tool is never matched.
+Container names are **exact matches only**: epoxy never touches a container other than the one named after the instance, so a shared container owned by another tool is never matched.
 
 ### Control port
 
 Each instance publishes the control server on `127.0.0.1:<port>`. **Every** command resolves the port in this order:
 
 1. `--ctl-port HOST_PORT`
-2. `GLUETUN_CTL_PORT` (from the instance's env)
-3. the registry record (`~/.cache/vpn/instances/<instance>.json`)
-4. a registry-less instance's *actually published* host port, read live from Docker — i.e. an imported or shared container vpn never created
+2. `EPOXY_CTL_PORT` (from the instance's env)
+3. the registry record (`~/.cache/epoxy/instances/<instance>.json`)
+4. a registry-less instance's *actually published* host port, read live from Docker — i.e. an imported or shared container created outside epoxy
 5. `8000` — only when the container has no published port
 
-`vpn up` on a brand-new instance auto-allocates a free port in `[8000, 9000]`, persists it to the registry, and writes it into the compose file. A registry-less container keeps its own port: `up` adopts it and every other command targets it, so a shared gluetun created outside vpn stays addressable — `vpn status --json` on such an instance reports its real `control_server.port` instead of a blind `8000`.
+`epoxy up` on a brand-new instance auto-allocates a free port in `[8000, 9000]`, persists it to the registry, and writes it into the compose file. A registry-less container keeps its own port: `up` adopts it and every other command targets it, so a shared container created outside epoxy stays addressable — `epoxy status --json` on such an instance reports its real `control_server.port` instead of a blind `8000`.
 
 `bench -c N` temporary one-off containers never publish host ports.
 
@@ -221,12 +221,12 @@ Every instance reads its env from `./.env` by default. For a dedicated instance,
 
 ### Listing instances
 
-`vpn ls [--json]` enumerates instances from the registry and from containers whose compose project starts with `vpn-`, reporting per-instance state, selection, control-server port, *consumers* — containers sharing the instance's network namespace (`NetworkMode == container:<instance>`; Docker records the reference as the container's name or its ID, both are matched) — and when each instance was started. Rows are ordered by start time, oldest instance first; instances without a start time (absent, or never started) sort last. `STARTED` is rendered in local time; under `--json` it is the raw RFC3339 timestamp (`"started_at"`), or `null` when unknown.
+`epoxy ls [--json]` enumerates instances from the registry and from containers whose compose project starts with `epoxy-`, reporting per-instance state, selection, control-server port, *consumers* — containers sharing the instance's network namespace (`NetworkMode == container:<instance>`; Docker records the reference as the container's name or its ID, both are matched) — and when each instance was started. Rows are ordered by start time, oldest instance first; instances without a start time (absent, or never started) sort last. `STARTED` is rendered in local time; under `--json` it is the raw RFC3339 timestamp (`"started_at"`), or `null` when unknown.
 
 ```text
-$ vpn ls
+$ epoxy ls
 INSTANCE   STATE    CONTROL  SELECTION                             CONSUMERS        STARTED
-gluetun    running  8000     surfshark/wireguard → Germany         firefox-app      2026-09-19 09:00:00
+epoxy    running  8000     surfshark/wireguard → Germany         firefox-app      2026-09-19 09:00:00
 ```
 
 ### Acting on all instances
@@ -234,17 +234,17 @@ gluetun    running  8000     surfshark/wireguard → Germany         firefox-app
 `status`, `down`, `rm`, `logs`, `dns`, and `update` accept `--all` to act on every known instance (alphabetical) instead of one:
 
 ```text
-$ vpn status --all --no-speedtest
-== gluetun ==
-  Container   gluetun (running)
+$ epoxy status --all --no-speedtest
+== epoxy ==
+  Container   epoxy (running)
   ...
-== plan-a-gluetun ==
-  Container   plan-a-gluetun (stopped)
+== plan-a-epoxy ==
+  Container   plan-a-epoxy (stopped)
 ```
 
 Rules:
 
-- `--instance` and `--all` together are a usage error (exit `2`). `--all` ignores `GLUETUN_INSTANCE` and never prompts.
+- `--instance` and `--all` together are a usage error (exit `2`). `--all` ignores `EPOXY_INSTANCE` and never prompts.
 - `up`, `connect`, and `bench` take no `--all`: applying one selection to every instance is never what you want — target them explicitly. `ls` already lists everything.
 - Failures are per instance: the run continues past a failing instance, reports it as `<name>: <error>`, and exits `1` when any instance failed. With no known instances, commands print `(no instances)` and exit `0`.
 - `status --all --json` emits an `{"instances": [...]}` envelope (one status document per instance, same schema as `status --json`); it exits `1` when any instance trips the single-instance exit-1 rules.
@@ -257,10 +257,10 @@ Secrets live in `.env` in the working directory (copy `.env.sample` to get start
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GLUETUN_INSTANCE` | *(required for scripts)* | Instance name; pass `--instance` or set this. Omitting both asks interactively on a terminal (pick from the known instances); non-interactive runs fail with a usage error. |
-| `GLUETUN_CTL_PORT` | unset | Control-server host port for the resolved instance (equivalent to `--ctl-port`) |
-| `GLUETUN_CACHE_TTL` | `3600` | Server cache TTL (seconds) |
-| `VPN_DEBUG` | unset | Set to enable debug output (same as `--debug`) |
+| `EPOXY_INSTANCE` | *(required for scripts)* | Instance name; pass `--instance` or set this. Omitting both asks interactively on a terminal (pick from the known instances); non-interactive runs fail with a usage error. |
+| `EPOXY_CTL_PORT` | unset | Control-server host port for the resolved instance (equivalent to `--ctl-port`) |
+| `EPOXY_CACHE_TTL` | `3600` | Server cache TTL (seconds) |
+| `EPOXY_DEBUG` | unset | Set to enable debug output (same as `--debug`) |
 
 ### Credentials
 
@@ -273,21 +273,21 @@ A provider/protocol pair only appears in listings and can only be started when a
 | ProtonVPN | WireGuard | `PROTONVPN_WIREGUARD_PRIVATE_KEY`, `PROTONVPN_WIREGUARD_ADDRESSES` (always `10.2.0.2/32`) | both |
 | ProtonVPN | OpenVPN | `PROTONVPN_OPENVPN_USER`, `PROTONVPN_OPENVPN_PASSWORD` | both |
 
-`HTTP_CONTROL_SERVER_API_KEY` (any random string) is **required** — it authenticates gluetun's HTTP control server, which the CLI exposes on `127.0.0.1:<port>` only (per instance, see [Instances](#instances)). The commands that mutate or select the runtime config (`up`, `connect`, `bench`) refuse to run without it; read-only commands (`status`, `logs`, `ls`, `dns`, `update`, `down`) don't gate on it.
+`HTTP_CONTROL_SERVER_API_KEY` (any random string) is **required** — it authenticates the container's HTTP control server, which the CLI exposes on `127.0.0.1:<port>` only (per instance, see [Instances](#instances)). The commands that mutate or select the runtime config (`up`, `connect`, `bench`) refuse to run without it; read-only commands (`status`, `logs`, `ls`, `dns`, `update`, `down`) don't gate on it.
 
 ### Set automatically
 
-These are managed by the CLI at container creation time — never define them yourself: `VPN_SERVICE_PROVIDER`, `VPN_TYPE`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `OPENVPN_USER`, `OPENVPN_PASSWORD` (mapped from your provider credentials). A location may be baked via `.env` `SERVER_COUNTRIES`/`SERVER_CITIES` (the compose template interpolates them); after creation, all *runtime* selection changes happen through the control server, and `vpn up` verifies a fresh start — or a `--recreate` — against the baked location when present.
+These are managed by the CLI at container creation time — never define them yourself: `VPN_SERVICE_PROVIDER`, `VPN_TYPE`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `OPENVPN_USER`, `OPENVPN_PASSWORD` (mapped from your provider credentials). A location may be baked via `.env` `SERVER_COUNTRIES`/`SERVER_CITIES` (the compose template interpolates them); after creation, all *runtime* selection changes happen through the control server, and `epoxy up` verifies a fresh start — or a `--recreate` — against the baked location when present.
 
 ## Consumer API (dockerstrator)
 
-This is the contract `dockerstrator` consumes from `vpn`. Stable schemas — additions only, never removals or renames.
+This is the contract `dockerstrator` consumes from `epoxy`. Stable schemas — additions only, never removals or renames.
 
 ### Instance identity and naming
 
-Instance names follow docker-safe rules (`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`); anything else is a usage error (exit `2`). The container name is **always** the instance name and is never derived from the compose project. The compose project is pinned to `vpn-<instance>` via `docker compose -p`, independent of the file location.
+Instance names follow docker-safe rules (`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`); anything else is a usage error (exit `2`). The container name is **always** the instance name and is never derived from the compose project. The compose project is pinned to `epoxy-<instance>` via `docker compose -p`, independent of the file location.
 
-Resolution order for every command: `--instance NAME` → `GLUETUN_INSTANCE` → interactive choice (TTY only) → error. There is no default instance; a non-interactive run with neither flag is a usage error (exit `2`).
+Resolution order for every command: `--instance NAME` → `EPOXY_INSTANCE` → interactive choice (TTY only) → error. There is no default instance; a non-interactive run with neither flag is a usage error (exit `2`).
 
 ### Exit codes
 
@@ -297,29 +297,29 @@ Resolution order for every command: `--instance NAME` → `GLUETUN_INSTANCE` →
 | `1`  | scripted error / VPN failed / leak (verdict in JSON under `--json`) |
 | `2`  | usage error |
 
-Other non-zero codes are unspecified. `vpn up` and `vpn connect` return `1` when the connection cannot be verified; `vpn status --json` returns `1` when `leak` is `true` or the control server is unreachable while the container is running/restarting; it returns `0` for any other emitted JSON (probe health failures are reported in `last_error`, never as a leak). `vpn bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run.
+Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` when the connection cannot be verified; `epoxy status --json` returns `1` when `leak` is `true` or the control server is unreachable while the container is running/restarting; it returns `0` for any other emitted JSON (probe health failures are reported in `last_error`, never as a leak). `epoxy bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run.
 
 ### The calls dockerstrator makes
 
 | Purpose | Command |
 |---------|---------|
-| Ensure shared gluetun is running (idempotent; verify-only when already up) | `vpn up --instance gluetun` |
-| Shared gluetun health probe | `vpn status --json` |
-| Capability probe (is vpn 0.2+ implemented?) | `vpn ls --json` (or `vpn --version` for the exact version) |
-| Create a dedicated instance (creds from `.env`) | `vpn up --instance <plan>-gluetun --provider P [--protocol T] [--country C] [--city Ci]` |
-| Verify a dedicated instance after create | `vpn status --instance <plan>-gluetun --json` |
-| Tear down when the plan container is removed | `vpn down --instance <plan>-gluetun` |
+| Ensure shared container is running (idempotent; verify-only when already up) | `epoxy up --instance epoxy` |
+| Shared container health probe | `epoxy status --json` |
+| Capability probe (is epoxy 0.3+ implemented?) | `epoxy ls --json` (or `epoxy --version` for the exact version) |
+| Create a dedicated instance (creds from `.env`) | `epoxy up --instance <plan>-epoxy --provider P [--protocol T] [--country C] [--city Ci]` |
+| Verify a dedicated instance after create | `epoxy status --instance <plan>-epoxy --json` |
+| Tear down when the plan container is removed | `epoxy down --instance <plan>-epoxy` |
 
-dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag, treat vpn as pre-0.2 and hide the *dedicated* gluetun option (shared-only falls back to plain `vpn up`). Since 0.2.4 every call names its instance explicitly (`--instance` or `GLUETUN_INSTANCE`) — there is no default instance anymore. dockerstrator keeps its own container inventory from `docker ps`; `vpn ls` is used only for instance/control-port/selection state.
+dockerstrator rule: if `epoxy ls --json` exits non-zero or reports an unknown flag, treat epoxy as pre-0.3 and hide the *dedicated* container option (shared-only falls back to plain `epoxy up`). Since 0.3.0 every call names its instance explicitly (`--instance` or `EPOXY_INSTANCE`) — there is no default instance anymore. dockerstrator keeps its own container inventory from `docker ps`; `epoxy ls` is used only for instance/control-port/selection state.
 
-`--json` output is deterministic single-line JSON on stdout (no colors, no progress). `--instance` filters `vpn ls` output to one instance.
+`--json` output is deterministic single-line JSON on stdout (no colors, no progress). `--instance` filters `epoxy ls` output to one instance.
 
-### `vpn status --json`
+### `epoxy status --json`
 
 ```json
 {
-  "instance": "gluetun",
-  "container_name": "gluetun",
+  "instance": "epoxy",
+  "container_name": "epoxy",
   "image": "qmcgaw/gluetun:latest",
   "state": "running",
   "selection": { "provider": "surfshark", "protocol": "wireguard", "country": "Japan", "city": "Tokyo" },
@@ -341,14 +341,14 @@ dockerstrator rule: if `vpn ls --json` exits non-zero or reports an unknown flag
 - `verified` — `true` when the exit verifiably differs from the host's bare IP (or matches the requested country while the bare IP is unknown); `false` otherwise, including when the tunnel is merely stopped or the probe failed.
 - `last_error` — human-readable failure detail (e.g. control server unreachable), else `null`.
 
-### `vpn ls --json`
+### `epoxy ls --json`
 
 ```json
 {
   "instances": [
     {
-      "instance": "gluetun",
-      "container_name": "gluetun",
+      "instance": "epoxy",
+      "container_name": "epoxy",
       "state": "running",
       "selection": { "provider": "surfshark", "protocol": "wireguard", "country": "Japan", "city": "Tokyo" },
       "control_server": { "port": 8000, "enabled": true },

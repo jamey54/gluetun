@@ -3,13 +3,13 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vpn"
-version = "0.2.11"
-description = "CLI for managing a Gluetun VPN container via docker compose"
+name = "epoxy"
+version = "0.3.0"
+description = "CLI for managing VPN containers via docker compose"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["click", "prompt-toolkit", "rich"]
-keywords = ["gluetun", "vpn", "wireguard", "openvpn", "docker"]
+keywords = ["epoxy", "vpn", "wireguard", "openvpn", "docker"]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -18,10 +18,10 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-vpn = ["vpn.yml"]
+epoxy = ["epoxy.yml"]
 
 [project.scripts]
-vpn = "vpn:main"
+epoxy = "epoxy.cli:main"
 
 [dependency-groups]
 dev = ["pytest", "ruff", "mypy"]

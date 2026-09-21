@@ -1,4 +1,4 @@
-# AGENTS.md — Gluetun Working Guidelines
+# AGENTS.md — Epoxy Working Guidelines
 
 ## How to work
 - Set up a working environment first: editable install plus dev tools (pytest, ruff, mypy), and get a green baseline (`pytest`, `ruff check`, `mypy`) before changing code.
@@ -24,5 +24,5 @@
 - Never log secrets; mask key/password/token values (the `SENSITIVE_KEY_PARTS` pattern).
 
 ## Versioning
-- The project version lives in `src/vpn/version.py` (`__version__`) and `pyproject.toml` (`[project] version`) — they MUST always match, and `vpn --version` must report exactly that.
-- Bump both together on ANY code change; `importlib.metadata` is not used, so drift breaks the contract silently. Docs-only changes (README, AGENTS.md) don't need a bump. Smoke-check with `vpn --version` after bumping.
+- The project version lives in `src/epoxy/version.py` (`__version__`) and `pyproject.toml` (`[project] version`) — they MUST always match, and `epoxy --version` must report exactly that.
+- Bump both together on ANY code change; `importlib.metadata` is not used, so drift breaks the contract silently. Docs-only changes (README, AGENTS.md) don't need a bump. Smoke-check with `epoxy --version` after bumping.

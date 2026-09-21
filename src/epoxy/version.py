@@ -4,4 +4,4 @@ Keep this in sync with ``[project] version`` in pyproject.toml; the two must
 never drift. `epoxy --version` reports it via click's version_option.
 """
 
-__version__ = "0.2.11"
+__version__ = "0.3.0"
