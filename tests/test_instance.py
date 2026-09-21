@@ -1,4 +1,4 @@
-"""Unit tests for vpn.instance: naming, registry, env, compose, ports."""
+"""Unit tests for epoxy.instance: naming, registry, env, compose, ports."""
 
 import json
 import socket
@@ -6,8 +6,8 @@ import socket
 import click
 import pytest
 
-from vpn import config
-from vpn.instance import (
+from epoxy import config
+from epoxy.instance import (
     Instance,
     allocate_free_port,
     compose_file_for,
@@ -23,7 +23,7 @@ from vpn.instance import (
 
 
 def test_parse_instance_name_accepts_docker_safe_names():
-    for good in ["gluetun", "plan-a", "plan_1", "a.b", "A1", "a-b-c", "0x"]:
+    for good in ["epoxy", "plan-a", "plan_1", "a.b", "A1", "a-b-c", "0x"]:
         assert parse_instance_name(good) == good
 
 
@@ -38,26 +38,26 @@ def test_parse_instance_name_trims_padding():
 
 
 def test_required_name_from_explicit(monkeypatch):
-    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
     assert required_name("plan-a") == "plan-a"
 
 
 def test_required_name_from_env(monkeypatch):
-    monkeypatch.setenv("GLUETUN_INSTANCE", "plan-a")
+    monkeypatch.setenv("EPOXY_INSTANCE", "plan-a")
     assert required_name(None) == "plan-a"
 
 
 def test_required_name_without_source_exits(monkeypatch):
-    """No --instance and no GLUETUN_INSTANCE is a usage error, not a hidden default."""
-    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
-    with pytest.raises(click.UsageError, match="GLUETUN_INSTANCE"):
+    """No --instance and no EPOXY_INSTANCE is a usage error, not a hidden default."""
+    monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
+    with pytest.raises(click.UsageError, match="EPOXY_INSTANCE"):
         required_name(None)
 
 
 def test_instance_properties():
     inst = Instance("plan-a", 8123, None, {}, "/cfg/compose.yml")
     assert inst.container == "plan-a"
-    assert inst.project == "vpn-plan-a"
+    assert inst.project == "epoxy-plan-a"
     assert inst.lock_file.endswith("locks/plan-a.lock")
     assert inst.base_url == "http://127.0.0.1:8123"
 
@@ -102,7 +102,7 @@ def test_registry_records_env_file():
 
 
 def test_compose_file_for_always_generated(tmp_path, monkeypatch):
-    assert compose_file_for("gluetun") == str(config.INSTANCES_DIR / "gluetun" / "compose.yml")
+    assert compose_file_for("epoxy") == str(config.INSTANCES_DIR / "epoxy" / "compose.yml")
     assert compose_file_for("plan-a") == str(config.INSTANCES_DIR / "plan-a" / "compose.yml")
 
 
@@ -110,13 +110,13 @@ def test_render_compose_swaps_name_and_port():
     body = render_compose("plan-a", 8123)
     assert "container_name: plan-a" in body
     assert "127.0.0.1:8123:8000/tcp" in body
-    assert "container_name: gluetun" not in body
+    assert "container_name: epoxy" not in body
 
 
 def test_ensure_compose_file_generates_for_every_instance():
-    default = resolve_instance("gluetun")
+    default = resolve_instance("epoxy")
     ensure_compose_file(default)
-    assert (config.INSTANCES_DIR / "gluetun" / "compose.yml").exists()
+    assert (config.INSTANCES_DIR / "epoxy" / "compose.yml").exists()
 
     named = resolve_instance("plan-a", control_port=8123)
     ensure_compose_file(named)
@@ -137,12 +137,12 @@ def test_allocate_free_port_returns_bindable_port():
 
 def test_allocate_free_port_prefers_lowest_free(monkeypatch):
     taken = {7999, 8000, 8001}  # 8000/8001 busy -> first free is 8002
-    monkeypatch.setattr("vpn.instance._port_in_use", lambda p: p in taken)
+    monkeypatch.setattr("epoxy.instance._port_in_use", lambda p: p in taken)
     assert allocate_free_port() == 8002
 
 
 def test_allocate_free_port_full_range_is_friendly_error(monkeypatch):
-    monkeypatch.setattr("vpn.instance._port_in_use", lambda p: True)
+    monkeypatch.setattr("epoxy.instance._port_in_use", lambda p: True)
     with pytest.raises(SystemExit, match="--ctl-port"):
         allocate_free_port()
 

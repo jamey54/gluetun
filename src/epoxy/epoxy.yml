@@ -1,7 +1,7 @@
 services:
-  gluetun:
+  epoxy:
     image: qmcgaw/gluetun:latest
-    container_name: gluetun
+    container_name: epoxy
     cap_add:
       - NET_ADMIN
     devices:

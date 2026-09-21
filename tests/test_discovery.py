@@ -6,8 +6,8 @@ from subprocess import CompletedProcess
 import pytest
 from click.testing import CliRunner
 
-from vpn import cli, config, discovery
-from vpn.apply import Selection
+from epoxy import cli, config, discovery
+from epoxy.apply import Selection
 
 
 def _proc(stdout: str) -> CompletedProcess[str]:
@@ -19,7 +19,7 @@ _STUB_STARTED = "2026-09-19T09:00:00.123456789Z"
 
 
 def _stub_docker(runner, monkeypatch):
-    """Return a runner for vpn.discovery.run keyed on its --format argument."""
+    """Return a runner for epoxy.discovery.run keyed on its --format argument."""
     monkeypatch.setattr(discovery, "container_id", lambda name: _STUB_ID)
     monkeypatch.setattr(discovery, "container_started_at", lambda name: _STUB_STARTED)
 
@@ -27,12 +27,12 @@ def _stub_docker(runner, monkeypatch):
         fmt = args[args.index("--format") + 1]
         if "NetworkMode" in fmt:
             return _proc(
-                "consumer-a\tcontainer:gluetun\n"
+                "consumer-a\tcontainer:epoxy\n"
                 "plan-app\tcontainer:plan-a\n"
                 "unrelated\tfile:///app/compose.yml\n"
             )
         if "compose.project" in fmt:
-            return _proc("vpn-gluetun\nvpn-plan-a\nother-app\n")
+            return _proc("epoxy-epoxy\nepoxy-plan-a\nother-app\n")
         raise AssertionError(f"unexpected args: {args}")
 
     monkeypatch.setattr(discovery, "run", fake_run)
@@ -52,14 +52,14 @@ def test_state_mapping(monkeypatch):
         ("created", "stopped"),
     ]:
         monkeypatch.setattr(discovery, "container_status", lambda n, status=status: status)
-        assert discovery._state("gluetun") == expected
+        assert discovery._state("epoxy") == expected
     monkeypatch.setattr(discovery, "container_status", lambda n: None)
-    assert discovery._state("gluetun") == "absent"
+    assert discovery._state("epoxy") == "absent"
 
 
 def test_consumers_of(monkeypatch):
     _stub_docker(None, monkeypatch)
-    assert discovery.consumers_of("gluetun") == ["consumer-a"]
+    assert discovery.consumers_of("epoxy") == ["consumer-a"]
     assert discovery.consumers_of("plan-a") == ["plan-app"]
     assert discovery.consumers_of("other") == []
 
@@ -67,11 +67,11 @@ def test_consumers_of(monkeypatch):
 def test_consumers_of_sorted_across_many(monkeypatch):
     def fake_run(*args, **kwargs):
         return _proc(
-            "z-app\tcontainer:gluetun\na-app\tcontainer:gluetun\nb-app\tcontainer:gluetun\n"
+            "z-app\tcontainer:epoxy\na-app\tcontainer:epoxy\nb-app\tcontainer:epoxy\n"
         )
 
     monkeypatch.setattr(discovery, "run", fake_run)
-    assert discovery.consumers_of("gluetun") == ["a-app", "b-app", "z-app"]
+    assert discovery.consumers_of("epoxy") == ["a-app", "b-app", "z-app"]
 
 
 def test_consumers_of_matches_instance_by_full_and_short_id(monkeypatch):
@@ -106,12 +106,12 @@ def test_consumers_of_missing_docker_reads_as_empty(monkeypatch):
     monkeypatch.setattr(
         discovery, "run", lambda *a, **kw: CompletedProcess(a, 127, stderr="no docker")
     )
-    assert discovery.consumers_of("gluetun") == []
+    assert discovery.consumers_of("epoxy") == []
     assert discovery._compose_projects() == []
 
 
 def test_docker_ps_calls_are_bounded(monkeypatch):
-    from vpn import config
+    from epoxy import config
 
     seen: dict[str, object] = {}
     monkeypatch.setattr(
@@ -119,17 +119,17 @@ def test_docker_ps_calls_are_bounded(monkeypatch):
         "run",
         lambda *args, **kw: seen.update(kw) or _proc(""),
     )
-    discovery.consumers_of("gluetun")
+    discovery.consumers_of("epoxy")
     assert seen["timeout"] == config.CONTAINER_OP_TIMEOUT_S
 
 
 def test_known_names_from_registry_and_projects(monkeypatch):
     _stub_docker(None, monkeypatch)
-    from vpn import config
+    from epoxy import config
 
     (config.INSTANCES_DIR / "from-registry.json").parent.mkdir(parents=True, exist_ok=True)
     (config.INSTANCES_DIR / "from-registry.json").write_text("{}")
-    assert discovery._known_names() == {"gluetun", "plan-a", "from-registry"}
+    assert discovery._known_names() == {"epoxy", "plan-a", "from-registry"}
 
 
 def test_instance_records_schema(monkeypatch):
@@ -137,11 +137,11 @@ def test_instance_records_schema(monkeypatch):
     monkeypatch.setattr(discovery, "container_status", lambda n: "running")
     monkeypatch.setattr(discovery, "container_control_port", lambda n: 8123)
     monkeypatch.setattr(
-        "vpn.control.get_settings",
+        "epoxy.control.get_settings",
         lambda: {"type": "wireguard", "provider": {"name": "surfshark"}, "server_selection": {}},
     )
     records = discovery.instance_records()
-    assert [r["instance"] for r in records] == ["gluetun", "plan-a"]
+    assert [r["instance"] for r in records] == ["epoxy", "plan-a"]
     plan = records[1]
     assert plan == {
         "instance": "plan-a",
@@ -177,7 +177,7 @@ def test_record_without_control_port_has_null_control_server(monkeypatch):
     monkeypatch.setattr(discovery, "container_status", lambda n: "running")
     monkeypatch.setattr(discovery, "container_control_port", lambda n: None)
     monkeypatch.setattr(
-        "vpn.control.get_settings",
+        "epoxy.control.get_settings",
         lambda: {"type": "wireguard", "provider": {"name": "surfshark"}, "server_selection": {}},
     )
     record = next(r for r in discovery.instance_records() if r["instance"] == "plan-a")
@@ -275,7 +275,7 @@ def _record() -> dict[str, object]:
 def test_instance_records_ordered_oldest_first(monkeypatch):
     """ls records are ordered by start time (older instance first)."""
     times = {
-        "gluetun": "2026-01-01T08:00:00Z",
+        "epoxy": "2026-01-01T08:00:00Z",
         "plan-b": "2026-05-01T08:00:00Z",
         "plan-a": "2026-03-01T08:00:00Z",
     }
@@ -286,7 +286,7 @@ def test_instance_records_ordered_oldest_first(monkeypatch):
     monkeypatch.setattr(discovery, "container_started_at", lambda name: times[name])
     monkeypatch.setattr(discovery, "consumers_of", lambda name: [])
     records = discovery.instance_records()
-    assert [r["instance"] for r in records] == ["gluetun", "plan-a", "plan-b"]
+    assert [r["instance"] for r in records] == ["epoxy", "plan-a", "plan-b"]
     assert [r["started_at"] for r in records] == [
         "2026-01-01T08:00:00Z",
         "2026-03-01T08:00:00Z",

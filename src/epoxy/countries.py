@@ -1,6 +1,6 @@
 """ISO 3166-1 alpha-2 codes and country name resolution."""
 
-from vpn.textutil import fold
+from epoxy.textutil import fold
 
 COUNTRY_NAMES: dict[str, str] = {
     "AD": "Andorra",

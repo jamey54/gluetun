@@ -8,10 +8,10 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from vpn import cli, config, discovery
-from vpn.apply import Selection
-from vpn.instance import current_instance
-from vpn.version import __version__
+from epoxy import cli, config, discovery
+from epoxy.apply import Selection
+from epoxy.instance import current_instance
+from epoxy.version import __version__
 
 
 @pytest.fixture(autouse=True)
@@ -20,9 +20,9 @@ def creds(monkeypatch):
     monkeypatch.setenv("PROTONVPN_WIREGUARD_PRIVATE_KEY", "k")
     monkeypatch.setenv("PROTONVPN_WIREGUARD_ADDRESSES", "10.2.0.2/32")
     monkeypatch.setenv("HTTP_CONTROL_SERVER_API_KEY", "test-key")
-    monkeypatch.setattr("vpn.cli.print_ip_status", lambda **kwargs: True)
-    monkeypatch.setattr("vpn.cli.measure", lambda size=25: None)
-    monkeypatch.setattr("vpn.cli.current_exit_ip", lambda: None)
+    monkeypatch.setattr("epoxy.cli.print_ip_status", lambda **kwargs: True)
+    monkeypatch.setattr("epoxy.cli.measure", lambda size=25: None)
+    monkeypatch.setattr("epoxy.cli.current_exit_ip", lambda: None)
 
 
 @pytest.fixture()
@@ -37,7 +37,7 @@ def compose_calls(monkeypatch):
         calls.append(args)
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("vpn.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
     return calls
 
 
@@ -55,7 +55,7 @@ def read_registry(name: str) -> dict[str, object]:
 
 
 def test_up_non_default_instance_writes_compose_and_registry(compose_calls, cold, monkeypatch):
-    monkeypatch.setattr("vpn.cli.allocate_free_port", lambda: 8123)
+    monkeypatch.setattr("epoxy.cli.allocate_free_port", lambda: 8123)
     result = invoke(["up", "--instance", "plan-a", "--provider", "surfshark"])
     assert result.exit_code == 0
 
@@ -72,7 +72,7 @@ def test_up_non_default_instance_reuses_registered_port(compose_calls, cold, mon
     (config.INSTANCES_DIR / "plan-a.json").write_text(
         json.dumps({"instance": "plan-a", "control_port": 8123, "env_file": None})
     )
-    monkeypatch.setattr("vpn.cli.allocate_free_port", lambda: pytest.fail("must not allocate"))
+    monkeypatch.setattr("epoxy.cli.allocate_free_port", lambda: pytest.fail("must not allocate"))
     result = invoke(["up", "--instance", "plan-a", "--provider", "surfshark"])
     assert result.exit_code == 0
     body = (config.INSTANCES_DIR / "plan-a" / "compose.yml").read_text()
@@ -81,7 +81,7 @@ def test_up_non_default_instance_reuses_registered_port(compose_calls, cold, mon
 
 
 def test_up_ctl_port_wins_over_allocation(compose_calls, cold, monkeypatch):
-    monkeypatch.setattr("vpn.cli.allocate_free_port", lambda: pytest.fail("must not allocate"))
+    monkeypatch.setattr("epoxy.cli.allocate_free_port", lambda: pytest.fail("must not allocate"))
     result = invoke(["up", "--instance", "plan-b", "--ctl-port", "8300", "--provider", "surfshark"])
     assert result.exit_code == 0
     assert read_registry("plan-b")["control_port"] == 8300
@@ -90,11 +90,11 @@ def test_up_ctl_port_wins_over_allocation(compose_calls, cold, monkeypatch):
     )
 
 
-def test_up_gluetun_ctl_port_env_honored(compose_calls, cold, monkeypatch):
-    monkeypatch.setenv("GLUETUN_CTL_PORT", "8450")
+def test_up_epoxy_ctl_port_env_honored(compose_calls, cold, monkeypatch):
+    monkeypatch.setenv("EPOXY_CTL_PORT", "8450")
     result = invoke(["up", "--provider", "surfshark"])
     assert result.exit_code == 0
-    assert read_registry("gluetun")["control_port"] == 8450
+    assert read_registry("epoxy")["control_port"] == 8450
 
 
 def test_up_running_without_registry_adopts_published_port(monkeypatch):
@@ -108,7 +108,7 @@ def test_up_running_without_registry_adopts_published_port(monkeypatch):
     )
     result = invoke(["up", "--instance", "plan-a"])
     assert result.exit_code == 0
-    assert not (config.INSTANCES_DIR / "plan-a.json").exists()  # still not vpn-owned
+    assert not (config.INSTANCES_DIR / "plan-a.json").exists()  # still not epoxy-owned
     body = (config.INSTANCES_DIR / "plan-a" / "compose.yml").read_text()
     assert "127.0.0.1:8123:8000/tcp" in body
 
@@ -167,12 +167,12 @@ def test_up_unknown_provider_is_friendly_not_traceback(compose_calls, cold):
 
 
 def test_commands_require_instance_or_env(compose_calls, cold, monkeypatch):
-    """No --instance and no GLUETUN_INSTANCE is a usage error, not a hidden default."""
-    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    """No --instance and no EPOXY_INSTANCE is a usage error, not a hidden default."""
+    monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
     monkeypatch.setattr(cli, "_stdin_is_tty", lambda: False)
     result = invoke(["up", "--provider", "surfshark"])
     assert result.exit_code == 2
-    assert "GLUETUN_INSTANCE" in result.output
+    assert "EPOXY_INSTANCE" in result.output
     assert compose_calls == []
 
 
@@ -182,29 +182,29 @@ def test_commands_require_instance_or_env(compose_calls, cold, monkeypatch):
 
 
 def _multi_instance(monkeypatch):
-    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
     monkeypatch.setattr(cli, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr(discovery, "_known_names", lambda: {"plan-a", "plan-b"})
     monkeypatch.setattr(cli, "_state", lambda name: "running")
 
 
 def test_choose_instance_non_tty_is_usage_error(monkeypatch):
-    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
     monkeypatch.setattr(cli, "_stdin_is_tty", lambda: False)
-    with pytest.raises(click.UsageError, match="GLUETUN_INSTANCE"):
+    with pytest.raises(click.UsageError, match="EPOXY_INSTANCE"):
         cli._choose_instance_name()
 
 
 def test_choose_instance_zero_known_is_usage_error(monkeypatch):
-    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
     monkeypatch.setattr(cli, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr(discovery, "_known_names", lambda: set())
-    with pytest.raises(click.UsageError, match="GLUETUN_INSTANCE"):
+    with pytest.raises(click.UsageError, match="EPOXY_INSTANCE"):
         cli._choose_instance_name()
 
 
 def test_choose_instance_auto_uses_sole_instance(monkeypatch):
-    monkeypatch.delenv("GLUETUN_INSTANCE", raising=False)
+    monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
     monkeypatch.setattr(cli, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr(discovery, "_known_names", lambda: {"plan-a"})
     assert cli._choose_instance_name() == "plan-a"
@@ -234,21 +234,21 @@ def test_down_picks_instance_when_multiple(monkeypatch):
     """The chosen instance flows through instance_context: down targets its project."""
     _multi_instance(monkeypatch)
     monkeypatch.setattr(cli, "select_instance", lambda instances, **kw: "plan-a")
-    monkeypatch.setattr("vpn.control.set_vpn_status", lambda *a, **kw: None)
+    monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
     projects: list[str] = []
 
     def fake_compose(*args: str, env_overrides=None, timeout=None) -> CompletedProcess[str]:
         projects.append(current_instance().project)
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("vpn.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
     result = invoke(["down"])
     assert result.exit_code == 0
-    assert projects == ["vpn-plan-a"]
+    assert projects == ["epoxy-plan-a"]
 
 
-def test_gluetun_instance_env_still_wins_over_picker(monkeypatch):
-    """GLUETUN_INSTANCE must be honored without prompting or auto-selection."""
+def test_epoxy_instance_env_still_wins_over_picker(monkeypatch):
+    """EPOXY_INSTANCE must be honored without prompting or auto-selection."""
     monkeypatch.setattr(cli, "_stdin_is_tty", lambda: pytest.fail("must not prompt"))
     monkeypatch.setattr(
         discovery, "_known_names", lambda: pytest.fail("must not discover")
@@ -259,17 +259,17 @@ def test_gluetun_instance_env_still_wins_over_picker(monkeypatch):
         projects.append(current_instance().project)
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("vpn.cli.compose", fake_compose)
-    monkeypatch.setattr("vpn.control.set_vpn_status", lambda *a, **kw: None)
-    result = invoke(["down"])  # GLUETUN_INSTANCE=gluetun from conftest
+    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
+    result = invoke(["down"])  # EPOXY_INSTANCE=epoxy from conftest
     assert result.exit_code == 0
-    assert projects == ["vpn-gluetun"]
+    assert projects == ["epoxy-epoxy"]
 
 
 def test_version_flag_reports_exact_package_version():
     result = invoke(["--version"])
     assert result.exit_code == 0
-    assert result.output.strip() == f"vpn {__version__}"
+    assert result.output.strip() == f"epoxy {__version__}"
 
 
 def test_pyproject_version_matches_version_module():

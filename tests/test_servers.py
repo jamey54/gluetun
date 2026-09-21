@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from vpn import config, servers
-from vpn.config import DEFAULT_PROTOCOL
-from vpn.servers import (
+from epoxy import config, servers
+from epoxy.config import DEFAULT_PROTOCOL
+from epoxy.servers import (
     _parse_servers_output,
     _read_cache,
     _write_cache,
@@ -17,7 +17,7 @@ from vpn.servers import (
     print_servers_table,
     sorted_server_rows,
 )
-from vpn.textutil import strip_accents
+from epoxy.textutil import strip_accents
 
 
 def _fake_run(stdout: str) -> subprocess.CompletedProcess[str]:
@@ -42,7 +42,7 @@ SAMPLE_MD = """\
 | Country       | City     | Hostname        | VPN        |
 | ------------- | -------- | --------------- | ---------- |
 | United States | Boston   | `us-bos-001`    | wireguard  |
-| Germany       | Cologne  | `de-cgn-ovpn-1` | openvpn    |
+| Germany       | Cologne  | `de-cgn-oepoxy-1` | openvpn    |
 | Séoul         | Séoul    | `kr-sel-1`      |            |
 """
 
@@ -119,7 +119,7 @@ def test_parse_selection_city_containing_dash():
 
 
 # ---------------------------------------------------------------------------
-# gluetun markdown output parsing
+# epoxy markdown output parsing
 # ---------------------------------------------------------------------------
 
 
@@ -134,7 +134,7 @@ def test_parse_servers_output_basic():
     assert {
         "country": "Germany",
         "city": "Cologne",
-        "hostname": "de-cgn-ovpn-1",
+        "hostname": "de-cgn-oepoxy-1",
         "vpn": "openvpn",
     } in parsed
 

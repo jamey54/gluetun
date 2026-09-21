@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass
 
-from vpn.config import DEFAULT_PROTOCOL
-from vpn.instance import env_lookup
+from epoxy.config import DEFAULT_PROTOCOL
+from epoxy.instance import env_lookup
 
 # Surfshark accepts a bare private key, ProtonVPN requires the WireGuard
 # address as well -- hence the require_addresses flag below.
@@ -11,7 +11,7 @@ from vpn.instance import env_lookup
 
 @dataclass(frozen=True)
 class ProtocolConfig:
-    """How a provider's credentials map onto Gluetun's generic env vars."""
+    """How a provider's credentials map onto the container's generic env vars."""
 
     required_env: tuple[str, ...]
     env_map: dict[str, str]
@@ -118,10 +118,10 @@ def validate_provider(name: str, protocol: str = DEFAULT_PROTOCOL) -> tuple[str,
 
 
 def get_provider_env(provider: str, protocol: str) -> dict[str, str]:
-    """Map provider-specific env vars to Gluetun's generic env vars."""
+    """Map provider-specific env vars to the container's generic env vars."""
     overrides: dict[str, str] = {"VPN_SERVICE_PROVIDER": provider, "VPN_TYPE": protocol}
-    for gluetun_var, provider_var in PROVIDERS[provider][protocol].env_map.items():
+    for container_var, provider_var in PROVIDERS[provider][protocol].env_map.items():
         value = env_lookup(provider_var)
         if value:
-            overrides[gluetun_var] = value
+            overrides[container_var] = value
     return overrides

@@ -2,7 +2,7 @@
 
 import pytest
 
-from vpn import config
+from epoxy import config
 
 
 @pytest.fixture(autouse=True)
@@ -22,4 +22,4 @@ def default_instance_name(monkeypatch):
     env alias is the standard way to express "the usual one" for the many tests
     that invoke commands without --instance.
     """
-    monkeypatch.setenv("GLUETUN_INSTANCE", "gluetun")
+    monkeypatch.setenv("EPOXY_INSTANCE", "epoxy")

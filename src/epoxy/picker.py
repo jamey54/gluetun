@@ -19,8 +19,8 @@ from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.output import Output
 from prompt_toolkit.styles import Style
 
-from vpn.servers import SERVER_SEP, ServerRow, sorted_server_rows
-from vpn.textutil import fold, fold_mapped
+from epoxy.servers import SERVER_SEP, ServerRow, sorted_server_rows
+from epoxy.textutil import fold, fold_mapped
 
 VISIBLE_ROWS = 10
 

@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from rich.console import Console
 from rich.table import Table
 
-from vpn.config import (
+from epoxy.config import (
     CACHE_DIR,
     CACHE_FILE,
     CACHE_TTL,
@@ -15,9 +15,9 @@ from vpn.config import (
     DEFAULT_PROTOCOL,
     SERVER_FETCH_TIMEOUT_S,
 )
-from vpn.docker import GLUETUN_IMAGE, run
-from vpn.providers import PROVIDERS, get_active_providers
-from vpn.textutil import fold
+from epoxy.docker import ENGINE_IMAGE, run
+from epoxy.providers import PROVIDERS, get_active_providers
+from epoxy.textutil import fold
 
 SERVER_SEP = " - "
 
@@ -52,7 +52,7 @@ ServerRow = dict[str, str]
 
 
 def _parse_servers_output(lines: list[str]) -> list[ServerRow]:
-    """Parse gluetun 'format-servers' markdown output into row dicts."""
+    """Parse the container 'format-servers' markdown output into row dicts."""
     idx: dict[str, int] = {}
     for line in lines:
         cells = [c.strip() for c in line.split("|")]
@@ -98,7 +98,7 @@ def _fetch_servers(provider: str) -> list[ServerRow]:
         "docker",
         "run",
         "--rm",
-        GLUETUN_IMAGE,
+        ENGINE_IMAGE,
         "format-servers",
         f"-{provider}",
         capture=True,
@@ -130,7 +130,7 @@ def _fetch_all_servers(providers: list[str]) -> dict[str, list[ServerRow]] | Non
         "--rm",
         "--entrypoint",
         "/bin/sh",
-        GLUETUN_IMAGE,
+        ENGINE_IMAGE,
         "-c",
         loop,
         capture=True,

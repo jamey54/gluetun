@@ -5,9 +5,9 @@ from typing import Any
 
 import pytest
 
-from vpn import apply as apply_module
-from vpn import bench, cli, config, control
-from vpn.apply import Verification
+from epoxy import apply as apply_module
+from epoxy import bench, cli, config, control
+from epoxy.apply import Verification
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -484,7 +484,7 @@ def test_run_bench_parallel_uses_temp_containers(monkeypatch, happy_path):
     names = [name for name, _ in launched]
     assert len(names) == 6  # 3 screened + 3 finalists, all via temp containers
     assert names == list(dict.fromkeys(names))  # unique
-    assert all(n.startswith("vpn-bench-") for n in names)
+    assert all(n.startswith("epoxy-bench-") for n in names)
 
     by_country = {env["SERVER_COUNTRIES"]: env for _, env in launched}
     assert set(by_country) == {"France", "Spain", "Japan"}
@@ -502,9 +502,9 @@ def test_run_bench_parallel_uses_temp_containers(monkeypatch, happy_path):
     # the six stage verifies/measures ran through the disposable containers;
     # the adoption re-check runs against the (default) main container.
     assert len(verify_containers) == 7
-    assert all(c is not None and c.startswith("vpn-bench-") for c in verify_containers[:6])
+    assert all(c is not None and c.startswith("epoxy-bench-") for c in verify_containers[:6])
     assert verify_containers[-1] is None
-    assert all(c is not None and c.startswith("vpn-bench-") for c in measure_containers)
+    assert all(c is not None and c.startswith("epoxy-bench-") for c in measure_containers)
     assert report.winner is not None
 
 
@@ -612,7 +612,7 @@ def test_test_batch_interrupt_removes_containers(monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         bench._test_batch(candidates, 10, 90)
     assert len(removed) == len(candidates)
-    assert all(n.startswith("vpn-bench-") for n in removed)
+    assert all(n.startswith("epoxy-bench-") for n in removed)
 
 
 def test_run_bench_parallel_crashed_candidate_is_recorded(monkeypatch, happy_path):

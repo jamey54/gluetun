@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from vpn import config, docker
+from epoxy import config, docker
 
 
 @pytest.fixture()
@@ -63,10 +63,10 @@ def test_compose_merges_env_without_tempfile(monkeypatch):
         "docker",
         "compose",
         "-f",
-        str(config.INSTANCES_DIR / "gluetun" / "compose.yml"),
+        str(config.INSTANCES_DIR / "epoxy" / "compose.yml"),
     )
     assert seen_args[4] == "-p"
-    assert seen_args[5] == "vpn-gluetun"
+    assert seen_args[5] == "epoxy-epoxy"
     assert seen_env is not None
     assert seen_env["WIREGUARD_PRIVATE_KEY"] == "secret"
     assert seen_env["PATH"]  # process env preserved
@@ -88,7 +88,7 @@ def test_launch_container_builds_docker_run_args(monkeypatch):
 
     monkeypatch.setattr(docker, "run", fake_run)
     ok = docker.launch_container(
-        "vpn-bench-123-0",
+        "epoxy-bench-123-0",
         {"VPN_SERVICE_PROVIDER": "surfshark", "SERVER_COUNTRIES": "Germany"},
     )
 
@@ -100,14 +100,14 @@ def test_launch_container_builds_docker_run_args(monkeypatch):
         "-d",
         "--rm",
         "--name",
-        "vpn-bench-123-0",
+        "epoxy-bench-123-0",
         "--cap-add",
         "NET_ADMIN",
     )
     assert args[8:11] == ("--device", "/dev/net/tun:/dev/net/tun", "-e")
     assert "VPN_SERVICE_PROVIDER=surfshark" in args
     assert "SERVER_COUNTRIES=Germany" in args
-    assert args[-1] == docker.GLUETUN_IMAGE
+    assert args[-1] == docker.ENGINE_IMAGE
     assert seen["capture"] is True and seen["check"] is False
 
 
@@ -178,7 +178,7 @@ def test_inspect_container_bounds_stalled_daemon(monkeypatch):
         "run",
         lambda *args, **kw: seen.update(kw) or CompletedProcess(args, 0),
     )
-    docker.container_status("gluetun")
+    docker.container_status("epoxy")
     assert seen["timeout"] == config.CONTAINER_OP_TIMEOUT_S
 
 
@@ -188,4 +188,4 @@ def test_inspect_container_timeout_reads_as_absent(monkeypatch):
     monkeypatch.setattr(
         docker, "run", lambda *args, **kw: CompletedProcess(args, 124, stdout="", stderr="timeout")
     )
-    assert docker.container_status("gluetun") is None
+    assert docker.container_status("epoxy") is None

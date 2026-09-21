@@ -1,7 +1,7 @@
-"""CLI commands for the vpn package.
+"""CLI commands for the epoxy package.
 
-Runtime selection changes hot-swap through gluetun's control server
-(vpn.apply); compose is only used for container lifecycle (create, recreate,
+Runtime selection changes hot-swap through the container's control server
+(epoxy.apply); compose is only used for container lifecycle (create, recreate,
 stop) and logs.
 """
 
@@ -16,16 +16,16 @@ from typing import Any, NoReturn, TypeVar
 
 import click
 
-from vpn import control, discovery
-from vpn.apply import Selection, apply_location
-from vpn.bench import (
+from epoxy import control, discovery
+from epoxy.apply import Selection, apply_location
+from epoxy.bench import (
     DEFAULT_FINAL_SIZE_MB,
     DEFAULT_TOP,
     build_candidates,
     print_report,
     run_bench,
 )
-from vpn.config import (
+from epoxy.config import (
     COMPOSE_TIMEOUT_S,
     DEFAULT_PROTOCOL,
     DEFAULT_SCAN_SIZE_MB,
@@ -34,10 +34,10 @@ from vpn.config import (
     DOWN_TIMEOUT_S,
     PULL_TIMEOUT_S,
 )
-from vpn.countries import resolve_country
-from vpn.discovery import _state, instance_records, print_ls_table
-from vpn.docker import (
-    GLUETUN_IMAGE,
+from epoxy.countries import resolve_country
+from epoxy.discovery import _state, instance_records, print_ls_table
+from epoxy.docker import (
+    ENGINE_IMAGE,
     compose,
     container_control_port,
     container_env,
@@ -47,7 +47,7 @@ from vpn.docker import (
     remove_container,
     run,
 )
-from vpn.instance import (
+from epoxy.instance import (
     INSTANCE_ENV_VAR,
     Instance,
     allocate_free_port,
@@ -60,24 +60,24 @@ from vpn.instance import (
     resolve_instance,
     write_registry,
 )
-from vpn.ipinfo import _probe, current_exit_ip, print_ip_status, real_ip
-from vpn.picker import select_instance, select_server
-from vpn.providers import (
+from epoxy.ipinfo import _probe, current_exit_ip, print_ip_status, real_ip
+from epoxy.picker import select_instance, select_server
+from epoxy.providers import (
     PROVIDERS,
     get_provider_env,
     resolve_provider,
     validate_provider,
 )
-from vpn.servers import (
+from epoxy.servers import (
     get_servers,
     listable_servers,
     parse_server_selection,
     print_servers_table,
 )
-from vpn.speedtest import format_result, measure
-from vpn.statusdoc import classify_verdict, control_server_doc, selection_doc
-from vpn.textutil import fold
-from vpn.version import __version__
+from epoxy.speedtest import format_result, measure
+from epoxy.statusdoc import classify_verdict, control_server_doc, selection_doc
+from epoxy.textutil import fold
+from epoxy.version import __version__
 
 DEBUG = False
 
@@ -94,7 +94,7 @@ def require_api_key() -> None:
         port = current_instance().control_port
         raise click.ClickException(
             "HTTP_CONTROL_SERVER_API_KEY is not set.\n"
-            f"It authenticates gluetun's control server (port {port}) "
+            f"It authenticates the container's control server (port {port}) "
             "— add any random string to .env."
         )
 
@@ -139,7 +139,7 @@ def add_instance_options(ctl_port: bool = False, env_file: bool = False) -> Call
         func = click.option(
             "--instance",
             default=None,
-            help="Instance name (default: $GLUETUN_INSTANCE; required when unset)",
+            help="Instance name (default: $EPOXY_INSTANCE; required when unset)",
         )(func)
         return func
 
@@ -147,8 +147,8 @@ def add_instance_options(ctl_port: bool = False, env_file: bool = False) -> Call
 
 
 def _no_instance_error() -> NoReturn:
-    """The documented no-target error: --instance or GLUETUN_INSTANCE required."""
-    raise click.UsageError("No instance selected: pass --instance or set GLUETUN_INSTANCE.")
+    """The documented no-target error: --instance or EPOXY_INSTANCE required."""
+    raise click.UsageError("No instance selected: pass --instance or set EPOXY_INSTANCE.")
 
 
 def _stdin_is_tty() -> bool:
@@ -157,7 +157,7 @@ def _stdin_is_tty() -> bool:
 
 
 def _choose_instance_name() -> str:
-    """Resolve the target when neither --instance nor GLUETUN_INSTANCE is set.
+    """Resolve the target when neither --instance nor EPOXY_INSTANCE is set.
 
     Interactive terminals pick among the known instances (auto-selecting the
     sole instance without prompting); scripts keep the documented usage error —
@@ -181,8 +181,8 @@ def _resolve_for_command(
     ctl_port: int | None = None,
     env_file: str | None = None,
 ) -> Instance:
-    """Resolve the target instance: --instance > GLUETUN_INSTANCE > interactive
-    choice > usage error, honoring GLUETUN_CTL_PORT. A registry-less instance
+    """Resolve the target instance: --instance > EPOXY_INSTANCE > interactive
+    choice > usage error, honoring EPOXY_CTL_PORT. A registry-less instance
     falls back to its published control port so imported/shared containers stay
     addressable."""
     name = instance or os.getenv(INSTANCE_ENV_VAR)
@@ -191,13 +191,13 @@ def _resolve_for_command(
     base = resolve_instance(name, env_file=env_file)
     port = ctl_port
     if port is None:
-        env_port = base.env.get("GLUETUN_CTL_PORT")
+        env_port = base.env.get("EPOXY_CTL_PORT")
         if env_port:
             try:
                 port = int(env_port)
             except ValueError:
                 raise click.UsageError(
-                    f"GLUETUN_CTL_PORT must be a port number, got {env_port!r}"
+                    f"EPOXY_CTL_PORT must be a port number, got {env_port!r}"
                 ) from None
     if port is None:
         return _apply_published_fallback(base)
@@ -232,7 +232,7 @@ def _apply_published_fallback(base: Instance) -> Instance:
 def _resolve_targets(instance: str | None, all_instances: bool) -> list[Instance]:
     """Resolve one instance, or every known instance for --all (sorted by name).
 
-    --all conflicts with --instance; it ignores GLUETUN_INSTANCE and never
+    --all conflicts with --instance; it ignores EPOXY_INSTANCE and never
     prompts. Registry-less targets fall back to their published control port,
     mirroring single-instance resolution.
     """
@@ -298,7 +298,7 @@ def _require_selection() -> Selection:
     sel = effective_selection()
     if sel is None or not sel.provider:
         raise click.ClickException(
-            "Cannot read runtime settings — is gluetun's control server reachable?"
+            "Cannot read runtime settings — is the control server reachable?"
         )
     return sel
 
@@ -447,10 +447,10 @@ def _apply_request(
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="vpn", message="%(prog)s %(version)s")
-@click.option("--debug", is_flag=True, envvar="VPN_DEBUG", help="Enable debug output")
+@click.version_option(version=__version__, prog_name="epoxy", message="%(prog)s %(version)s")
+@click.option("--debug", is_flag=True, envvar="EPOXY_DEBUG", help="Enable debug output")
 def main(debug: bool) -> None:
-    """Gluetun VPN manager."""
+    """Epoxy VPN manager."""
     global DEBUG
     DEBUG = debug
 
@@ -466,7 +466,7 @@ def main(debug: bool) -> None:
 )
 @click.option("--country", help="Country to connect to")
 @click.option("--city", help="City within the country")
-@click.option("--pull", is_flag=True, help="Pull the latest gluetun image first")
+@click.option("--pull", is_flag=True, help="Pull the latest container image first")
 @click.option("--recreate", is_flag=True, help="Recreate the container from compose/.env config")
 @click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
 def up(
@@ -494,7 +494,7 @@ def up(
     # even though its registry record is gone.
     if (
         ctl_port is None
-        and inst.env.get("GLUETUN_CTL_PORT") is None
+        and inst.env.get("EPOXY_CTL_PORT") is None
         and read_registry(inst.name) is None
     ):
         if container_running(name=inst.name):
@@ -511,7 +511,7 @@ def up(
         current = effective_selection() if was_running else None
         created = not was_running
         if pull:
-            run("docker", "pull", GLUETUN_IMAGE, timeout=PULL_TIMEOUT_S)
+            run("docker", "pull", ENGINE_IMAGE, timeout=PULL_TIMEOUT_S)
             recreate = True
         if recreate:
             created = True
@@ -522,7 +522,7 @@ def up(
             requested = country is not None or city is not None
         if was_running and requested and current is None and not recreate:
             raise click.ClickException(
-                "Cannot read runtime settings — is gluetun's control server reachable?"
+                "Cannot read runtime settings — is the control server reachable?"
             )
 
         swapped = False
@@ -605,7 +605,7 @@ def connect(
         require_api_key()
         if not container_running():
             raise click.ClickException(
-                f"Container '{current_instance().container}' is not running. Use 'vpn up' first."
+                f"Container '{current_instance().container}' is not running. Use 'epoxy up' first."
             )
         current = _require_selection()
 
@@ -647,7 +647,7 @@ def down(instance: str | None, all_instances: bool) -> None:
         with instance_context(inst):
             try:
                 with contextlib.suppress(Exception):
-                    control.set_vpn_status("stopped", timeout=DOWN_TIMEOUT_S)
+                    control.set_tunnel_status("stopped", timeout=DOWN_TIMEOUT_S)
                 compose("down", timeout=COMPOSE_TIMEOUT_S)
             except (Exception, SystemExit) as exc:  # per-instance: report and continue
                 _record_failure(inst.name, exc)
@@ -671,7 +671,7 @@ def _remove_one(inst: Instance, force: bool) -> None:
         )
     with instance_context(inst):
         with contextlib.suppress(Exception):
-            control.set_vpn_status("stopped", timeout=DOWN_TIMEOUT_S)
+            control.set_tunnel_status("stopped", timeout=DOWN_TIMEOUT_S)
         if Path(inst.compose_file).exists():
             compose("down", timeout=COMPOSE_TIMEOUT_S)
         else:
@@ -774,8 +774,8 @@ def _print_human_status(size: int, no_speedtest: bool) -> None:
     _kv("Container", f"{container} ({state})")
 
     try:
-        vpn = control.get_vpn_status()
-        _kv("Tunnel", vpn, "red" if vpn == "stopped" else None)
+        tunnel = control.get_tunnel_status()
+        _kv("Tunnel", tunnel, "red" if tunnel == "stopped" else None)
     except control.ControlError:
         pass
     try:
@@ -800,7 +800,7 @@ def _print_human_status(size: int, no_speedtest: bool) -> None:
             _kv("Location", loc)
     else:
         click.echo()
-        _kv("Provider", "unknown — is gluetun's control server reachable?")
+        _kv("Provider", "unknown — is the control server reachable?")
 
     if state == "running":
         click.echo()
@@ -967,7 +967,7 @@ def bench(
             control.get_settings()
         except control.ControlError as exc:
             raise click.ClickException(
-                f"Cannot reach the gluetun control server: {exc.message}"
+                f"Cannot reach the control server: {exc.message}"
             ) from None
 
         candidates = build_candidates(by_provider, provider, protocol, country)
@@ -988,7 +988,7 @@ def bench(
             raise SystemExit(130) from None
         except control.ControlError as exc:
             raise click.ClickException(
-                f"Cannot reach the gluetun control server: {exc.message}"
+                f"Cannot reach the control server: {exc.message}"
             ) from None
 
         print_report(report)
@@ -1005,7 +1005,7 @@ def bench(
     help="Machine-readable list (single-line JSON)",
 )
 def ls(instance: str | None, json_output: bool) -> None:
-    """List instances (registry and vpn-* compose containers) and their consumers."""
+    """List instances (registry and epoxy-* compose containers) and their consumers."""
     records = instance_records()
     if instance:
         records = [r for r in records if r["instance"] == instance]

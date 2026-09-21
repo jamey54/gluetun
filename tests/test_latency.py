@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from vpn import latency
+from epoxy import latency
 
 
 class FakeSocket:
@@ -20,7 +20,7 @@ def test_probe_host_returns_elapsed_seconds(monkeypatch):
         calls.append((address, timeout))
         return FakeSocket()
 
-    monkeypatch.setattr("vpn.latency.socket.create_connection", connect)
+    monkeypatch.setattr("epoxy.latency.socket.create_connection", connect)
     result = latency.probe_host("example.com")
     assert isinstance(result, float)
     assert result >= 0
@@ -31,7 +31,7 @@ def test_probe_host_unreachable_is_none(monkeypatch):
     def connect(address, timeout=None):
         raise ConnectionRefusedError()
 
-    monkeypatch.setattr("vpn.latency.socket.create_connection", connect)
+    monkeypatch.setattr("epoxy.latency.socket.create_connection", connect)
     assert latency.probe_host("down.example.com") is None
 
 
@@ -46,7 +46,7 @@ def test_probe_hosts_maps_results_and_dedupes(monkeypatch):
             raise OSError("nope")
         return FakeSocket()
 
-    monkeypatch.setattr("vpn.latency.socket.create_connection", connect)
+    monkeypatch.setattr("epoxy.latency.socket.create_connection", connect)
     result = latency.probe_hosts(["b.example.com", "a.example.com", "a.example.com"], timeout=1.5)
     assert sorted(seen) == ["a.example.com", "b.example.com"]  # probed once each
     assert set(result) == {"a.example.com", "b.example.com"}

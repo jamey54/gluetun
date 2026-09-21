@@ -1,14 +1,14 @@
 """Resilient multi-provider probe: extractors, voting, parallel fetch.
 
-The probe mirrors gluetun's approach — several echo services queried in
+The probe mirrors the upstream approach — several echo services queried in
 parallel, most-agreed result wins — so one rate-limited provider (ipinfo 429)
 can no longer stall the verification retry loop.
 """
 
 from subprocess import CompletedProcess
 
-from vpn import ipinfo
-from vpn.config import PROBE_EXEC_TIMEOUT_S
+from epoxy import ipinfo
+from epoxy.config import PROBE_EXEC_TIMEOUT_S
 
 _URLS = {
     "ipinfo": "https://ipinfo.io/",
@@ -19,7 +19,7 @@ _URLS = {
 
 
 def stub_run(monkeypatch, results: dict[str, tuple[int, str]]) -> None:
-    """Stub vpn.ipinfo.run to return per-provider (returncode, stdout) by URL."""
+    """Stub epoxy.ipinfo.run to return per-provider (returncode, stdout) by URL."""
 
     def fake_run(*args, **kwargs):
         url = args[-1]
@@ -205,7 +205,7 @@ def test_probe_survives_rate_limited_primary(monkeypatch):
             _URLS["ip2location"]: (4, ""),
         },
     )
-    result = ipinfo._probe("gluetun")
+    result = ipinfo._probe("epoxy")
     assert result is not None
     assert result.info["ip"] == "5.6.7.8"
     assert result.sources == ("cloudflare",)
@@ -221,7 +221,7 @@ def test_probe_majority_across_providers(monkeypatch):
             _URLS["ip2location"]: (4, ""),
         },
     )
-    result = ipinfo._probe("gluetun")
+    result = ipinfo._probe("epoxy")
     assert result is not None
     assert result.info["ip"] == "1.1.1.1"
     assert result.sources == ("ipinfo", "cloudflare")
@@ -229,7 +229,7 @@ def test_probe_majority_across_providers(monkeypatch):
 
 def test_probe_returns_none_when_every_provider_fails(monkeypatch):
     stub_run(monkeypatch, {})
-    assert ipinfo._probe("gluetun") is None
+    assert ipinfo._probe("epoxy") is None
 
 
 def test_probe_uses_explicit_container(monkeypatch):
@@ -254,7 +254,7 @@ def test_probe_provider_bounds_the_docker_exec(monkeypatch):
         return CompletedProcess(args, 0, stdout="5.6.7.8")
 
     monkeypatch.setattr(ipinfo, "run", fake_run)
-    assert ipinfo._probe_provider("gluetun", "https://echo/") == "5.6.7.8"
+    assert ipinfo._probe_provider("epoxy", "https://echo/") == "5.6.7.8"
     assert seen["timeout"] == PROBE_EXEC_TIMEOUT_S
 
 
@@ -265,7 +265,7 @@ def test_probe_provider_timeout_counts_as_provider_failure(monkeypatch):
         return CompletedProcess(args, 124, stdout="", stderr="timed out after 20s")
 
     monkeypatch.setattr(ipinfo, "run", fake_run)
-    assert ipinfo._probe_provider("gluetun", "https://echo/") == ""
+    assert ipinfo._probe_provider("epoxy", "https://echo/") == ""
 
 
 def test_probe_provider_missing_docker_reads_as_failure(monkeypatch):
@@ -275,4 +275,4 @@ def test_probe_provider_missing_docker_reads_as_failure(monkeypatch):
         return CompletedProcess(args, 127, stdout="", stderr="no such file")
 
     monkeypatch.setattr(ipinfo, "run", fake_run)
-    assert ipinfo._probe_provider("gluetun", "https://echo/") == ""
+    assert ipinfo._probe_provider("epoxy", "https://echo/") == ""

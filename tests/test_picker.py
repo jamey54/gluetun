@@ -2,8 +2,8 @@
 
 from itertools import pairwise
 
-from vpn.picker import _InstancePicker, _ServerPicker, select_instance, select_server
-from vpn.textutil import fold_mapped as _fold
+from epoxy.picker import _InstancePicker, _ServerPicker, select_instance, select_server
+from epoxy.textutil import fold_mapped as _fold
 
 ROWS = [
     ("surfshark", "wireguard", "Netherlands", "Amsterdam", "nl-ams-1"),
@@ -151,7 +151,7 @@ def test_column_value_and_typed_tokens_are_both_applied():
     p._advance_col(1)
     p._advance_col(1)  # protocol column
     p._set_query("wireguard")
-    assert p.matches == [0, 2]  # surfshark-wg + protonvpn-wg
+    assert p.matches == [0, 2]  # surfshark-wg + protonepoxy-wg
     p._cycle_value(1)  # openvpn contradicts the typed query
     assert p.col_value == "openvpn"
     assert p.matches == []
@@ -282,7 +282,7 @@ def test_select_server_empty_returns_none():
 # instance picker
 # ---------------------------------------------------------------------------
 
-INSTANCES = [("gluetun", "running"), ("plan-a", "stopped"), ("plan-b", "running")]
+INSTANCES = [("epoxy", "running"), ("plan-a", "stopped"), ("plan-b", "running")]
 
 
 def make_instance_picker():
@@ -291,12 +291,12 @@ def make_instance_picker():
 
 def test_instance_picker_lines_show_name_and_state():
     p = make_instance_picker()
-    assert p.lines == ["gluetun (running)", "plan-a (stopped)", "plan-b (running)"]
+    assert p.lines == ["epoxy (running)", "plan-a (stopped)", "plan-b (running)"]
 
 
 def test_instance_picker_values_are_bare_names():
     p = make_instance_picker()
-    assert p.values == ["gluetun", "plan-a", "plan-b"]
+    assert p.values == ["epoxy", "plan-a", "plan-b"]
 
 
 def test_instance_picker_filters_by_name():

@@ -2,7 +2,7 @@
 
 Candidates are unique (provider, protocol, country, city) locations from the
 server cache. With concurrency=1 (the default) each test hot-swaps through the
-runtime config engine (vpn.apply), proves the exit IP actually moved (leak-first
+runtime config engine (epoxy.apply), proves the exit IP actually moved (leak-first
 verification), then downloads through the tunnel. With concurrency>1 the screen
 and final stages instead run batches of candidates on temporary one-off
 containers in parallel, leaving the running tunnel untouched until the winner
@@ -22,21 +22,21 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from vpn.apply import Selection, apply_location, restore_settings, swap_lock, verify
-from vpn.config import (
+from epoxy.apply import Selection, apply_location, restore_settings, swap_lock, verify
+from epoxy.config import (
     DEFAULT_SCAN_SIZE_MB,
     DEFAULT_TEST_CONCURRENCY,
     DOWNLOAD_TIMEOUT_S,
     SCAN_TIMEOUT_S,
 )
-from vpn.control import ControlError, get_settings
-from vpn.docker import launch_container, remove_container
-from vpn.ipinfo import current_exit_ip
-from vpn.latency import probe_hosts
-from vpn.providers import get_provider_env
-from vpn.servers import ServerRow, sorted_server_rows
-from vpn.speedtest import measure
-from vpn.textutil import fold
+from epoxy.control import ControlError, get_settings
+from epoxy.docker import launch_container, remove_container
+from epoxy.ipinfo import current_exit_ip
+from epoxy.latency import probe_hosts
+from epoxy.providers import get_provider_env
+from epoxy.servers import ServerRow, sorted_server_rows
+from epoxy.speedtest import measure
+from epoxy.textutil import fold
 
 DEFAULT_TOP = 12
 DEFAULT_FINAL_SIZE_MB = 25
@@ -52,7 +52,7 @@ _BENCH_ENV_TUNING = {
     "FIREWALL": "on",
 }
 
-_CONTAINER_PREFIX = "vpn-bench-"
+_CONTAINER_PREFIX = "epoxy-bench-"
 _container_ids = itertools.count()
 
 

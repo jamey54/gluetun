@@ -2,9 +2,9 @@
 
 import time
 
-from vpn.config import DEFAULT_SIZE_MB, DOWNLOAD_TIMEOUT_S, SPEEDTEST_URL
-from vpn.docker import run
-from vpn.instance import current_instance
+from epoxy.config import DEFAULT_SIZE_MB, DOWNLOAD_TIMEOUT_S, SPEEDTEST_URL
+from epoxy.docker import run
+from epoxy.instance import current_instance
 
 
 def mbps(nbytes: int | float, seconds: float) -> float:

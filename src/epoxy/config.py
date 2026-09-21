@@ -2,7 +2,7 @@
 
 Every magic number lives here. Modules import what they need; nothing is
 duplicated. Per-instance state (name, control port, env, compose file, lock)
-lives in vpn.instance.
+lives in epoxy.instance.
 """
 
 import os
@@ -17,7 +17,7 @@ INSTANCES_DIR = CACHE_DIR / "instances"
 
 # --- Caching -------------------------------------------------------------
 
-CACHE_TTL: int = int(os.getenv("GLUETUN_CACHE_TTL", "3600"))
+CACHE_TTL: int = int(os.getenv("EPOXY_CACHE_TTL", "3600"))
 CACHE_VERSION = 4
 
 # --- Lock ----------------------------------------------------------------
@@ -37,7 +37,7 @@ HTTP_NOT_FOUND = 404
 # --- Docker operations ---------------------------------------------------
 
 COMPOSE_TIMEOUT_S = 300  # compose up/down; a stalled daemon must not hang forever
-PULL_TIMEOUT_S = 600  # docker pull of the gluetun image
+PULL_TIMEOUT_S = 600  # docker pull of the container image
 CONTAINER_OP_TIMEOUT_S = 60  # disposable container launch/removal
 SERVER_FETCH_TIMEOUT_S = 120  # docker run format-servers server fetch
 

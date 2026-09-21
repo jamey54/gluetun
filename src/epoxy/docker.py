@@ -5,10 +5,10 @@ import os
 import subprocess
 import sys
 
-from vpn.config import CONTAINER_OP_TIMEOUT_S
-from vpn.instance import current_instance
+from epoxy.config import CONTAINER_OP_TIMEOUT_S
+from epoxy.instance import current_instance
 
-GLUETUN_IMAGE = "qmcgaw/gluetun:latest"
+ENGINE_IMAGE = "qmcgaw/gluetun:latest"
 
 
 def run(
@@ -159,7 +159,7 @@ def launch_container(name: str, env: dict[str, str]) -> bool:
     ]
     for key, value in env.items():
         args += ["-e", f"{key}={value}"]
-    args.append(GLUETUN_IMAGE)
+    args.append(ENGINE_IMAGE)
     result = run(*args, capture=True, check=False, timeout=CONTAINER_OP_TIMEOUT_S)
     return result.returncode == 0
 

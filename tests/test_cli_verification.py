@@ -5,14 +5,14 @@ from collections.abc import Callable
 
 import pytest
 
-from vpn import cli, ipinfo
+from epoxy import cli, ipinfo
 
 
 def stub_probe(
     results: list[dict[str, object] | None],
     sources: tuple[str, ...] = ("ipinfo",),
 ) -> tuple[Callable[..., ipinfo._Probe | None], list[str]]:
-    """Stub vpn.ipinfo._probe with queued observations; records poll count."""
+    """Stub epoxy.ipinfo._probe with queued observations; records poll count."""
     calls: list[str] = []
 
     def fake_probe(container: str | None = None) -> ipinfo._Probe | None:
@@ -32,7 +32,7 @@ def no_sleep(_seconds: float) -> None:
 @pytest.fixture(autouse=True)
 def offline_real_ip(monkeypatch):
     """Host bare-IP fetch fails fast (offline stub); cache reset between tests."""
-    monkeypatch.delenv("VPN_REAL_IP", raising=False)
+    monkeypatch.delenv("EPOXY_REAL_IP", raising=False)
     monkeypatch.setattr(ipinfo, "_real_ip_cache", None)
     monkeypatch.setattr(ipinfo, "_real_ip_info", None)
 
@@ -76,7 +76,7 @@ def test_log_env_silent_when_debug_off(capsys):
 
 
 def test_real_ip_env_override(monkeypatch):
-    monkeypatch.setenv("VPN_REAL_IP", "203.0.113.7")
+    monkeypatch.setenv("EPOXY_REAL_IP", "203.0.113.7")
     assert ipinfo.real_ip() == "203.0.113.7"
 
 
@@ -261,7 +261,7 @@ def test_print_ip_status_still_detects_leak_from_backup_sources(monkeypatch):
 
 def test_current_exit_ip_returns_accepted_observation(monkeypatch):
     probe, _ = stub_probe([{"ip": "9.9.9.9", "country": "DE"}])
-    monkeypatch.setenv("VPN_REAL_IP", "1.1.1.1")
+    monkeypatch.setenv("EPOXY_REAL_IP", "1.1.1.1")
     monkeypatch.setattr(ipinfo, "_probe", probe)
     assert ipinfo.current_exit_ip() == "9.9.9.9"
 
@@ -270,7 +270,7 @@ def test_current_exit_ip_falls_back_to_last_observation(monkeypatch):
     """When every observation is excluded (e.g. still on the bare IP), the
     single-shot still reports what was last seen rather than None."""
     probe, _ = stub_probe([{"ip": "1.1.1.1", "country": "Egypt"}])
-    monkeypatch.setenv("VPN_REAL_IP", "1.1.1.1")
+    monkeypatch.setenv("EPOXY_REAL_IP", "1.1.1.1")
     monkeypatch.setattr(ipinfo, "_probe", probe)
     assert ipinfo.current_exit_ip() == "1.1.1.1"
 
@@ -288,8 +288,8 @@ def test_current_exit_ip_none_when_probe_failed(monkeypatch):
 
 def test_container_running_requires_running_state(monkeypatch):
     states = iter(["exited", "running", None])
-    monkeypatch.setattr("vpn.docker.container_status", lambda name=None: next(states))
-    from vpn.docker import container_running
+    monkeypatch.setattr("epoxy.docker.container_status", lambda name=None: next(states))
+    from epoxy.docker import container_running
 
     assert container_running() is False  # exited
     assert container_running() is True  # running

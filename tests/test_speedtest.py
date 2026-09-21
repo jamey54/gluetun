@@ -2,10 +2,10 @@
 
 from subprocess import CompletedProcess
 
-from vpn import speedtest
-from vpn.config import DEFAULT_SIZE_MB
-from vpn.ipinfo import _same_country
-from vpn.speedtest import mbps
+from epoxy import speedtest
+from epoxy.config import DEFAULT_SIZE_MB
+from epoxy.ipinfo import _same_country
+from epoxy.speedtest import mbps
 
 
 def test_mbps():

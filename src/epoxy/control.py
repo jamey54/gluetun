@@ -1,6 +1,6 @@
-"""Gluetun control server client and settings document building (stdlib only).
+"""Container control server client and settings document building (stdlib only).
 
-The settings routes (`GET/PUT /v1/vpn/settings`) exist on recent gluetun
+The settings routes (`GET/PUT /v1/vpn/settings`) exist on recent
 images. PUT merges the posted document over the running settings via
 `OverrideWith`, where an empty JSON list is a real override — so a full
 GET → mutate → PUT round-trip both updates the location and clears stale
@@ -15,14 +15,14 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from vpn.config import (
+from epoxy.config import (
     CONTROL_READY_DELAY_S,
     CONTROL_READY_RETRIES,
     GET_TIMEOUT_S,
     PUT_TIMEOUT_S,
 )
-from vpn.instance import current_instance, env_lookup
-from vpn.providers import get_provider_env
+from epoxy.instance import current_instance, env_lookup
+from epoxy.providers import get_provider_env
 
 SETTINGS_PATH = "/v1/vpn/settings"
 
@@ -77,7 +77,7 @@ def _request(
         raise ControlError(None, str(exc.reason)) from exc
     except (OSError, http.client.HTTPException) as exc:
         # urlopen lets raw socket errors (e.g. ConnectionResetError when
-        # gluetun's control server is still booting) and http.client errors
+        # the control server is still booting) and http.client errors
         # (e.g. RemoteDisconnected, BadStatusLine) escape unwrapped — map
         # them to ControlError so callers stay friendly (no tracebacks).
         raise ControlError(None, str(exc) or type(exc).__name__) from exc
@@ -117,7 +117,7 @@ def wait_for_settings(
 ) -> dict[str, Any]:
     """Poll GET settings until the control server answers (fresh containers).
 
-    A just-started gluetun is not listening yet — callers on the create path
+    A just-started container is not listening yet — callers on the create path
     wait instead of failing the first GET. Raises ControlError on timeout.
     """
     limit = CONTROL_READY_RETRIES if retries is None else retries
@@ -139,13 +139,13 @@ def wait_for_settings(
 # ---------------------------------------------------------------------------
 
 
-def get_vpn_status() -> str:
+def get_tunnel_status() -> str:
     """VPN tunnel status: 'running' or 'stopped'."""
     _, body = _request("GET", "/v1/vpn/status")
     return str(_parse_json(body, "/v1/vpn/status").get("status", ""))
 
 
-def set_vpn_status(status: str, timeout: int = GET_TIMEOUT_S) -> None:
+def set_tunnel_status(status: str, timeout: int = GET_TIMEOUT_S) -> None:
     """Start or stop the VPN tunnel ('running' / 'stopped')."""
     _request("PUT", "/v1/vpn/status", payload={"status": status}, timeout=timeout)
 
@@ -190,7 +190,7 @@ def get_port_forward() -> int | None:
     try:
         return int(port)
     except (TypeError, ValueError) as exc:
-        raise ControlError(None, f"invalid port-forward value from gluetun: {port!r}") from exc
+        raise ControlError(None, f"invalid port-forward value from container: {port!r}") from exc
 
 
 def with_location(

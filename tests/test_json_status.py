@@ -5,8 +5,8 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from vpn import cli, control, ipinfo
-from vpn.control import ControlError
+from epoxy import cli, control, ipinfo
+from epoxy.control import ControlError
 
 
 def _settings(provider: str = "surfshark", country: str | None = None) -> dict[str, object]:
@@ -40,7 +40,7 @@ def invoke_status(
     probe_geo: bool = True,
 ):
     monkeypatch.setattr(
-        "vpn.discovery.container_status",
+        "epoxy.discovery.container_status",
         lambda n=None: None if state == "absent" else state,
     )
     monkeypatch.setattr(
@@ -93,8 +93,8 @@ def test_status_json_schema_running(monkeypatch):
         "verified",
         "last_error",
     }
-    assert doc["instance"] == "gluetun"
-    assert doc["container_name"] == "gluetun"
+    assert doc["instance"] == "epoxy"
+    assert doc["container_name"] == "epoxy"
     assert doc["image"] == "qmcgaw/gluetun:latest"
     assert doc["state"] == "running"
     assert doc["selection"]["provider"] == "surfshark"
@@ -167,7 +167,7 @@ def test_status_json_probe_totally_failed_is_not_leak(monkeypatch):
 def test_status_json_uses_published_port_without_registry(monkeypatch):
     """A registry-less (imported) running container is targeted via its
     published control port, not a blind port 8000."""
-    monkeypatch.setattr("vpn.discovery.container_status", lambda n=None: "running")
+    monkeypatch.setattr("epoxy.discovery.container_status", lambda n=None: "running")
     monkeypatch.setattr(
         cli,
         "container_env",

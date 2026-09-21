@@ -1,17 +1,17 @@
 """Per-instance identity: name, control port, env, compose file, lock, registry.
 
-An *instance* is one Gluetun container fully owned by vpn, identified by its
+An *instance* is one VPN container fully owned by epoxy, identified by its
 docker container name (== instance name). Commands resolve an instance up front
 and run inside ``instance_context``; everything else reads the active instance
 through ``current_instance()``.
 
-An instance name comes from ``--instance`` or else ``GLUETUN_INSTANCE``; with
+An instance name comes from ``--instance`` or else ``EPOXY_INSTANCE``; with
 neither, resolution is a usage error — there is no hidden default instance.
 
 Isolation invariants:
 - container name is always the instance name (never derived from the compose
-  project, which is pinned to ``vpn-<instance>`` via ``docker compose -p``);
-- swaps/benches serialize on ``~/.cache/vpn/locks/<instance>.lock`` per
+  project, which is pinned to ``epoxy-<instance>`` via ``docker compose -p``);
+- swaps/benches serialize on ``~/.cache/epoxy/locks/<instance>.lock`` per
   instance only;
 - every docker exec / IP probe / status read targets the instance's container
   name explicitly.
@@ -32,10 +32,10 @@ from pathlib import Path
 
 import click
 
-from vpn import config
-from vpn.config import BASE_CONTROL_PORT, read_env_file
+from epoxy import config
+from epoxy.config import BASE_CONTROL_PORT, read_env_file
 
-INSTANCE_ENV_VAR = "GLUETUN_INSTANCE"
+INSTANCE_ENV_VAR = "EPOXY_INSTANCE"
 INSTANCE_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 PORT_RANGE = range(BASE_CONTROL_PORT, 9001)
 
@@ -51,16 +51,16 @@ def parse_instance_name(name: str) -> str:
 
 
 def required_name(instance: str | None) -> str:
-    """An explicit instance name wins; else GLUETUN_INSTANCE; else a usage error."""
+    """An explicit instance name wins; else EPOXY_INSTANCE; else a usage error."""
     name = instance or os.getenv(INSTANCE_ENV_VAR)
     if not name:
-        raise click.UsageError("No instance selected: pass --instance or set GLUETUN_INSTANCE.")
+        raise click.UsageError("No instance selected: pass --instance or set EPOXY_INSTANCE.")
     return parse_instance_name(name)
 
 
 @dataclass(frozen=True)
 class Instance:
-    """A fully-resolved vpn instance: one owned Gluetun container."""
+    """A fully-resolved epoxy instance: one owned VPN container."""
 
     name: str
     control_port: int
@@ -74,7 +74,7 @@ class Instance:
 
     @property
     def project(self) -> str:
-        return f"vpn-{self.name}"
+        return f"epoxy-{self.name}"
 
     @property
     def lock_file(self) -> str:
@@ -172,13 +172,13 @@ def compose_file_for(name: str) -> str:
 
 
 def render_compose(name: str, port: int) -> str:
-    """Per-instance compose file: bundled vpn.yml with name and host port swapped.
+    """Per-instance compose file: bundled epoxy.yml with name and host port swapped.
 
     The project is pinned by docker.compose via ``-p``, so the file only pins
     the container name (== instance) and the host control port.
     """
-    body = resource_files("vpn").joinpath("vpn.yml").read_text()
-    body = body.replace("container_name: gluetun", f"container_name: {name}")
+    body = resource_files("epoxy").joinpath("epoxy.yml").read_text()
+    body = body.replace("container_name: epoxy", f"container_name: {name}")
     body = re.sub(r"127\.0\.0\.1:\d+:8000/tcp", f"127.0.0.1:{port}:8000/tcp", body)
     return body
 
@@ -232,7 +232,7 @@ def default_instance() -> Instance:
     return resolve_instance(None)
 
 
-_active: ContextVar[Instance | None] = ContextVar("vpn_active_instance", default=None)
+_active: ContextVar[Instance | None] = ContextVar("epoxy_active_instance", default=None)
 
 
 def current_instance() -> Instance:

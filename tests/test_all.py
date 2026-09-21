@@ -7,8 +7,8 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from vpn import cli, config, discovery
-from vpn.instance import current_instance
+from epoxy import cli, config, discovery
+from epoxy.instance import current_instance
 
 ALL_COMMANDS = ["status", "down", "rm", "logs", "dns", "update"]
 SINGLE_ONLY = ["up", "connect", "bench", "ls"]
@@ -22,7 +22,7 @@ def invoke(args, **kwargs):
 def two_instances(monkeypatch):
     """Two known instances (a, b) resolvable without docker."""
     monkeypatch.setattr(discovery, "_known_names", lambda: {"b", "a"})
-    monkeypatch.setattr("vpn.cli.container_control_port", lambda name=None: None)
+    monkeypatch.setattr("epoxy.cli.container_control_port", lambda name=None: None)
     return ("a", "b")
 
 
@@ -57,30 +57,30 @@ def test_instance_and_all_conflict():
 
 
 def test_all_ignores_env_and_never_prompts(monkeypatch, two_instances):
-    """--all ignores GLUETUN_INSTANCE and never touches the picker."""
-    monkeypatch.setenv("GLUETUN_INSTANCE", "bogus")
+    """--all ignores EPOXY_INSTANCE and never touches the picker."""
+    monkeypatch.setenv("EPOXY_INSTANCE", "bogus")
     monkeypatch.setattr(cli, "_stdin_is_tty", lambda: pytest.fail("must not prompt"))
     monkeypatch.setattr(cli, "_choose_instance_name", lambda: pytest.fail("must not choose"))
     projects: list[str] = []
-    monkeypatch.setattr("vpn.control.set_vpn_status", lambda *a, **kw: None)
+    monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
 
     def fake_compose(*args: str, env_overrides=None, timeout=None):
         projects.append(current_instance().project)
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("vpn.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
     result = invoke(["down", "--all"], catch_exceptions=False)
     assert result.exit_code == 0
-    assert projects == ["vpn-a", "vpn-b"]
+    assert projects == ["epoxy-a", "epoxy-b"]
 
 
 def test_down_all_stops_each_and_reports_prefixed(monkeypatch, two_instances):
     stopped: list[str] = []
     monkeypatch.setattr(
-        "vpn.control.set_vpn_status", lambda *a, **kw: stopped.append(current_instance().name)
+        "epoxy.control.set_tunnel_status", lambda *a, **kw: stopped.append(current_instance().name)
     )
     monkeypatch.setattr(
-        "vpn.cli.compose", lambda *a, **kw: CompletedProcess((), 0)
+        "epoxy.cli.compose", lambda *a, **kw: CompletedProcess((), 0)
     )
     result = invoke(["down", "--all"], catch_exceptions=False)
     assert result.exit_code == 0
@@ -90,14 +90,14 @@ def test_down_all_stops_each_and_reports_prefixed(monkeypatch, two_instances):
 
 
 def test_down_all_continues_past_failure(monkeypatch, two_instances):
-    monkeypatch.setattr("vpn.control.set_vpn_status", lambda *a, **kw: None)
+    monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
 
     def fake_compose(*args: str, env_overrides=None, timeout=None):
         if current_instance().name == "a":
             raise SystemExit("Error: daemon exploded")
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("vpn.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
     result = invoke(["down", "--all"])
     assert result.exit_code == 1
     assert "daemon exploded" in result.output
@@ -117,7 +117,7 @@ def test_logs_all_prints_header_per_instance(monkeypatch, two_instances):
         seen.append((current_instance().name, args))
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("vpn.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
     result = invoke(["logs", "--all"], catch_exceptions=False)
     assert result.exit_code == 0
     assert "== a ==" in result.output
@@ -148,7 +148,7 @@ def test_status_all_json_envelope(monkeypatch, two_instances):
             "last_error": None,
         }
 
-    monkeypatch.setattr("vpn.cli._status_doc", fake_doc)
+    monkeypatch.setattr("epoxy.cli._status_doc", fake_doc)
     result = invoke(["status", "--all", "--json"], catch_exceptions=False)
     assert result.exit_code == 0
     doc = json.loads(result.output)
@@ -176,7 +176,7 @@ def test_status_all_json_leak_in_one_fails(monkeypatch, two_instances):
             "last_error": None,
         }
 
-    monkeypatch.setattr("vpn.cli._status_doc", fake_doc)
+    monkeypatch.setattr("epoxy.cli._status_doc", fake_doc)
     result = invoke(["status", "--all", "--json"])
     assert result.exit_code == 1
     assert len(json.loads(result.output)["instances"]) == 2
@@ -188,7 +188,7 @@ def test_status_all_human_headers_and_continues(monkeypatch, two_instances):
             raise click.ClickException("boom")
         click.echo("fine")
 
-    monkeypatch.setattr("vpn.cli._print_human_status", fake_human)
+    monkeypatch.setattr("epoxy.cli._print_human_status", fake_human)
     result = invoke(["status", "--all", "--no-speedtest"])
     assert result.exit_code == 1
     assert "== a ==" in result.output
@@ -203,7 +203,7 @@ def test_status_all_human_empty(no_instances):
 
 
 def test_dns_all_shows_each(monkeypatch, two_instances):
-    monkeypatch.setattr("vpn.control.get_dns_status", lambda: "running")
+    monkeypatch.setattr("epoxy.control.get_dns_status", lambda: "running")
     result = invoke(["dns", "--all"], catch_exceptions=False)
     assert result.exit_code == 0
     assert "a: DNS: running" in result.output
@@ -211,7 +211,7 @@ def test_dns_all_shows_each(monkeypatch, two_instances):
 
 
 def test_dns_all_sets_each_and_continues(monkeypatch, two_instances):
-    from vpn.control import ControlError
+    from epoxy.control import ControlError
 
     targets: list[str] = []
 
@@ -220,7 +220,7 @@ def test_dns_all_sets_each_and_continues(monkeypatch, two_instances):
             raise ControlError(None, "down")
         targets.append(target)
 
-    monkeypatch.setattr("vpn.control.set_dns_status", fake_set)
+    monkeypatch.setattr("epoxy.control.set_dns_status", fake_set)
     result = invoke(["dns", "--all", "on"])
     assert result.exit_code == 1
     assert targets == ["running"]
@@ -230,7 +230,7 @@ def test_dns_all_sets_each_and_continues(monkeypatch, two_instances):
 def test_update_all_triggers_each(monkeypatch, two_instances):
     triggered: list[str] = []
     monkeypatch.setattr(
-        "vpn.control.trigger_updater", lambda: triggered.append(current_instance().name)
+        "epoxy.control.trigger_updater", lambda: triggered.append(current_instance().name)
     )
     result = invoke(["update", "--all"], catch_exceptions=False)
     assert result.exit_code == 0
@@ -252,9 +252,9 @@ def _seed(name: str) -> None:
 def test_rm_all_skips_shared_without_force(monkeypatch, two_instances):
     _seed("a")
     _seed("b")
-    monkeypatch.setattr("vpn.control.set_vpn_status", lambda *a, **kw: None)
+    monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
     monkeypatch.setattr(
-        "vpn.cli.compose", lambda *args, **kw: CompletedProcess((), 0)
+        "epoxy.cli.compose", lambda *args, **kw: CompletedProcess((), 0)
     )
     monkeypatch.setattr(discovery, "consumers_of", lambda name: ["web"] if name == "a" else [])
 
@@ -269,9 +269,9 @@ def test_rm_all_skips_shared_without_force(monkeypatch, two_instances):
 def test_rm_all_force_removes_everything(monkeypatch, two_instances):
     _seed("a")
     _seed("b")
-    monkeypatch.setattr("vpn.control.set_vpn_status", lambda *a, **kw: None)
+    monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
     monkeypatch.setattr(
-        "vpn.cli.compose", lambda *args, **kw: CompletedProcess((), 0)
+        "epoxy.cli.compose", lambda *args, **kw: CompletedProcess((), 0)
     )
     monkeypatch.setattr(discovery, "consumers_of", lambda name: ["web"] if name == "a" else [])
 

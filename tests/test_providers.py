@@ -2,9 +2,9 @@
 
 import pytest
 
-from vpn import providers
-from vpn.config import DEFAULT_PROTOCOL
-from vpn.providers import (
+from epoxy import providers
+from epoxy.config import DEFAULT_PROTOCOL
+from epoxy.providers import (
     active_protocols,
     choose_protocol,
     get_active_providers,
@@ -106,7 +106,7 @@ def test_get_provider_env_skips_unset():
 
 
 def test_registry_shapes_consistent():
-    """Every required credential must be mapped to a gluetun variable."""
+    """Every required credential must be mapped to a container variable."""
     for provider, protocols in providers.PROVIDERS.items():
         assert protocols, provider
         for protocol, config in protocols.items():

@@ -2,7 +2,7 @@
 
 import pytest
 
-from vpn.countries import COUNTRY_NAMES, resolve_country, to_code
+from epoxy.countries import COUNTRY_NAMES, resolve_country, to_code
 
 
 def test_to_code_from_alpha2():

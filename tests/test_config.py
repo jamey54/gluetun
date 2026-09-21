@@ -1,6 +1,6 @@
 """Tests for .env file parsing."""
 
-from vpn.config import read_env_file
+from epoxy.config import read_env_file
 
 
 def test_read_env_file_missing(tmp_path):

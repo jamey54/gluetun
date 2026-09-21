@@ -5,9 +5,9 @@ observed exit IP differs from the host's bare public IP. Country matching is
 advisory — a VPN exit that geolocates elsewhere (virtual locations) is a
 warning, not a failure.
 
-Probability of getting a public IP, gluetun's way: instead of one echo service
+Probability of getting a public IP, the upstream way: instead of one echo service
 (ipinfo.io) whose rate limit stalls the retry loop, probe the same services
-gluetun uses, in parallel, and accept the most-agreed answer. One provider
+the container image uses, in parallel, and accept the most-agreed answer. One provider
 being rate-limited (HTTP 429) no longer blocks everyone else.
 """
 
@@ -21,7 +21,7 @@ from urllib.request import urlopen
 
 import click
 
-from vpn.config import (
+from epoxy.config import (
     CURRENT_EXIT_IP_RETRIES,
     IP_FETCH_DELAY,
     IP_FETCH_RETRIES,
@@ -30,11 +30,11 @@ from vpn.config import (
     PROBE_TIMEOUT,
     REAL_IP_TIMEOUT_S,
 )
-from vpn.countries import COUNTRY_NAMES, resolve_country, to_code
-from vpn.docker import run
-from vpn.instance import current_instance
-from vpn.statusdoc import classify_verdict
-from vpn.textutil import fold
+from epoxy.countries import COUNTRY_NAMES, resolve_country, to_code
+from epoxy.docker import run
+from epoxy.instance import current_instance
+from epoxy.statusdoc import classify_verdict
+from epoxy.textutil import fold
 
 _real_ip_cache: str | None = None
 _real_ip_info: dict[str, object] | None = None
@@ -60,7 +60,7 @@ class IpOutcome:
 def real_ip() -> str | None:
     """The host's bare public IP, cached per process. None if it can't be fetched."""
     global _real_ip_cache
-    override = os.getenv("VPN_REAL_IP")
+    override = os.getenv("EPOXY_REAL_IP")
     if override:
         return override
     if _real_ip_cache is not None:
@@ -80,7 +80,7 @@ def real_ip_info() -> dict[str, object] | None:
 def _fetch_real_ip_info() -> None:
     """Fetch and cache the full host IP response from ipinfo.io."""
     global _real_ip_cache, _real_ip_info
-    override = os.getenv("VPN_REAL_IP")
+    override = os.getenv("EPOXY_REAL_IP")
     if override:
         _real_ip_cache = override
         return
@@ -101,7 +101,7 @@ def _same_country(a: str, b: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Resilient probing: the same echo services gluetun uses, in parallel
+# Resilient probing: the same echo services the container image uses, in parallel
 # ---------------------------------------------------------------------------
 
 
@@ -311,14 +311,14 @@ def _fmt_row(
 
 
 def _fmt_table(
-    vpn_info: dict[str, object],
-    vpn_color: str | None,
+    exit_info: dict[str, object],
+    exit_color: str | None,
     bare_info: dict[str, object] | None,
 ) -> None:
     """Print the IP comparison table."""
     header = click.style(f"  {' ':3} {'IP':<20} {'Location':<25} {'Org'}", bold=True)
     click.echo(header)
-    click.echo(_fmt_row("VPN", vpn_info, vpn_color, marker="▸"))
+    click.echo(_fmt_row("VPN", exit_info, exit_color, marker="▸"))
     if bare_info:
         click.echo(_fmt_row("Bare", bare_info, "bright_black"))
 
@@ -351,7 +351,7 @@ def print_ip_status(
         return False
 
     info = outcome.result.info
-    vpn_ip = str(info.get("ip") or "")
+    exit_ip = str(info.get("ip") or "")
     sources = outcome.result.sources
     if "ipinfo" not in sources:
         backup = ", ".join(sources) or "unknown"
@@ -362,12 +362,12 @@ def print_ip_status(
             )
         )
 
-    if not vpn_ip:
+    if not exit_ip:
         click.echo("Could not fetch public IP.")
         return False
 
     state, _ = classify_verdict(
-        bare, vpn_ip, matched=outcome.result.matched, expected_country=expected_country
+        bare, exit_ip, matched=outcome.result.matched, expected_country=expected_country
     )
 
     if state == "leak":

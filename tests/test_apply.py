@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from vpn import apply, config, control
+from epoxy import apply, config, control
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +63,7 @@ def test_key_folds_case():
 
 def test_swap_lock_excludes_concurrent_holders():
     with apply.swap_lock():
-        fd = os.open(config.LOCKS_DIR / "gluetun.lock", os.O_CREAT | os.O_RDWR)
+        fd = os.open(config.LOCKS_DIR / "epoxy.lock", os.O_CREAT | os.O_RDWR)
         try:
             with pytest.raises(BlockingIOError):
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -74,7 +74,7 @@ def test_swap_lock_excludes_concurrent_holders():
 def test_swap_lock_released_after_context():
     with apply.swap_lock():
         pass
-    fd = os.open(config.LOCKS_DIR / "gluetun.lock", os.O_CREAT | os.O_RDWR)
+    fd = os.open(config.LOCKS_DIR / "epoxy.lock", os.O_CREAT | os.O_RDWR)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # must not raise
     finally:
@@ -166,7 +166,7 @@ def test_restore_settings_404_translates_to_upgrade_hint(monkeypatch):
 
 def ok_fetch(info: dict[str, Any], matched: bool = True):
     def fake(**_kwargs: Any) -> Any:
-        from vpn.ipinfo import IpOutcome, IpResult
+        from epoxy.ipinfo import IpOutcome, IpResult
 
         return IpOutcome(IpResult(info, matched))
 
@@ -207,7 +207,7 @@ def test_verify_passes_prev_ip_as_exclusion(monkeypatch):
 
 
 def test_verify_failure_classification(monkeypatch):
-    from vpn.ipinfo import IpOutcome
+    from epoxy.ipinfo import IpOutcome
 
     bare = selection()
     monkeypatch.setattr(apply, "real_ip", lambda: "203.0.113.7")

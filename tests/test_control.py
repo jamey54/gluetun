@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from vpn import control
+from epoxy import control
 
 
 class FakeResponse:
@@ -220,7 +220,7 @@ def test_get_settings_invalid_json_raises(monkeypatch):
 
 @pytest.mark.parametrize(
     "endpoint",
-    [control.get_vpn_status, control.get_dns_status, control.get_port_forward],
+    [control.get_tunnel_status, control.get_dns_status, control.get_port_forward],
 )
 def test_simple_reads_wrap_invalid_json_as_control_error(monkeypatch, endpoint):
     monkeypatch.setattr(control, "urlopen", fake_urllib((200, "oops not json")))
@@ -230,7 +230,7 @@ def test_simple_reads_wrap_invalid_json_as_control_error(monkeypatch, endpoint):
 
 def test_simple_reads_parse_valid_json(monkeypatch):
     monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"status": "running"}')))
-    assert control.get_vpn_status() == "running"
+    assert control.get_tunnel_status() == "running"
     monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"status": "running"}')))
     assert control.get_dns_status() == "running"
     monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"port": 51820}')))
@@ -314,15 +314,15 @@ def test_with_location_injects_openvpn_credentials(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_get_vpn_status(monkeypatch):
+def test_get_tunnel_status(monkeypatch):
     monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"status":"running"}')))
-    assert control.get_vpn_status() == "running"
+    assert control.get_tunnel_status() == "running"
 
 
-def test_set_vpn_status_sends_put(monkeypatch):
+def test_set_tunnel_status_sends_put(monkeypatch):
     calls: list[Any] = []
     monkeypatch.setattr(control, "urlopen", fake_urllib((200, ""), calls))
-    control.set_vpn_status("stopped")
+    control.set_tunnel_status("stopped")
     method, url, data, _ = calls[0]
     assert (method, url) == ("PUT", "http://127.0.0.1:8000/v1/vpn/status")
     assert json.loads(data) == {"status": "stopped"}
@@ -377,7 +377,7 @@ def test_get_port_forward_returns_none_when_empty(monkeypatch):
 
 
 def test_get_port_forward_bad_value_is_a_control_error_not_valueerror(monkeypatch):
-    from vpn.control import ControlError
+    from epoxy.control import ControlError
 
     monkeypatch.setattr(control, "urlopen", fake_urllib((200, '{"port":"open"}')))
     with pytest.raises(ControlError, match="port-forward"):

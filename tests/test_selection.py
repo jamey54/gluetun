@@ -6,9 +6,9 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from vpn import cli, config, control
-from vpn.apply import Selection
-from vpn.control import ControlError
+from epoxy import cli, config, control
+from epoxy.apply import Selection
+from epoxy.control import ControlError
 
 
 @pytest.fixture(autouse=True)
@@ -17,9 +17,9 @@ def creds(monkeypatch):
     monkeypatch.setenv("PROTONVPN_WIREGUARD_PRIVATE_KEY", "k")
     monkeypatch.setenv("PROTONVPN_WIREGUARD_ADDRESSES", "10.2.0.2/32")
     monkeypatch.setenv("HTTP_CONTROL_SERVER_API_KEY", "test-key")
-    monkeypatch.setattr("vpn.cli.print_ip_status", lambda **kwargs: True)
-    monkeypatch.setattr("vpn.cli.measure", lambda size=25: None)
-    monkeypatch.setattr("vpn.cli.current_exit_ip", lambda: None)
+    monkeypatch.setattr("epoxy.cli.print_ip_status", lambda **kwargs: True)
+    monkeypatch.setattr("epoxy.cli.measure", lambda size=25: None)
+    monkeypatch.setattr("epoxy.cli.current_exit_ip", lambda: None)
 
 
 @pytest.fixture()
@@ -31,7 +31,7 @@ def verified(monkeypatch):
         seen.append(kwargs)
         return True
 
-    monkeypatch.setattr("vpn.cli.print_ip_status", record)
+    monkeypatch.setattr("epoxy.cli.print_ip_status", record)
     return seen
 
 
@@ -56,7 +56,7 @@ def _control_down(monkeypatch) -> None:
     def boom(*args: object, **kwargs: object) -> None:
         raise ControlError(None, "no")
 
-    monkeypatch.setattr("vpn.control.get_settings", boom)
+    monkeypatch.setattr("epoxy.control.get_settings", boom)
 
 
 def running(monkeypatch, sel: Selection | None = RUNNING):
@@ -71,7 +71,7 @@ def swaps(monkeypatch):
     def record(sel: Selection) -> None:
         seen.append(sel)
 
-    monkeypatch.setattr("vpn.cli.apply_location", record)
+    monkeypatch.setattr("epoxy.cli.apply_location", record)
     return seen
 
 
@@ -87,7 +87,7 @@ def compose_calls(monkeypatch):
         calls.append((args, env_overrides))
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("vpn.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
     return calls
 
 
@@ -158,7 +158,7 @@ def test_up_cold_start_unready_control_is_friendly(monkeypatch, compose_calls):
         raise ControlError(None, "connection refused")
 
     monkeypatch.setattr(control, "wait_for_settings", no_server)
-    monkeypatch.setattr("vpn.cli.apply_location", down)
+    monkeypatch.setattr("epoxy.cli.apply_location", down)
     result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
     assert result.exit_code != 0
     assert "Could not switch to" in result.output
@@ -225,7 +225,7 @@ def test_up_pull_pulls_image_and_recreates(monkeypatch, compose_calls, swaps):
         pulls.append(args)
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("vpn.cli.run", fake_pull)
+    monkeypatch.setattr("epoxy.cli.run", fake_pull)
     result = invoke(["up", "--pull"])
     assert result.exit_code == 0
     assert any("pull" in c for c in pulls[0])
@@ -304,13 +304,13 @@ def test_up_recreate_works_with_unreachable_control_server(monkeypatch, compose_
 def test_logs_tails_container_by_default(monkeypatch, compose_calls):
     result = invoke(["logs"])
     assert result.exit_code == 0
-    assert compose_calls[0][0] == ("logs", "--tail", "50", "gluetun")
+    assert compose_calls[0][0] == ("logs", "--tail", "50", "epoxy")
 
 
 def test_logs_follows_and_tails_custom(monkeypatch, compose_calls):
     result = invoke(["logs", "--follow", "-n", "200"])
     assert result.exit_code == 0
-    assert compose_calls[0][0] == ("logs", "-f", "--tail", "200", "gluetun")
+    assert compose_calls[0][0] == ("logs", "-f", "--tail", "200", "epoxy")
 
 
 def test_up_explicit_protocol_requires_its_own_creds(monkeypatch, compose_calls, swaps):
@@ -324,7 +324,7 @@ def test_up_explicit_protocol_requires_its_own_creds(monkeypatch, compose_calls,
 def test_up_fails_closed_without_api_key(monkeypatch, compose_calls, swaps):
     running(monkeypatch, None)
     monkeypatch.delenv("HTTP_CONTROL_SERVER_API_KEY")
-    monkeypatch.setattr("vpn.cli.env_lookup", lambda name: None)
+    monkeypatch.setattr("epoxy.cli.env_lookup", lambda name: None)
     result = invoke(["up", "--provider", "surfshark"])
     assert result.exit_code != 0
     assert "HTTP_CONTROL_SERVER_API_KEY" in result.output
@@ -438,7 +438,7 @@ def test_connect_cancelled_picker_exits(monkeypatch, swaps):
 def test_connect_list_prints_table(monkeypatch, swaps):
     _stub_server_rows(monkeypatch)
     printed: list[Any] = []
-    monkeypatch.setattr("vpn.cli.print_servers_table", printed.append)
+    monkeypatch.setattr("epoxy.cli.print_servers_table", printed.append)
     result = invoke(["connect", "--list"])
     assert result.exit_code == 0
     assert printed and printed[0]["surfshark"]
@@ -474,9 +474,9 @@ def test_status_missing_container(monkeypatch):
 def test_status_shows_vpn_and_dns(monkeypatch):
     monkeypatch.setattr(cli, "container_status", lambda: "running")
     monkeypatch.setattr(cli, "_runtime_selection_or_error", lambda: (RUNNING, True))
-    monkeypatch.setattr("vpn.control.get_vpn_status", lambda: "running")
-    monkeypatch.setattr("vpn.control.get_dns_status", lambda: "running")
-    monkeypatch.setattr("vpn.control.get_port_forward", lambda: 5914)
+    monkeypatch.setattr("epoxy.control.get_tunnel_status", lambda: "running")
+    monkeypatch.setattr("epoxy.control.get_dns_status", lambda: "running")
+    monkeypatch.setattr("epoxy.control.get_port_forward", lambda: 5914)
     result = invoke(["status", "--no-speedtest"])
     assert result.exit_code == 0
     assert "Tunnel      running" in result.output
@@ -508,7 +508,7 @@ def test_status_does_not_probe_when_not_running(monkeypatch):
 
     monkeypatch.setattr(cli, "container_status", lambda: "exited")
     monkeypatch.setattr(cli, "effective_selection", lambda: None)
-    monkeypatch.setattr("vpn.control.get_vpn_status", boom)
+    monkeypatch.setattr("epoxy.control.get_tunnel_status", boom)
     monkeypatch.setattr(cli, "finish_connection", record_connection)
     result = invoke(["status", "--no-speedtest"])
     assert result.exit_code == 0
@@ -518,7 +518,7 @@ def test_status_does_not_probe_when_not_running(monkeypatch):
 
 
 def test_hotswap_control_error_shows_friendly_exit(monkeypatch):
-    from vpn.control import ControlError
+    from epoxy.control import ControlError
 
     def boom(*args, **kwargs):
         raise ControlError(None, "control server unreachable")
@@ -533,16 +533,16 @@ def test_hotswap_control_error_shows_friendly_exit(monkeypatch):
 
 
 def test_status_hides_dns_and_port_when_unreachable(monkeypatch):
-    from vpn.control import ControlError
+    from epoxy.control import ControlError
 
     def _control_error_noarg():
         raise ControlError(None, "no")
 
     monkeypatch.setattr(cli, "container_status", lambda: "running")
     monkeypatch.setattr(cli, "_runtime_selection_or_error", lambda: (RUNNING, True))
-    monkeypatch.setattr("vpn.control.get_vpn_status", _control_error_noarg)
-    monkeypatch.setattr("vpn.control.get_dns_status", _control_error_noarg)
-    monkeypatch.setattr("vpn.control.get_port_forward", _control_error_noarg)
+    monkeypatch.setattr("epoxy.control.get_tunnel_status", _control_error_noarg)
+    monkeypatch.setattr("epoxy.control.get_dns_status", _control_error_noarg)
+    monkeypatch.setattr("epoxy.control.get_port_forward", _control_error_noarg)
     result = invoke(["status", "--no-speedtest"])
     assert result.exit_code == 0
     assert "VPN:" not in result.output
@@ -558,7 +558,7 @@ def test_status_hides_dns_and_port_when_unreachable(monkeypatch):
 def test_down_stops_vpn_before_compose(monkeypatch, compose_calls):
     stopped: list[tuple[str, int]] = []
     monkeypatch.setattr(
-        "vpn.control.set_vpn_status",
+        "epoxy.control.set_tunnel_status",
         lambda s, timeout=10: stopped.append((s, timeout)),
     )
     result = invoke(["down"])
@@ -569,12 +569,12 @@ def test_down_stops_vpn_before_compose(monkeypatch, compose_calls):
 
 
 def test_down_succeeds_when_control_server_unreachable(monkeypatch, compose_calls):
-    from vpn.control import ControlError
+    from epoxy.control import ControlError
 
     def boom(s, timeout=10):
         raise ControlError(None, "no")
 
-    monkeypatch.setattr("vpn.control.set_vpn_status", boom)
+    monkeypatch.setattr("epoxy.control.set_tunnel_status", boom)
     result = invoke(["down"])
     assert result.exit_code == 0
     assert compose_calls[0][0] == ("down",)
@@ -585,7 +585,7 @@ def test_down_succeeds_when_control_server_times_out(monkeypatch, compose_calls)
     def boom(s, timeout=10):
         raise TimeoutError("timed out")
 
-    monkeypatch.setattr("vpn.control.set_vpn_status", boom)
+    monkeypatch.setattr("epoxy.control.set_tunnel_status", boom)
     result = invoke(["down"])
     assert result.exit_code == 0
     assert compose_calls[0][0] == ("down",)
@@ -598,7 +598,7 @@ def test_down_succeeds_when_control_server_times_out(monkeypatch, compose_calls)
 
 
 def test_dns_no_action_shows_status(monkeypatch):
-    monkeypatch.setattr("vpn.control.get_dns_status", lambda: "running")
+    monkeypatch.setattr("epoxy.control.get_dns_status", lambda: "running")
     result = invoke(["dns"])
     assert result.exit_code == 0
     assert "DNS: running" in result.output
@@ -606,7 +606,7 @@ def test_dns_no_action_shows_status(monkeypatch):
 
 def test_dns_on_starts_resolver(monkeypatch):
     calls: list[str] = []
-    monkeypatch.setattr("vpn.control.set_dns_status", lambda s: calls.append(s))
+    monkeypatch.setattr("epoxy.control.set_dns_status", lambda s: calls.append(s))
     result = invoke(["dns", "on"])
     assert result.exit_code == 0
     assert calls == ["running"]
@@ -615,7 +615,7 @@ def test_dns_on_starts_resolver(monkeypatch):
 
 def test_dns_off_stops_resolver(monkeypatch):
     calls: list[str] = []
-    monkeypatch.setattr("vpn.control.set_dns_status", lambda s: calls.append(s))
+    monkeypatch.setattr("epoxy.control.set_dns_status", lambda s: calls.append(s))
     result = invoke(["dns", "off"])
     assert result.exit_code == 0
     assert calls == ["stopped"]
@@ -623,10 +623,10 @@ def test_dns_off_stops_resolver(monkeypatch):
 
 
 def test_dns_command_fails_without_control_server(monkeypatch):
-    from vpn.control import ControlError
+    from epoxy.control import ControlError
 
     monkeypatch.setattr(
-        "vpn.control.get_dns_status",
+        "epoxy.control.get_dns_status",
         lambda: (_ for _ in ()).throw(ControlError(None, "no")),
     )
     result = invoke(["dns"])
@@ -641,7 +641,7 @@ def test_dns_command_fails_without_control_server(monkeypatch):
 
 def test_update_triggers_updater(monkeypatch):
     called = []
-    monkeypatch.setattr("vpn.control.trigger_updater", lambda: called.append(True))
+    monkeypatch.setattr("epoxy.control.trigger_updater", lambda: called.append(True))
     result = invoke(["update"])
     assert result.exit_code == 0
     assert called == [True]
@@ -649,12 +649,12 @@ def test_update_triggers_updater(monkeypatch):
 
 
 def test_update_fails_without_control_server(monkeypatch):
-    from vpn.control import ControlError
+    from epoxy.control import ControlError
 
     def boom():
         raise ControlError(None, "no")
 
-    monkeypatch.setattr("vpn.control.trigger_updater", boom)
+    monkeypatch.setattr("epoxy.control.trigger_updater", boom)
     result = invoke(["update"])
     assert result.exit_code != 0
     assert "Cannot reach control server" in result.output

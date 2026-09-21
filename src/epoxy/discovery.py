@@ -1,7 +1,7 @@
-"""Instance discovery for `vpn ls`: registry plus `vpn-*` compose containers.
+"""Instance discovery for `epoxy ls`: registry plus `epoxy-*` compose containers.
 
 Discovery only ever matches exact container names — it never reaches for "any
-gluetun container" (that is what would let vpn touch a foreign gluetun).
+VPN container" (that is what would let epoxy touch a foreign container).
 Consumers are containers sharing the instance's network namespace
 (``NetworkMode == container:<instance>``, referenced by name or container ID).
 """
@@ -9,21 +9,21 @@ Consumers are containers sharing the instance's network namespace
 from datetime import datetime
 from typing import cast
 
-from vpn import control
-from vpn.apply import Selection
-from vpn.config import CONTAINER_OP_TIMEOUT_S
-from vpn.docker import (
+from epoxy import control
+from epoxy.apply import Selection
+from epoxy.config import CONTAINER_OP_TIMEOUT_S
+from epoxy.docker import (
     container_control_port,
     container_id,
     container_started_at,
     container_status,
     run,
 )
-from vpn.instance import instance_context, list_registry, read_registry, resolve_instance
-from vpn.statusdoc import control_server_doc
-from vpn.statusdoc import selection_doc as _selection_doc
+from epoxy.instance import instance_context, list_registry, read_registry, resolve_instance
+from epoxy.statusdoc import control_server_doc
+from epoxy.statusdoc import selection_doc as _selection_doc
 
-PROJECT_PREFIX = "vpn-"
+PROJECT_PREFIX = "epoxy-"
 PROJECT_LABEL = '{{.Label "com.docker.compose.project"}}'
 NETWORK_FORMAT = "{{.Names}}\t{{.HostConfig.NetworkMode}}"
 
@@ -56,7 +56,7 @@ def _compose_projects() -> list[str]:
 
 
 def _known_names() -> set[str]:
-    """Instance names: the registry plus containers under a vpn-* project."""
+    """Instance names: the registry plus containers under an epoxy-* project."""
     names = set(list_registry())
     for project in _compose_projects():
         if project.startswith(PROJECT_PREFIX) and project[len(PROJECT_PREFIX) :]:

@@ -80,7 +80,7 @@ def control_server_doc(port: int | None, enabled: bool) -> dict[str, Any] | None
 
 def classify_verdict(
     bare: str | None,
-    vpn_ip: str | None,
+    exit_ip: str | None,
     *,
     matched: bool = True,
     expected_country: str | None = None,
@@ -97,12 +97,12 @@ def classify_verdict(
       country matched while the bare IP was unavailable — the caller must warn
       loudly in that degraded case.
     """
-    if not vpn_ip:
+    if not exit_ip:
         return "unknown", False
     if bare is None:
         if expected_country and matched:
             return "ok", True
         return "unknown", False
-    if vpn_ip == bare:
+    if exit_ip == bare:
         return "leak", False
     return "ok", True

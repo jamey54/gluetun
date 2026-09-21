@@ -1,6 +1,6 @@
 """Runtime configuration engine: selection changes via the control server.
 
-Every provider/protocol/location change hot-swaps through gluetun's settings
+Every provider/protocol/location change hot-swaps through the container's settings
 route (`GET/PUT /v1/vpn/settings`) in single-digit seconds — the container is
 never recreated. An advisory lockfile serializes read-modify-write round-trips
 across concurrent CLI processes (e.g. a bench running while a server is
@@ -15,18 +15,18 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from vpn import config
-from vpn.config import HTTP_NOT_FOUND, LOCK_FILE_PERMS
-from vpn.control import ControlError, get_settings, put_settings, with_location
-from vpn.countries import resolve_country
-from vpn.instance import current_instance
-from vpn.ipinfo import fetch_ip_info, real_ip
-from vpn.textutil import fold
+from epoxy import config
+from epoxy.config import HTTP_NOT_FOUND, LOCK_FILE_PERMS
+from epoxy.control import ControlError, get_settings, put_settings, with_location
+from epoxy.countries import resolve_country
+from epoxy.instance import current_instance
+from epoxy.ipinfo import fetch_ip_info, real_ip
+from epoxy.textutil import fold
 
 VERIFY_RETRIES = 3
 VERIFY_DELAY_S = 1
 
-_UPGRADE_HINT = "gluetun image lacks the settings route; run 'vpn up --pull' to update"
+_UPGRADE_HINT = "container image lacks the settings route; run 'epoxy up --pull' to update"
 
 
 @dataclass(frozen=True)
