@@ -188,6 +188,30 @@ def test_http_client_errors_wrapped_as_control_error(monkeypatch, error):
     assert str(excinfo.value)
 
 
+def test_wait_for_settings_recovers_once_server_listens(monkeypatch):
+    attempts = 0
+
+    def flaky() -> dict[str, Any]:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise control.ControlError(None, "connection refused")
+        return {"type": "wireguard"}
+
+    monkeypatch.setattr(control, "get_settings", flaky)
+    assert control.wait_for_settings(retries=5, delay=0) == {"type": "wireguard"}
+    assert attempts == 3
+
+
+def test_wait_for_settings_timeout_is_a_friendly_control_error(monkeypatch):
+    def down() -> dict[str, Any]:
+        raise control.ControlError(None, "connection refused")
+
+    monkeypatch.setattr(control, "get_settings", down)
+    with pytest.raises(control.ControlError, match="did not become ready"):
+        control.wait_for_settings(retries=3, delay=0)
+
+
 def test_get_settings_invalid_json_raises(monkeypatch):
     monkeypatch.setattr(control, "urlopen", fake_urllib((200, "<html>nope</html>")))
     with pytest.raises(control.ControlError):

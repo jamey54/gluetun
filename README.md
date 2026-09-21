@@ -137,6 +137,7 @@ Selections made through the control server live at **runtime only** — `.env` s
 
 - A hot-swapped location survives container restarts (`restart: always`) but is lost when the container is recreated (`vpn up --pull`, `vpn up --recreate`) or removed (`vpn down`); recreation reverts to whatever the compose file interpolates from `.env`.
 - `vpn status` shows the effective (runtime) selection; when it differs from the selection baked into the container's env at create time, `vpn status --json` reports `"drift": true`.
+- A fresh `vpn up --country/--city` starts the container first and applies the location via hot-swap, waiting up to ~15s for the just-started control server; a server that never comes up is a friendly `Could not switch to ...` error (exit 1), never a traceback.
 
 ## Connection verification
 

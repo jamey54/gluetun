@@ -553,6 +553,14 @@ def up(
             if not created:
                 # A hot-swap on a live tunnel must move the exit off this IP.
                 prev_ip = current_exit_ip()
+            else:
+                # A fresh container's control server is usually not listening
+                # yet — wait for it instead of failing the first GET. A still
+                # unreachable server falls through to _apply_request, which
+                # reports the friendly "Could not switch to ..." error.
+                click.echo("Waiting for control server...")
+                with contextlib.suppress(control.ControlError):
+                    control.wait_for_settings()
             base = current or Selection("", "")
             target, swapped = _apply_request(provider, protocol, country, city, base)
             click.echo(f"{'Swapped to' if swapped else 'Already on'} {_print_target(target)}.")

@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from vpn import cli, config
+from vpn import cli, config, control
 from vpn.apply import Selection
 from vpn.control import ControlError
 
@@ -122,12 +122,46 @@ def test_up_cold_start_requires_provider(monkeypatch, compose_calls, swaps):
 
 def test_up_cold_start_with_country_swaps_after_start(monkeypatch, compose_calls, swaps, verified):
     running(monkeypatch, None)
+    monkeypatch.setattr(control, "wait_for_settings", lambda **kwargs: {})
     result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
     assert result.exit_code == 0
     _, overrides = compose_calls[0]
     assert "SERVER_COUNTRIES" not in overrides  # location applied at runtime instead
     assert swaps == [Selection("protonvpn", "wireguard", "Japan")]
     assert verified[0]["expected_country"] == "Japan"
+
+
+def test_up_cold_start_waits_for_control_before_swap(monkeypatch, compose_calls, swaps):
+    running(monkeypatch, None)
+    waits: list[dict[str, Any]] = []
+
+    def fake_wait(**kwargs: Any) -> dict[str, Any]:
+        waits.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(control, "wait_for_settings", fake_wait)
+    result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
+    assert result.exit_code == 0
+    assert len(waits) == 1
+    assert swaps == [Selection("protonvpn", "wireguard", "Japan")]
+    assert "Waiting for control server..." in result.output
+
+
+def test_up_cold_start_unready_control_is_friendly(monkeypatch, compose_calls):
+    """A control server that never comes up is a ClickException, never a traceback."""
+    running(monkeypatch, None)
+
+    def no_server(**kwargs: Any) -> dict[str, Any]:
+        raise ControlError(None, "connection refused")
+
+    def down(sel: Selection) -> None:
+        raise ControlError(None, "connection refused")
+
+    monkeypatch.setattr(control, "wait_for_settings", no_server)
+    monkeypatch.setattr("vpn.cli.apply_location", down)
+    result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
+    assert result.exit_code != 0
+    assert "Could not switch to" in result.output
 
 
 def test_up_running_no_flags_only_verifies(monkeypatch, compose_calls, swaps):
@@ -232,6 +266,7 @@ def test_up_recreate_same_country_still_swaps(monkeypatch, compose_calls, swaps,
     """Recreate resets runtime state to env config, so an explicit request
     matching the pre-recreate selection must still be applied."""
     running(monkeypatch)  # on Germany before the recreate
+    monkeypatch.setattr(control, "wait_for_settings", lambda **kwargs: {})
     result = invoke(["up", "--recreate", "--country", "Germany"])
     assert result.exit_code == 0
     args, _ = compose_calls[0]
@@ -346,6 +381,7 @@ def test_up_cold_start_has_no_previous_exit_to_exclude(monkeypatch, compose_call
         return "7.7.7.7"
 
     monkeypatch.setattr(cli, "current_exit_ip", probe)
+    monkeypatch.setattr(control, "wait_for_settings", lambda **kwargs: {})
     running(monkeypatch, None)
     result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
     assert result.exit_code == 0

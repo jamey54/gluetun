@@ -30,6 +30,8 @@ BASE_CONTROL_PORT = 8000
 GET_TIMEOUT_S = 10
 PUT_TIMEOUT_S = 60
 DOWN_TIMEOUT_S = 3
+CONTROL_READY_RETRIES = 15
+CONTROL_READY_DELAY_S = 1
 HTTP_NOT_FOUND = 404
 
 # --- Docker operations ---------------------------------------------------

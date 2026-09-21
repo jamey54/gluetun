@@ -10,11 +10,17 @@ filters in one shot.
 import copy
 import http.client
 import json
+import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from vpn.config import GET_TIMEOUT_S, PUT_TIMEOUT_S
+from vpn.config import (
+    CONTROL_READY_DELAY_S,
+    CONTROL_READY_RETRIES,
+    GET_TIMEOUT_S,
+    PUT_TIMEOUT_S,
+)
 from vpn.instance import current_instance, env_lookup
 from vpn.providers import get_provider_env
 
@@ -103,6 +109,29 @@ def put_settings(doc: dict[str, Any]) -> str:
     """Apply a settings document (merged server-side); returns the outcome text."""
     _, body = _request("PUT", SETTINGS_PATH, payload=doc, timeout=PUT_TIMEOUT_S)
     return body.strip()
+
+
+def wait_for_settings(
+    retries: int | None = None,
+    delay: float | None = None,
+) -> dict[str, Any]:
+    """Poll GET settings until the control server answers (fresh containers).
+
+    A just-started gluetun is not listening yet — callers on the create path
+    wait instead of failing the first GET. Raises ControlError on timeout.
+    """
+    limit = CONTROL_READY_RETRIES if retries is None else retries
+    pause = CONTROL_READY_DELAY_S if delay is None else delay
+    last: ControlError | None = None
+    for attempt in range(max(limit, 1)):
+        try:
+            return get_settings()
+        except ControlError as exc:
+            last = exc
+            if attempt < limit - 1:
+                time.sleep(pause)
+    detail = last.message if last is not None else "unknown error"
+    raise ControlError(None, f"control server did not become ready in time: {detail}")
 
 
 # ---------------------------------------------------------------------------
