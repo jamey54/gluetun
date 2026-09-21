@@ -261,6 +261,38 @@ def _record_failure(name: str, exc: BaseException) -> None:
         click.echo(f"{name}: Error: {exc}", err=True)
 
 
+def for_each_instance(
+    targets: list[Instance],
+    action: Callable[[Instance, bool], None],
+    all_instances: bool,
+    header: bool = False,
+    separate: bool = False,
+) -> None:
+    """Run an action for one instance or every known instance, with isolation.
+
+    Empty targets print ``(no instances)``; per-instance failures are reported
+    via ``_record_failure`` and the run continues, exiting ``1`` when any
+    instance failed. ``header`` prints a ``== <name> ==`` banner per instance
+    under ``--all`` (``separate`` adds a blank line between instances).
+    """
+    if not targets:
+        click.echo("(no instances)")
+        return
+    failures = 0
+    for index, inst in enumerate(targets):
+        if header and all_instances:
+            if separate and index:
+                click.echo()
+            click.echo(f"== {inst.name} ==")
+        try:
+            action(inst, all_instances)
+        except (Exception, SystemExit) as exc:  # per-instance: report and continue
+            _record_failure(inst.name, exc)
+            failures += 1
+    if failures:
+        raise SystemExit(1)
+
+
 def finish_connection(
     expected_country: str | None = None,
     speedtest: bool = True,
@@ -638,23 +670,15 @@ def connect(
 def down(instance: str | None, all_instances: bool) -> None:
     """Stop the VPN container."""
     targets = _resolve_targets(instance, all_instances)
-    if not targets:
-        click.echo("(no instances)")
-        return
-    failures = 0
-    for inst in targets:
+
+    def stop_one(inst: Instance, fan_out: bool) -> None:
         with instance_context(inst):
-            try:
-                with contextlib.suppress(Exception):
-                    control.set_tunnel_status("stopped", timeout=DOWN_TIMEOUT_S)
-                compose("down", timeout=COMPOSE_TIMEOUT_S)
-            except (Exception, SystemExit) as exc:  # per-instance: report and continue
-                _record_failure(inst.name, exc)
-                failures += 1
-                continue
-            click.echo(f"{inst.name}: VPN stopped." if all_instances else "VPN stopped.")
-    if failures:
-        raise SystemExit(1)
+            with contextlib.suppress(Exception):
+                control.set_tunnel_status("stopped", timeout=DOWN_TIMEOUT_S)
+            compose("down", timeout=COMPOSE_TIMEOUT_S)
+        click.echo(f"{inst.name}: VPN stopped." if fan_out else "VPN stopped.")
+
+    for_each_instance(targets, stop_one, all_instances)
 
 
 def _remove_one(inst: Instance, force: bool) -> None:
@@ -694,18 +718,11 @@ def rm(instance: str | None, force: bool, all_instances: bool) -> None:
     if not all_instances:
         _remove_one(targets[0], force)
         return
-    if not targets:
-        click.echo("(no instances)")
-        return
-    failures = 0
-    for inst in targets:
-        try:
-            _remove_one(inst, force)
-        except (Exception, SystemExit) as exc:  # per-instance: report and continue
-            _record_failure(inst.name, exc)
-            failures += 1
-    if failures:
-        raise SystemExit(1)
+
+    def remove_one(inst: Instance, _fan_out: bool) -> None:
+        _remove_one(inst, force)
+
+    for_each_instance(targets, remove_one, all_instances)
 
 
 @main.command()
@@ -718,25 +735,16 @@ def logs(instance: str | None, all_instances: bool, follow: bool, tail: str) -> 
     if all_instances and follow:
         raise click.UsageError("--follow cannot be used with --all.")
     targets = _resolve_targets(instance, all_instances)
-    if not targets:
-        click.echo("(no instances)")
-        return
-    failures = 0
-    for inst in targets:
+
+    def show_one(inst: Instance, _fan_out: bool) -> None:
         with instance_context(inst):
-            try:
-                args: list[str] = ["logs"]
-                if follow:
-                    args.append("-f")
-                args.extend(["--tail", tail, current_instance().container])
-                if all_instances:
-                    click.echo(f"== {inst.name} ==")
-                compose(*args)
-            except (Exception, SystemExit) as exc:  # per-instance: report and continue
-                _record_failure(inst.name, exc)
-                failures += 1
-    if failures:
-        raise SystemExit(1)
+            args: list[str] = ["logs"]
+            if follow:
+                args.append("-f")
+            args.extend(["--tail", tail, current_instance().container])
+            compose(*args)
+
+    for_each_instance(targets, show_one, all_instances, header=True)
 
 
 def _kv(label: str, value: str, color: str | None = None) -> None:
@@ -855,22 +863,12 @@ def status(
             if any(_status_json_failed(doc) for doc in docs):
                 raise SystemExit(1)
             return
-        if not targets:
-            click.echo("(no instances)")
-            return
-        failures = 0
-        for index, inst in enumerate(targets):
-            if index:
-                click.echo()
-            click.echo(f"== {inst.name} ==")
+
+        def show_one(inst: Instance, _fan_out: bool) -> None:
             with instance_context(inst):
-                try:
-                    _print_human_status(size, no_speedtest)
-                except (Exception, SystemExit) as exc:  # per-instance: report and continue
-                    _record_failure(inst.name, exc)
-                    failures += 1
-        if failures:
-            raise SystemExit(1)
+                _print_human_status(size, no_speedtest)
+
+        for_each_instance(targets, show_one, all_instances, header=True, separate=True)
         return
     with instance_context(_resolve_for_command(instance)):
         if json_output:
@@ -1017,37 +1015,22 @@ def ls(instance: str | None, json_output: bool) -> None:
 def dns(instance: str | None, all_instances: bool, action: str | None) -> None:
     """Show or toggle the DNS-over-TLS resolver."""
     targets = _resolve_targets(instance, all_instances)
-    if not targets:
-        click.echo("(no instances)")
-        return
-    failures = 0
-    for inst in targets:
+
+    def dns_one(inst: Instance, fan_out: bool) -> None:
         with instance_context(inst):
             try:
                 if action is None:
-                    try:
-                        dns_status = control.get_dns_status()
-                    except control.ControlError as exc:
-                        raise click.ClickException(
-                            f"Cannot reach control server: {exc.message}"
-                        ) from None
-                    click.echo(
-                        f"{inst.name}: DNS: {dns_status}" if all_instances else f"DNS: {dns_status}"
-                    )
+                    text = f"DNS: {control.get_dns_status()}"
                 else:
                     target = "running" if action == "on" else "stopped"
-                    try:
-                        control.set_dns_status(target)
-                    except control.ControlError as exc:
-                        raise click.ClickException(
-                            f"Cannot reach control server: {exc.message}"
-                        ) from None
-                    click.echo(f"{inst.name}: DNS {target}." if all_instances else f"DNS {target}.")
-            except (Exception, SystemExit) as exc:  # per-instance: report and continue
-                _record_failure(inst.name, exc)
-                failures += 1
-    if failures:
-        raise SystemExit(1)
+                    control.set_dns_status(target)
+                    text = f"DNS {target}."
+            except control.ControlError as exc:
+                raise click.ClickException(f"Cannot reach control server: {exc.message}") from exc
+            prefix = f"{inst.name}: " if fan_out else ""
+            click.echo(prefix + text)
+
+    for_each_instance(targets, dns_one, all_instances)
 
 
 @main.command()
@@ -1056,29 +1039,17 @@ def dns(instance: str | None, all_instances: bool, action: str | None) -> None:
 def update(instance: str | None, all_instances: bool) -> None:
     """Trigger a server list update."""
     targets = _resolve_targets(instance, all_instances)
-    if not targets:
-        click.echo("(no instances)")
-        return
-    failures = 0
-    for inst in targets:
+
+    def update_one(inst: Instance, fan_out: bool) -> None:
         with instance_context(inst):
             try:
-                try:
-                    control.trigger_updater()
-                except control.ControlError as exc:
-                    raise click.ClickException(
-                        f"Cannot reach control server: {exc.message}"
-                    ) from None
-                click.echo(
-                    f"{inst.name}: Server list update triggered."
-                    if all_instances
-                    else "Server list update triggered."
-                )
-            except (Exception, SystemExit) as exc:  # per-instance: report and continue
-                _record_failure(inst.name, exc)
-                failures += 1
-    if failures:
-        raise SystemExit(1)
+                control.trigger_updater()
+            except control.ControlError as exc:
+                raise click.ClickException(f"Cannot reach control server: {exc.message}") from exc
+            prefix = f"{inst.name}: " if fan_out else ""
+            click.echo(f"{prefix}Server list update triggered.")
+
+    for_each_instance(targets, update_one, all_instances)
 
 
 @main.command()
