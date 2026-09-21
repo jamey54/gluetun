@@ -28,7 +28,9 @@ from epoxy.config import (
     IP_INFO_URL,
     PROBE_EXEC_TIMEOUT_S,
     PROBE_TIMEOUT,
+    REAL_IP_ENV_VAR,
     REAL_IP_TIMEOUT_S,
+    JsonDoc,
 )
 from epoxy.countries import COUNTRY_NAMES, resolve_country, to_code
 from epoxy.docker import run
@@ -37,14 +39,14 @@ from epoxy.statusdoc import classify_verdict
 from epoxy.textutil import fold
 
 _real_ip_cache: str | None = None
-_real_ip_info: dict[str, object] | None = None
+_real_ip_info: JsonDoc | None = None
 
 
 @dataclass
 class IpResult:
     """An accepted public-IP observation (not excluded as bare/unchanged)."""
 
-    info: dict[str, object]
+    info: JsonDoc
     matched: bool  # country matches expected_country; always True when none given
     sources: tuple[str, ...] = ()  # provider(s) that supplied the IP
 
@@ -54,13 +56,13 @@ class IpOutcome:
     """Outcome of a verification poll."""
 
     result: IpResult | None = None  # None = never observed an acceptable IP
-    last_info: dict[str, object] | None = None  # last raw observation, accepted or not
+    last_info: JsonDoc | None = None  # last raw observation, accepted or not
 
 
 def real_ip() -> str | None:
     """The host's bare public IP, cached per process. None if it can't be fetched."""
     global _real_ip_cache
-    override = os.getenv("EPOXY_REAL_IP")
+    override = os.getenv(REAL_IP_ENV_VAR)
     if override:
         return override
     if _real_ip_cache is not None:
@@ -69,7 +71,7 @@ def real_ip() -> str | None:
     return _real_ip_cache
 
 
-def real_ip_info() -> dict[str, object] | None:
+def real_ip_info() -> JsonDoc | None:
     """Full ipinfo.io response for the host's bare IP. None if unreachable."""
     if _real_ip_info is not None:
         return _real_ip_info
@@ -80,7 +82,7 @@ def real_ip_info() -> dict[str, object] | None:
 def _fetch_real_ip_info() -> None:
     """Fetch and cache the full host IP response from ipinfo.io."""
     global _real_ip_cache, _real_ip_info
-    override = os.getenv("EPOXY_REAL_IP")
+    override = os.getenv(REAL_IP_ENV_VAR)
     if override:
         _real_ip_cache = override
         return
@@ -105,7 +107,7 @@ def _same_country(a: str, b: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _json_ip(payload: str, key_map: dict[str, str]) -> dict[str, object] | None:
+def _json_ip(payload: str, key_map: dict[str, str]) -> JsonDoc | None:
     """Parse echo-service JSON into a common info dict; None when it has no IP."""
     try:
         data = json.loads(payload)
@@ -113,7 +115,7 @@ def _json_ip(payload: str, key_map: dict[str, str]) -> dict[str, object] | None:
         return None
     if not isinstance(data, dict) or not data.get("ip"):
         return None
-    info: dict[str, object] = {"ip": str(data["ip"])}
+    info: JsonDoc = {"ip": str(data["ip"])}
     for source, target in key_map.items():
         value = str(data.get(source) or "")
         if value:
@@ -121,13 +123,13 @@ def _json_ip(payload: str, key_map: dict[str, str]) -> dict[str, object] | None:
     return info
 
 
-def _extract_ipinfo(payload: str) -> dict[str, object] | None:
+def _extract_ipinfo(payload: str) -> JsonDoc | None:
     """ipinfo.io full JSON: ip, country, city, region, org."""
     keys = {"country": "country", "city": "city", "region": "region", "org": "org"}
     return _json_ip(payload, keys)
 
 
-def _extract_trace(payload: str) -> dict[str, object] | None:
+def _extract_trace(payload: str) -> JsonDoc | None:
     """Cloudflare trace text (one.one.one.one/cdn-cgi/trace): an `ip=` field."""
     for line in payload.splitlines():
         key, sep, value = line.partition("=")
@@ -136,14 +138,14 @@ def _extract_trace(payload: str) -> dict[str, object] | None:
     return None
 
 
-def _extract_ifconfigco(payload: str) -> dict[str, object] | None:
+def _extract_ifconfigco(payload: str) -> JsonDoc | None:
     """ifconfig.co echoip JSON: ip, country, city, region_name, asn_org."""
     return _json_ip(
         payload, {"country": "country", "city": "city", "region_name": "region", "asn_org": "org"}
     )
 
 
-def _extract_ip2location(payload: str) -> dict[str, object] | None:
+def _extract_ip2location(payload: str) -> JsonDoc | None:
     """api.ip2location.io JSON: ip, country_name, city_name, region_name, as."""
     return _json_ip(
         payload,
@@ -151,7 +153,7 @@ def _extract_ip2location(payload: str) -> dict[str, object] | None:
     )
 
 
-_PROVIDERS: list[tuple[str, str, Callable[[str], dict[str, object] | None]]] = [
+_PROVIDERS: list[tuple[str, str, Callable[[str], JsonDoc | None]]] = [
     ("ipinfo", "https://ipinfo.io/", _extract_ipinfo),
     ("cloudflare", "https://one.one.one.one/cdn-cgi/trace", _extract_trace),
     ("ifconfigco", "https://ifconfig.co/json", _extract_ifconfigco),
@@ -163,7 +165,7 @@ _PROVIDERS: list[tuple[str, str, Callable[[str], dict[str, object] | None]]] = [
 class _Probe:
     """One accepted probe observation and the providers that supplied it."""
 
-    info: dict[str, object]
+    info: JsonDoc
     sources: tuple[str, ...]
 
 
@@ -188,14 +190,14 @@ def _probe_provider(container: str, url: str) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
-def _vote(results: list[tuple[str, dict[str, object]]]) -> _Probe:
+def _vote(results: list[tuple[str, JsonDoc]]) -> _Probe:
     """Plurality over distinct IPs; ties broken by provider priority order."""
     order = {name: i for i, (name, _, _) in enumerate(_PROVIDERS)}
-    by_ip: dict[str, list[tuple[str, dict[str, object]]]] = {}
+    by_ip: dict[str, list[tuple[str, JsonDoc]]] = {}
     for name, info in results:
         by_ip.setdefault(str(info["ip"]), []).append((name, info))
 
-    best_entries: list[tuple[str, dict[str, object]]] = []
+    best_entries: list[tuple[str, JsonDoc]] = []
     best_priority = len(_PROVIDERS)
     for _ip, entries in by_ip.items():
         priority = min(order[name] for name, _ in entries)
@@ -206,7 +208,7 @@ def _vote(results: list[tuple[str, dict[str, object]]]) -> _Probe:
 
     ordered = sorted(best_entries, key=lambda pair: order[pair[0]])
     sources = tuple(name for name, _ in ordered)
-    merged: dict[str, object] = {}
+    merged: JsonDoc = {}
     for _name, entry in ordered:
         for key, value in entry.items():
             if key == "country":
@@ -225,7 +227,7 @@ def _probe(container: str | None = None) -> _Probe | None:
     rather than stalling the caller's retry loop; the most-agreed answer wins.
     """
     container = container or current_instance().container
-    results: list[tuple[str, dict[str, object]]] = []
+    results: list[tuple[str, JsonDoc]] = []
     with ThreadPoolExecutor(max_workers=len(_PROVIDERS)) as pool:
         futures = {
             pool.submit(_probe_provider, container, url): (name, extract)
@@ -264,7 +266,7 @@ def fetch_ip_info(
     if bare:
         exclude.add(bare)
 
-    last_info: dict[str, object] | None = None
+    last_info: JsonDoc | None = None
     for attempt in range(retries):
         result = _probe(container=container)
         if result is None:
@@ -295,7 +297,7 @@ def fetch_ip_info(
 
 def _fmt_row(
     label: str,
-    info: dict[str, object],
+    info: JsonDoc,
     color: str | None = None,
     marker: str = " ",
 ) -> str:
@@ -311,9 +313,9 @@ def _fmt_row(
 
 
 def _fmt_table(
-    exit_info: dict[str, object],
+    exit_info: JsonDoc,
     exit_color: str | None,
-    bare_info: dict[str, object] | None,
+    bare_info: JsonDoc | None,
 ) -> None:
     """Print the IP comparison table."""
     header = click.style(f"  {' ':3} {'IP':<20} {'Location':<25} {'Org'}", bold=True)

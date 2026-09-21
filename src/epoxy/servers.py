@@ -10,10 +10,10 @@ from rich.table import Table
 from epoxy.config import (
     CACHE_DIR,
     CACHE_FILE,
-    CACHE_TTL,
     CACHE_VERSION,
     DEFAULT_PROTOCOL,
     SERVER_FETCH_TIMEOUT_S,
+    cache_ttl,
 )
 from epoxy.docker import ENGINE_IMAGE, run
 from epoxy.providers import PROVIDERS, get_active_providers
@@ -165,7 +165,7 @@ def _read_cache() -> dict[str, list[ServerRow]] | None:
         servers = data["servers"]
         if not isinstance(servers, dict):
             return None
-        if time.time() - data["ts"] < CACHE_TTL:
+        if time.time() - data["ts"] < cache_ttl():
             return servers
     except (json.JSONDecodeError, KeyError, TypeError):
         pass

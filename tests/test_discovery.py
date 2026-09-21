@@ -1,4 +1,4 @@
-"""Tests for instance discovery (vpn ls) and its --json schema."""
+"""Tests for instance discovery (epoxy ls) and its --json schema."""
 
 import json
 from subprocess import CompletedProcess
@@ -6,7 +6,7 @@ from subprocess import CompletedProcess
 import pytest
 from click.testing import CliRunner
 
-from epoxy import cli, config, discovery
+from epoxy import cli, config, discovery, statusdoc
 from epoxy.apply import Selection
 
 
@@ -159,7 +159,7 @@ def test_instance_records_schema(monkeypatch):
 
 def test_selection_doc_schema():
     sel = Selection("surfshark", "wireguard", "Japan", "Tokyo")
-    assert discovery.selection_doc(sel) == {
+    assert statusdoc.selection_doc(sel) == {
         "provider": "surfshark",
         "protocol": "wireguard",
         "country": "Japan",

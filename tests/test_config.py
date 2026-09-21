@@ -1,6 +1,7 @@
 """Tests for .env file parsing."""
 
-from epoxy.config import read_env_file
+from epoxy import config
+from epoxy.config import DEFAULT_CACHE_TTL, cache_ttl, read_env_file
 
 
 def test_read_env_file_missing(tmp_path):
@@ -41,3 +42,17 @@ def test_read_env_file_tolerates_export_prefix(tmp_path):
     path = tmp_path / ".env"
     path.write_text("export SURFSHARK_KEY=abc-cba\n")
     assert read_env_file(path) == {"SURFSHARK_KEY": "abc-cba"}
+
+
+def test_default_cache_dir_is_epoxy(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert config.default_cache_dir() == tmp_path / ".cache" / "epoxy"
+
+
+def test_cache_ttl_default_and_fallback(monkeypatch):
+    monkeypatch.delenv("EPOXY_CACHE_TTL", raising=False)
+    assert cache_ttl() == DEFAULT_CACHE_TTL
+    monkeypatch.setenv("EPOXY_CACHE_TTL", "60")
+    assert cache_ttl() == 60
+    monkeypatch.setenv("EPOXY_CACHE_TTL", "garbage")
+    assert cache_ttl() == DEFAULT_CACHE_TTL

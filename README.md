@@ -267,7 +267,7 @@ Secrets live in `.env` in the working directory (copy `.env.sample` to get start
 |----------|---------|-------------|
 | `EPOXY_INSTANCE` | *(required for scripts)* | Instance name; pass `--instance` or set this. Omitting both asks interactively on a terminal (pick from the known instances); non-interactive runs fail with a usage error. |
 | `EPOXY_CTL_PORT` | unset | Control-server host port for the resolved instance (equivalent to `--ctl-port`) |
-| `EPOXY_CACHE_TTL` | `3600` | Server cache TTL (seconds) |
+| `EPOXY_CACHE_TTL` | `3600` | Server cache TTL (seconds); missing or non-numeric values fall back to the default |
 | `EPOXY_DEBUG` | unset | Set to enable debug output (same as `--debug`) |
 
 ### Credentials

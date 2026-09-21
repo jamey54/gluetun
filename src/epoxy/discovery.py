@@ -11,7 +11,7 @@ from typing import cast
 
 from epoxy import control
 from epoxy.apply import Selection
-from epoxy.config import CONTAINER_OP_TIMEOUT_S
+from epoxy.config import CONTAINER_OP_TIMEOUT_S, JsonDoc
 from epoxy.docker import (
     container_control_port,
     container_id,
@@ -20,8 +20,7 @@ from epoxy.docker import (
     run,
 )
 from epoxy.instance import instance_context, list_registry, read_registry, resolve_instance
-from epoxy.statusdoc import control_server_doc
-from epoxy.statusdoc import selection_doc as _selection_doc
+from epoxy.statusdoc import control_server_doc, selection_doc
 
 PROJECT_PREFIX = "epoxy-"
 PROJECT_LABEL = '{{.Label "com.docker.compose.project"}}'
@@ -83,11 +82,6 @@ def _runtime_selection(name: str, port: int | None) -> Selection | None:
     return sel if sel.provider else None
 
 
-def selection_doc(sel: Selection | None) -> dict[str, str | None] | None:
-    """Selection document shared by status --json and ls --json (statusdoc)."""
-    return _selection_doc(sel)
-
-
 def consumers_of(name: str) -> list[str]:
     """Containers sharing this instance's network namespace, sorted.
 
@@ -125,14 +119,14 @@ def consumers_of(name: str) -> list[str]:
     return sorted(consumers)
 
 
-def instance_records() -> list[dict[str, object]]:
+def instance_records() -> list[JsonDoc]:
     """One record per known instance, aligned with the ls --json schema.
 
     Records are ordered by start time (oldest first); instances without a
     start time (absent, never started) sort last, tie-broken by name for
     determinism.
     """
-    records: list[dict[str, object]] = []
+    records: list[JsonDoc] = []
     for name in sorted(_known_names()):
         state = _state(name)
         port = _control_port(name)
@@ -163,7 +157,7 @@ def _local_started(value: str) -> str:
         return value
 
 
-def print_ls_table(records: list[dict[str, object]]) -> None:
+def print_ls_table(records: list[JsonDoc]) -> None:
     """Human-readable ls output."""
     import click
 

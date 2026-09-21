@@ -33,9 +33,8 @@ from pathlib import Path
 import click
 
 from epoxy import config
-from epoxy.config import BASE_CONTROL_PORT, read_env_file
+from epoxy.config import BASE_CONTROL_PORT, INSTANCE_ENV_VAR, JsonDoc, read_env_file
 
-INSTANCE_ENV_VAR = "EPOXY_INSTANCE"
 INSTANCE_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 PORT_RANGE = range(BASE_CONTROL_PORT, 9001)
 
@@ -54,7 +53,7 @@ def required_name(instance: str | None) -> str:
     """An explicit instance name wins; else EPOXY_INSTANCE; else a usage error."""
     name = instance or os.getenv(INSTANCE_ENV_VAR)
     if not name:
-        raise click.UsageError("No instance selected: pass --instance or set EPOXY_INSTANCE.")
+        raise click.UsageError(f"No instance selected: pass --instance or set {INSTANCE_ENV_VAR}.")
     return parse_instance_name(name)
 
 
@@ -94,7 +93,7 @@ def registry_path(name: str) -> Path:
     return config.INSTANCES_DIR / f"{name}.json"
 
 
-def read_registry(name: str) -> dict[str, object] | None:
+def read_registry(name: str) -> JsonDoc | None:
     """Persisted instance state (control port, env file); None when absent."""
     path = registry_path(name)
     if not path.exists():

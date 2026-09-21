@@ -8,17 +8,45 @@ lives in epoxy.instance.
 import os
 from pathlib import Path
 
+# A JSON-ish document (status records, registry entries, probe observations).
+JsonDoc = dict[str, object]
+
+# --- Env var names (the CLI's own contract; the container's VPN_*/HTTP_* names
+# --- stay untouched in epoxy.yml / control.py) ------------------------------
+
+INSTANCE_ENV_VAR = "EPOXY_INSTANCE"
+CTL_PORT_ENV_VAR = "EPOXY_CTL_PORT"
+CACHE_TTL_ENV_VAR = "EPOXY_CACHE_TTL"
+DEBUG_ENV_VAR = "EPOXY_DEBUG"
+REAL_IP_ENV_VAR = "EPOXY_REAL_IP"
+
 # --- Paths ---------------------------------------------------------------
 
-CACHE_DIR = Path.home() / ".cache" / "vpn"
+
+def default_cache_dir() -> Path:
+    """The default cache root (isolated per-test via the module attrs)."""
+    return Path.home() / ".cache" / "epoxy"
+
+
+CACHE_DIR = default_cache_dir()
 CACHE_FILE = CACHE_DIR / "servers.json"
 LOCKS_DIR = CACHE_DIR / "locks"
 INSTANCES_DIR = CACHE_DIR / "instances"
 
 # --- Caching -------------------------------------------------------------
 
-CACHE_TTL: int = int(os.getenv("EPOXY_CACHE_TTL", "3600"))
+DEFAULT_CACHE_TTL = 3600
 CACHE_VERSION = 4
+
+
+def cache_ttl() -> int:
+    """Server cache TTL in seconds; missing/garbage values fall back to default."""
+    raw = os.getenv(CACHE_TTL_ENV_VAR, "")
+    try:
+        return int(raw) if raw else DEFAULT_CACHE_TTL
+    except ValueError:
+        return DEFAULT_CACHE_TTL
+
 
 # --- Lock ----------------------------------------------------------------
 

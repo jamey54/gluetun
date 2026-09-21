@@ -27,12 +27,16 @@ from epoxy.bench import (
 )
 from epoxy.config import (
     COMPOSE_TIMEOUT_S,
+    CTL_PORT_ENV_VAR,
+    DEBUG_ENV_VAR,
     DEFAULT_PROTOCOL,
     DEFAULT_SCAN_SIZE_MB,
     DEFAULT_SIZE_MB,
     DEFAULT_TEST_CONCURRENCY,
     DOWN_TIMEOUT_S,
+    INSTANCE_ENV_VAR,
     PULL_TIMEOUT_S,
+    JsonDoc,
 )
 from epoxy.countries import resolve_country
 from epoxy.discovery import _state, instance_records, print_ls_table
@@ -49,7 +53,6 @@ from epoxy.docker import (
 )
 from epoxy.install import completion_block, default_rc, detect_shell, path_hint, upsert_block
 from epoxy.instance import (
-    INSTANCE_ENV_VAR,
     Instance,
     allocate_free_port,
     current_instance,
@@ -140,7 +143,7 @@ def add_instance_options(ctl_port: bool = False, env_file: bool = False) -> Call
         func = click.option(
             "--instance",
             default=None,
-            help="Instance name (default: $EPOXY_INSTANCE; required when unset)",
+            help=f"Instance name (default: ${INSTANCE_ENV_VAR}; required when unset)",
         )(func)
         return func
 
@@ -149,7 +152,7 @@ def add_instance_options(ctl_port: bool = False, env_file: bool = False) -> Call
 
 def _no_instance_error() -> NoReturn:
     """The documented no-target error: --instance or EPOXY_INSTANCE required."""
-    raise click.UsageError("No instance selected: pass --instance or set EPOXY_INSTANCE.")
+    raise click.UsageError(f"No instance selected: pass --instance or set {INSTANCE_ENV_VAR}.")
 
 
 def _stdin_is_tty() -> bool:
@@ -192,13 +195,13 @@ def _resolve_for_command(
     base = resolve_instance(name, env_file=env_file)
     port = ctl_port
     if port is None:
-        env_port = base.env.get("EPOXY_CTL_PORT")
+        env_port = base.env.get(CTL_PORT_ENV_VAR)
         if env_port:
             try:
                 port = int(env_port)
             except ValueError:
                 raise click.UsageError(
-                    f"EPOXY_CTL_PORT must be a port number, got {env_port!r}"
+                    f"{CTL_PORT_ENV_VAR} must be a port number, got {env_port!r}"
                 ) from None
     if port is None:
         return _apply_published_fallback(base)
@@ -350,7 +353,7 @@ def _baked_selection() -> Selection | None:
     )
 
 
-def _status_doc() -> dict[str, object]:
+def _status_doc() -> JsonDoc:
     """Stable status document (status --json). Called inside the instance context.
 
     Contract (README §"Machine-readable output"): exit code is 0 for a healthy
@@ -479,7 +482,7 @@ def _apply_request(
 
 @click.group()
 @click.version_option(version=__version__, prog_name="epoxy", message="%(prog)s %(version)s")
-@click.option("--debug", is_flag=True, envvar="EPOXY_DEBUG", help="Enable debug output")
+@click.option("--debug", is_flag=True, envvar=DEBUG_ENV_VAR, help="Enable debug output")
 def main(debug: bool) -> None:
     """Epoxy VPN manager."""
     global DEBUG
@@ -525,7 +528,7 @@ def up(
     # even though its registry record is gone.
     if (
         ctl_port is None
-        and inst.env.get("EPOXY_CTL_PORT") is None
+        and inst.env.get(CTL_PORT_ENV_VAR) is None
         and read_registry(inst.name) is None
     ):
         if container_running(name=inst.name):
@@ -756,7 +759,7 @@ def _kv(label: str, value: str, color: str | None = None) -> None:
         click.echo(text)
 
 
-def _status_json_failed(doc: dict[str, object]) -> bool:
+def _status_json_failed(doc: JsonDoc) -> bool:
     """Whether a status document trips the exit-1 rules: leak, or unreachable
     control server while the container runs/restarts."""
     if doc["leak"]:
