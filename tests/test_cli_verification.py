@@ -5,7 +5,8 @@ from collections.abc import Callable
 
 import pytest
 
-from epoxy import cli, ipinfo
+from epoxy import ipinfo
+from epoxy.commands import _common
 
 
 def stub_probe(
@@ -49,8 +50,8 @@ def offline_real_ip(monkeypatch):
 
 
 def test_log_env_masks_sensitive_values(monkeypatch, capsys):
-    monkeypatch.setattr(cli, "DEBUG", True)
-    cli._log_env(
+    monkeypatch.setattr(_common, "DEBUG", True)
+    _common._log_env(
         {
             "VPN_SERVICE_PROVIDER": "surfshark",
             "WIREGUARD_PRIVATE_KEY": "super-secret",
@@ -66,7 +67,7 @@ def test_log_env_masks_sensitive_values(monkeypatch, capsys):
 
 
 def test_log_env_silent_when_debug_off(capsys):
-    cli._log_env({"WIREGUARD_PRIVATE_KEY": "super-secret"})
+    _common._log_env({"WIREGUARD_PRIVATE_KEY": "super-secret"})
     assert capsys.readouterr().out == ""
 
 

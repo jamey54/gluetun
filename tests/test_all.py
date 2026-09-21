@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from epoxy import cli, config, discovery
+from epoxy.commands import _common
 from epoxy.instance import current_instance
 
 ALL_COMMANDS = ["status", "down", "rm", "logs", "dns", "update"]
@@ -22,7 +23,7 @@ def invoke(args, **kwargs):
 def two_instances(monkeypatch):
     """Two known instances (a, b) resolvable without docker."""
     monkeypatch.setattr(discovery, "_known_names", lambda: {"b", "a"})
-    monkeypatch.setattr("epoxy.cli.container_control_port", lambda name=None: None)
+    monkeypatch.setattr("epoxy.docker.container_control_port", lambda name=None: None)
     return ("a", "b")
 
 
@@ -59,8 +60,8 @@ def test_instance_and_all_conflict():
 def test_all_ignores_env_and_never_prompts(monkeypatch, two_instances):
     """--all ignores EPOXY_INSTANCE and never touches the picker."""
     monkeypatch.setenv("EPOXY_INSTANCE", "bogus")
-    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: pytest.fail("must not prompt"))
-    monkeypatch.setattr(cli, "_choose_instance_name", lambda: pytest.fail("must not choose"))
+    monkeypatch.setattr(_common, "_stdin_is_tty", lambda: pytest.fail("must not prompt"))
+    monkeypatch.setattr(_common, "_choose_instance_name", lambda: pytest.fail("must not choose"))
     projects: list[str] = []
     monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
 
@@ -68,7 +69,7 @@ def test_all_ignores_env_and_never_prompts(monkeypatch, two_instances):
         projects.append(current_instance().project)
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.docker.compose", fake_compose)
     result = invoke(["down", "--all"], catch_exceptions=False)
     assert result.exit_code == 0
     assert projects == ["epoxy-a", "epoxy-b"]
@@ -79,7 +80,7 @@ def test_down_all_stops_each_and_reports_prefixed(monkeypatch, two_instances):
     monkeypatch.setattr(
         "epoxy.control.set_tunnel_status", lambda *a, **kw: stopped.append(current_instance().name)
     )
-    monkeypatch.setattr("epoxy.cli.compose", lambda *a, **kw: CompletedProcess((), 0))
+    monkeypatch.setattr("epoxy.docker.compose", lambda *a, **kw: CompletedProcess((), 0))
     result = invoke(["down", "--all"], catch_exceptions=False)
     assert result.exit_code == 0
     assert stopped == ["a", "b"]
@@ -95,7 +96,7 @@ def test_down_all_continues_past_failure(monkeypatch, two_instances):
             raise SystemExit("Error: daemon exploded")
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.docker.compose", fake_compose)
     result = invoke(["down", "--all"])
     assert result.exit_code == 1
     assert "daemon exploded" in result.output
@@ -115,7 +116,7 @@ def test_logs_all_prints_header_per_instance(monkeypatch, two_instances):
         seen.append((current_instance().name, args))
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.docker.compose", fake_compose)
     result = invoke(["logs", "--all"], catch_exceptions=False)
     assert result.exit_code == 0
     assert "== a ==" in result.output
@@ -146,7 +147,7 @@ def test_status_all_json_envelope(monkeypatch, two_instances):
             "last_error": None,
         }
 
-    monkeypatch.setattr("epoxy.cli._status_doc", fake_doc)
+    monkeypatch.setattr("epoxy.commands.status._status_doc", fake_doc)
     result = invoke(["status", "--all", "--json"], catch_exceptions=False)
     assert result.exit_code == 0
     doc = json.loads(result.output)
@@ -174,7 +175,7 @@ def test_status_all_json_leak_in_one_fails(monkeypatch, two_instances):
             "last_error": None,
         }
 
-    monkeypatch.setattr("epoxy.cli._status_doc", fake_doc)
+    monkeypatch.setattr("epoxy.commands.status._status_doc", fake_doc)
     result = invoke(["status", "--all", "--json"])
     assert result.exit_code == 1
     assert len(json.loads(result.output)["instances"]) == 2
@@ -186,7 +187,7 @@ def test_status_all_human_headers_and_continues(monkeypatch, two_instances):
             raise click.ClickException("boom")
         click.echo("fine")
 
-    monkeypatch.setattr("epoxy.cli._print_human_status", fake_human)
+    monkeypatch.setattr("epoxy.commands.status._print_human_status", fake_human)
     result = invoke(["status", "--all", "--no-speedtest"])
     assert result.exit_code == 1
     assert "== a ==" in result.output
@@ -251,7 +252,7 @@ def test_rm_all_skips_shared_without_force(monkeypatch, two_instances):
     _seed("a")
     _seed("b")
     monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
-    monkeypatch.setattr("epoxy.cli.compose", lambda *args, **kw: CompletedProcess((), 0))
+    monkeypatch.setattr("epoxy.docker.compose", lambda *args, **kw: CompletedProcess((), 0))
     monkeypatch.setattr(discovery, "consumers_of", lambda name: ["web"] if name == "a" else [])
 
     result = invoke(["rm", "--all"])
@@ -266,7 +267,7 @@ def test_rm_all_force_removes_everything(monkeypatch, two_instances):
     _seed("a")
     _seed("b")
     monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
-    monkeypatch.setattr("epoxy.cli.compose", lambda *args, **kw: CompletedProcess((), 0))
+    monkeypatch.setattr("epoxy.docker.compose", lambda *args, **kw: CompletedProcess((), 0))
     monkeypatch.setattr(discovery, "consumers_of", lambda name: ["web"] if name == "a" else [])
 
     result = invoke(["rm", "--all", "--force"], catch_exceptions=False)

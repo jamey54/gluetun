@@ -6,8 +6,9 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from epoxy import cli, config, control
+from epoxy import apply, cli, config, control, docker, ipinfo, picker, servers
 from epoxy.apply import Selection
+from epoxy.commands import _common
 from epoxy.control import ControlError
 
 
@@ -17,9 +18,9 @@ def creds(monkeypatch):
     monkeypatch.setenv("PROTONVPN_WIREGUARD_PRIVATE_KEY", "k")
     monkeypatch.setenv("PROTONVPN_WIREGUARD_ADDRESSES", "10.2.0.2/32")
     monkeypatch.setenv("HTTP_CONTROL_SERVER_API_KEY", "test-key")
-    monkeypatch.setattr("epoxy.cli.print_ip_status", lambda **kwargs: True)
-    monkeypatch.setattr("epoxy.cli.measure", lambda size=25: None)
-    monkeypatch.setattr("epoxy.cli.current_exit_ip", lambda: None)
+    monkeypatch.setattr("epoxy.ipinfo.print_ip_status", lambda **kwargs: True)
+    monkeypatch.setattr("epoxy.speedtest.measure", lambda size=25: None)
+    monkeypatch.setattr("epoxy.ipinfo.current_exit_ip", lambda: None)
 
 
 @pytest.fixture()
@@ -31,7 +32,7 @@ def verified(monkeypatch):
         seen.append(kwargs)
         return True
 
-    monkeypatch.setattr("epoxy.cli.print_ip_status", record)
+    monkeypatch.setattr("epoxy.ipinfo.print_ip_status", record)
     return seen
 
 
@@ -60,8 +61,8 @@ def _control_down(monkeypatch) -> None:
 
 
 def running(monkeypatch, sel: Selection | None = RUNNING):
-    monkeypatch.setattr(cli, "container_running", lambda name=None: sel is not None)
-    monkeypatch.setattr(cli, "effective_selection", lambda: sel)
+    monkeypatch.setattr(docker, "container_running", lambda name=None: sel is not None)
+    monkeypatch.setattr(_common, "effective_selection", lambda: sel)
 
 
 @pytest.fixture()
@@ -71,7 +72,7 @@ def swaps(monkeypatch):
     def record(sel: Selection) -> None:
         seen.append(sel)
 
-    monkeypatch.setattr("epoxy.cli.apply_location", record)
+    monkeypatch.setattr("epoxy.apply.apply_location", record)
     return seen
 
 
@@ -87,7 +88,7 @@ def compose_calls(monkeypatch):
         calls.append((args, env_overrides))
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.docker.compose", fake_compose)
     return calls
 
 
@@ -158,7 +159,7 @@ def test_up_cold_start_unready_control_is_friendly(monkeypatch, compose_calls):
         raise ControlError(None, "connection refused")
 
     monkeypatch.setattr(control, "wait_for_settings", no_server)
-    monkeypatch.setattr("epoxy.cli.apply_location", down)
+    monkeypatch.setattr("epoxy.apply.apply_location", down)
     result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
     assert result.exit_code != 0
     assert "Could not switch to" in result.output
@@ -221,11 +222,13 @@ def test_up_pull_pulls_image_and_recreates(monkeypatch, compose_calls, swaps):
     running(monkeypatch)
     pulls: list[tuple[str, ...]] = []
 
-    def fake_pull(*args: str, timeout: float | None = None) -> CompletedProcess[str]:
-        pulls.append(args)
-        return CompletedProcess((), 0)
+    def fake_pull(*args: str, **kwargs: object) -> CompletedProcess[str]:
+        if args[:2] == ("docker", "pull"):
+            pulls.append(args)
+            return CompletedProcess((), 0)
+        return CompletedProcess((), 1, stdout="", stderr="")
 
-    monkeypatch.setattr("epoxy.cli.run", fake_pull)
+    monkeypatch.setattr("epoxy.docker.run", fake_pull)
     result = invoke(["up", "--pull"])
     assert result.exit_code == 0
     assert any("pull" in c for c in pulls[0])
@@ -247,7 +250,7 @@ def test_up_recreate_verifies_baked_country(monkeypatch, compose_calls, swaps, v
     country baked into the container env (same as a cold start)."""
     running(monkeypatch)
     monkeypatch.setattr(
-        cli,
+        docker,
         "container_env",
         lambda: {
             "VPN_SERVICE_PROVIDER": "surfshark",
@@ -285,7 +288,7 @@ def test_up_city_without_any_country_fails_clearly(monkeypatch, compose_calls, s
 
 def test_up_running_unreachable_control_server_exits(monkeypatch, compose_calls, swaps):
     running(monkeypatch, None)
-    monkeypatch.setattr(cli, "container_running", lambda name=None: True)
+    monkeypatch.setattr(docker, "container_running", lambda name=None: True)
     result = invoke(["up", "--country", "Japan"])
     assert result.exit_code != 0
     assert "control server" in result.output
@@ -295,7 +298,7 @@ def test_up_running_unreachable_control_server_exits(monkeypatch, compose_calls,
 def test_up_recreate_works_with_unreachable_control_server(monkeypatch, compose_calls):
     """--recreate is the escape hatch: it must not block on the control server."""
     running(monkeypatch)
-    monkeypatch.setattr(cli, "effective_selection", lambda: None)
+    monkeypatch.setattr(_common, "effective_selection", lambda: None)
     result = invoke(["up", "--provider", "surfshark", "--recreate"])
     assert result.exit_code == 0
     assert compose_calls[0][0] == ("up", "-d", "--force-recreate")
@@ -324,7 +327,7 @@ def test_up_explicit_protocol_requires_its_own_creds(monkeypatch, compose_calls,
 def test_up_fails_closed_without_api_key(monkeypatch, compose_calls, swaps):
     running(monkeypatch, None)
     monkeypatch.delenv("HTTP_CONTROL_SERVER_API_KEY")
-    monkeypatch.setattr("epoxy.cli.env_lookup", lambda name: None)
+    monkeypatch.setattr("epoxy.commands._common.env_lookup", lambda name: None)
     result = invoke(["up", "--provider", "surfshark"])
     assert result.exit_code != 0
     assert "HTTP_CONTROL_SERVER_API_KEY" in result.output
@@ -345,7 +348,7 @@ def test_connect_requires_running_container(monkeypatch):
 
 def test_connect_swap_excludes_previous_exit(monkeypatch, swaps, verified):
     running(monkeypatch)
-    monkeypatch.setattr(cli, "current_exit_ip", lambda: "9.9.9.9")
+    monkeypatch.setattr(ipinfo, "current_exit_ip", lambda: "9.9.9.9")
     result = invoke(["connect", "--country", "Japan"])
     assert result.exit_code == 0
     assert swaps == [Selection("surfshark", "wireguard", "Japan")]
@@ -356,7 +359,7 @@ def test_connect_swap_excludes_previous_exit(monkeypatch, swaps, verified):
 def test_connect_already_on_keeps_current_exit_valid(monkeypatch, swaps, verified):
     """No swap happened: the tunnel's current IP must not be excluded."""
     running(monkeypatch)
-    monkeypatch.setattr(cli, "current_exit_ip", lambda: "1.1.1.1")
+    monkeypatch.setattr(ipinfo, "current_exit_ip", lambda: "1.1.1.1")
     result = invoke(["connect", "--country", "Germany"])
     assert result.exit_code == 0
     assert swaps == []
@@ -366,7 +369,7 @@ def test_connect_already_on_keeps_current_exit_valid(monkeypatch, swaps, verifie
 
 def test_up_running_swap_excludes_previous_exit(monkeypatch, compose_calls, swaps, verified):
     running(monkeypatch)
-    monkeypatch.setattr(cli, "current_exit_ip", lambda: "8.8.8.8")
+    monkeypatch.setattr(ipinfo, "current_exit_ip", lambda: "8.8.8.8")
     result = invoke(["up", "--country", "Japan"])
     assert result.exit_code == 0
     assert swaps == [Selection("surfshark", "wireguard", "Japan")]
@@ -380,7 +383,7 @@ def test_up_cold_start_has_no_previous_exit_to_exclude(monkeypatch, compose_call
         calls.append("probe")
         return "7.7.7.7"
 
-    monkeypatch.setattr(cli, "current_exit_ip", probe)
+    monkeypatch.setattr(ipinfo, "current_exit_ip", probe)
     monkeypatch.setattr(control, "wait_for_settings", lambda **kwargs: {})
     running(monkeypatch, None)
     result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
@@ -392,7 +395,7 @@ def test_up_cold_start_has_no_previous_exit_to_exclude(monkeypatch, compose_call
 def test_connect_picker_selection(monkeypatch, swaps):
     running(monkeypatch)
     _stub_server_rows(monkeypatch)
-    monkeypatch.setattr(cli, "select_server", lambda rows: "[surfshark/wireguard] Japan - Tokyo")
+    monkeypatch.setattr(picker, "select_server", lambda rows: "[surfshark/wireguard] Japan - Tokyo")
     result = invoke(["connect"])
     assert result.exit_code == 0
     assert swaps == [Selection("surfshark", "wireguard", "Japan", "Tokyo")]
@@ -402,7 +405,7 @@ def test_up_cold_start_verifies_baked_country(monkeypatch, compose_calls, swaps,
     """A plain cold start must verify against the country baked via compose env."""
     running(monkeypatch, None)
     monkeypatch.setattr(
-        cli,
+        docker,
         "container_env",
         lambda: {
             "VPN_SERVICE_PROVIDER": "surfshark",
@@ -428,7 +431,7 @@ def test_connect_city_without_country_fails_clearly(monkeypatch, swaps):
 def test_connect_cancelled_picker_exits(monkeypatch, swaps):
     running(monkeypatch)
     _stub_server_rows(monkeypatch)
-    monkeypatch.setattr(cli, "select_server", lambda rows: None)
+    monkeypatch.setattr(picker, "select_server", lambda rows: None)
     result = invoke(["connect"])
     assert result.exit_code != 0
     assert "No selection." in result.output
@@ -438,7 +441,7 @@ def test_connect_cancelled_picker_exits(monkeypatch, swaps):
 def test_connect_list_prints_table(monkeypatch, swaps):
     _stub_server_rows(monkeypatch)
     printed: list[Any] = []
-    monkeypatch.setattr("epoxy.cli.print_servers_table", printed.append)
+    monkeypatch.setattr("epoxy.servers.print_servers_table", printed.append)
     result = invoke(["connect", "--list"])
     assert result.exit_code == 0
     assert printed and printed[0]["surfshark"]
@@ -447,8 +450,8 @@ def test_connect_list_prints_table(monkeypatch, swaps):
 
 def _stub_server_rows(monkeypatch) -> None:
     data = {"surfshark": [{"country": "Japan", "city": "", "hostname": "jp1", "vpn": "wireguard"}]}
-    monkeypatch.setattr(cli, "get_servers", lambda: data)
-    monkeypatch.setattr(cli, "listable_servers", lambda d: d)
+    monkeypatch.setattr(servers, "get_servers", lambda: data)
+    monkeypatch.setattr(servers, "listable_servers", lambda d: d)
 
 
 # ---------------------------------------------------------------------------
@@ -457,23 +460,23 @@ def _stub_server_rows(monkeypatch) -> None:
 
 
 def test_status_unknown_when_control_server_down(monkeypatch):
-    monkeypatch.setattr(cli, "container_status", lambda: "running")
-    monkeypatch.setattr(cli, "_runtime_selection_or_error", lambda: (None, False))
+    monkeypatch.setattr(docker, "container_status", lambda: "running")
+    monkeypatch.setattr(_common, "_runtime_selection_or_error", lambda: (None, False))
     result = invoke(["status", "--no-speedtest"])
     assert result.exit_code == 1
     assert "unknown" in result.output
 
 
 def test_status_missing_container(monkeypatch):
-    monkeypatch.setattr(cli, "container_status", lambda: None)
+    monkeypatch.setattr(docker, "container_status", lambda: None)
     result = invoke(["status"])
     assert result.exit_code == 1
     assert "not found" in result.output
 
 
 def test_status_shows_vpn_and_dns(monkeypatch):
-    monkeypatch.setattr(cli, "container_status", lambda: "running")
-    monkeypatch.setattr(cli, "_runtime_selection_or_error", lambda: (RUNNING, True))
+    monkeypatch.setattr(docker, "container_status", lambda: "running")
+    monkeypatch.setattr(_common, "_runtime_selection_or_error", lambda: (RUNNING, True))
     monkeypatch.setattr("epoxy.control.get_tunnel_status", lambda: "running")
     monkeypatch.setattr("epoxy.control.get_dns_status", lambda: "running")
     monkeypatch.setattr("epoxy.control.get_port_forward", lambda: 5914)
@@ -488,8 +491,8 @@ def test_status_shows_vpn_and_dns(monkeypatch):
 
 def test_status_flags_running_country_mismatch(monkeypatch, verified):
     """`vpn status` must pass the running country so a geo mismatch shows yellow."""
-    monkeypatch.setattr(cli, "container_status", lambda: "running")
-    monkeypatch.setattr(cli, "_runtime_selection_or_error", lambda: (RUNNING, True))
+    monkeypatch.setattr(docker, "container_status", lambda: "running")
+    monkeypatch.setattr(_common, "_runtime_selection_or_error", lambda: (RUNNING, True))
     result = invoke(["status", "--no-speedtest"])
     assert result.exit_code == 0
     assert verified and verified[0]["expected_country"] == "Germany"
@@ -506,10 +509,10 @@ def test_status_does_not_probe_when_not_running(monkeypatch):
         calls.append((kw, True))
         return True
 
-    monkeypatch.setattr(cli, "container_status", lambda: "exited")
-    monkeypatch.setattr(cli, "effective_selection", lambda: None)
+    monkeypatch.setattr(docker, "container_status", lambda: "exited")
+    monkeypatch.setattr(_common, "effective_selection", lambda: None)
     monkeypatch.setattr("epoxy.control.get_tunnel_status", boom)
-    monkeypatch.setattr(cli, "finish_connection", record_connection)
+    monkeypatch.setattr(_common, "finish_connection", record_connection)
     result = invoke(["status", "--no-speedtest"])
     assert result.exit_code == 0
     assert calls == []
@@ -524,7 +527,7 @@ def test_hotswap_control_error_shows_friendly_exit(monkeypatch):
         raise ControlError(None, "control server unreachable")
 
     running(monkeypatch)
-    monkeypatch.setattr(cli, "apply_location", boom)
+    monkeypatch.setattr(apply, "apply_location", boom)
     result = invoke(["up", "--country", "France"])
     assert result.exit_code != 0
     assert "France" in result.output
@@ -538,8 +541,8 @@ def test_status_hides_dns_and_port_when_unreachable(monkeypatch):
     def _control_error_noarg():
         raise ControlError(None, "no")
 
-    monkeypatch.setattr(cli, "container_status", lambda: "running")
-    monkeypatch.setattr(cli, "_runtime_selection_or_error", lambda: (RUNNING, True))
+    monkeypatch.setattr(docker, "container_status", lambda: "running")
+    monkeypatch.setattr(_common, "_runtime_selection_or_error", lambda: (RUNNING, True))
     monkeypatch.setattr("epoxy.control.get_tunnel_status", _control_error_noarg)
     monkeypatch.setattr("epoxy.control.get_dns_status", _control_error_noarg)
     monkeypatch.setattr("epoxy.control.get_port_forward", _control_error_noarg)

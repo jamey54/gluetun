@@ -8,8 +8,9 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from epoxy import cli, config, discovery
+from epoxy import apply, cli, config, discovery, docker, ipinfo, picker
 from epoxy.apply import Selection
+from epoxy.commands import _common
 from epoxy.instance import current_instance
 from epoxy.version import __version__
 
@@ -20,9 +21,9 @@ def creds(monkeypatch):
     monkeypatch.setenv("PROTONVPN_WIREGUARD_PRIVATE_KEY", "k")
     monkeypatch.setenv("PROTONVPN_WIREGUARD_ADDRESSES", "10.2.0.2/32")
     monkeypatch.setenv("HTTP_CONTROL_SERVER_API_KEY", "test-key")
-    monkeypatch.setattr("epoxy.cli.print_ip_status", lambda **kwargs: True)
-    monkeypatch.setattr("epoxy.cli.measure", lambda size=25: None)
-    monkeypatch.setattr("epoxy.cli.current_exit_ip", lambda: None)
+    monkeypatch.setattr("epoxy.ipinfo.print_ip_status", lambda **kwargs: True)
+    monkeypatch.setattr("epoxy.speedtest.measure", lambda size=25: None)
+    monkeypatch.setattr("epoxy.ipinfo.current_exit_ip", lambda: None)
 
 
 @pytest.fixture()
@@ -37,13 +38,13 @@ def compose_calls(monkeypatch):
         calls.append(args)
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.docker.compose", fake_compose)
     return calls
 
 
 @pytest.fixture()
 def cold(monkeypatch):
-    monkeypatch.setattr(cli, "container_running", lambda name=None: False)
+    monkeypatch.setattr(docker, "container_running", lambda name=None: False)
 
 
 def invoke(args):
@@ -55,7 +56,7 @@ def read_registry(name: str) -> dict[str, object]:
 
 
 def test_up_non_default_instance_writes_compose_and_registry(compose_calls, cold, monkeypatch):
-    monkeypatch.setattr("epoxy.cli.allocate_free_port", lambda: 8123)
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda: 8123)
     result = invoke(["up", "--instance", "plan-a", "--provider", "surfshark"])
     assert result.exit_code == 0
 
@@ -72,7 +73,10 @@ def test_up_non_default_instance_reuses_registered_port(compose_calls, cold, mon
     (config.INSTANCES_DIR / "plan-a.json").write_text(
         json.dumps({"instance": "plan-a", "control_port": 8123, "env_file": None})
     )
-    monkeypatch.setattr("epoxy.cli.allocate_free_port", lambda: pytest.fail("must not allocate"))
+    monkeypatch.setattr(
+        "epoxy.commands.up.allocate_free_port",
+        lambda: pytest.fail("must not allocate"),
+    )
     result = invoke(["up", "--instance", "plan-a", "--provider", "surfshark"])
     assert result.exit_code == 0
     body = (config.INSTANCES_DIR / "plan-a" / "compose.yml").read_text()
@@ -81,7 +85,10 @@ def test_up_non_default_instance_reuses_registered_port(compose_calls, cold, mon
 
 
 def test_up_ctl_port_wins_over_allocation(compose_calls, cold, monkeypatch):
-    monkeypatch.setattr("epoxy.cli.allocate_free_port", lambda: pytest.fail("must not allocate"))
+    monkeypatch.setattr(
+        "epoxy.commands.up.allocate_free_port",
+        lambda: pytest.fail("must not allocate"),
+    )
     result = invoke(["up", "--instance", "plan-b", "--ctl-port", "8300", "--provider", "surfshark"])
     assert result.exit_code == 0
     assert read_registry("plan-b")["control_port"] == 8300
@@ -99,10 +106,10 @@ def test_up_epoxy_ctl_port_env_honored(compose_calls, cold, monkeypatch):
 
 def test_up_running_without_registry_adopts_published_port(monkeypatch):
     """A container not owned by a registry record stays addressable via its port."""
-    monkeypatch.setattr(cli, "container_running", lambda name=None: True)
-    monkeypatch.setattr(cli, "container_control_port", lambda name=None: 8123)
+    monkeypatch.setattr(docker, "container_running", lambda name=None: True)
+    monkeypatch.setattr(docker, "container_control_port", lambda name=None: 8123)
     monkeypatch.setattr(
-        cli,
+        _common,
         "effective_selection",
         lambda: Selection("surfshark", "wireguard", "Germany"),
     )
@@ -138,20 +145,20 @@ def test_instance_options_present_on_commands():
 
 
 def test_up_exit_1_when_not_verified(compose_calls, cold, monkeypatch):
-    monkeypatch.setattr(cli, "print_ip_status", lambda **kwargs: False)
+    monkeypatch.setattr(ipinfo, "print_ip_status", lambda **kwargs: False)
     result = invoke(["up", "--provider", "surfshark"])
     assert result.exit_code == 1
 
 
 def test_connect_exit_1_when_not_verified(monkeypatch):
-    monkeypatch.setattr(cli, "print_ip_status", lambda **kwargs: False)
-    monkeypatch.setattr(cli, "container_running", lambda: True)
+    monkeypatch.setattr(ipinfo, "print_ip_status", lambda **kwargs: False)
+    monkeypatch.setattr(docker, "container_running", lambda: True)
     monkeypatch.setattr(
-        cli,
+        _common,
         "effective_selection",
         lambda: Selection("surfshark", "wireguard", "Germany"),
     )
-    monkeypatch.setattr(cli, "apply_location", lambda sel: None)
+    monkeypatch.setattr(apply, "apply_location", lambda sel: None)
     result = invoke(["connect", "--country", "France"])
     assert result.exit_code == 1
 
@@ -169,7 +176,7 @@ def test_up_unknown_provider_is_friendly_not_traceback(compose_calls, cold):
 def test_commands_require_instance_or_env(compose_calls, cold, monkeypatch):
     """No --instance and no EPOXY_INSTANCE is a usage error, not a hidden default."""
     monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
-    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: False)
+    monkeypatch.setattr(_common, "_stdin_is_tty", lambda: False)
     result = invoke(["up", "--provider", "surfshark"])
     assert result.exit_code == 2
     assert "EPOXY_INSTANCE" in result.output
@@ -183,31 +190,31 @@ def test_commands_require_instance_or_env(compose_calls, cold, monkeypatch):
 
 def _multi_instance(monkeypatch):
     monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
-    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: True)
+    monkeypatch.setattr(_common, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr(discovery, "_known_names", lambda: {"plan-a", "plan-b"})
-    monkeypatch.setattr(cli, "_state", lambda name: "running")
+    monkeypatch.setattr(discovery, "_state", lambda name: "running")
 
 
 def test_choose_instance_non_tty_is_usage_error(monkeypatch):
     monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
-    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: False)
+    monkeypatch.setattr(_common, "_stdin_is_tty", lambda: False)
     with pytest.raises(click.UsageError, match="EPOXY_INSTANCE"):
-        cli._choose_instance_name()
+        _common._choose_instance_name()
 
 
 def test_choose_instance_zero_known_is_usage_error(monkeypatch):
     monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
-    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: True)
+    monkeypatch.setattr(_common, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr(discovery, "_known_names", lambda: set())
     with pytest.raises(click.UsageError, match="EPOXY_INSTANCE"):
-        cli._choose_instance_name()
+        _common._choose_instance_name()
 
 
 def test_choose_instance_auto_uses_sole_instance(monkeypatch):
     monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
-    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: True)
+    monkeypatch.setattr(_common, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr(discovery, "_known_names", lambda: {"plan-a"})
-    assert cli._choose_instance_name() == "plan-a"
+    assert _common._choose_instance_name() == "plan-a"
 
 
 def test_choose_instance_prompts_when_multiple(monkeypatch):
@@ -218,22 +225,22 @@ def test_choose_instance_prompts_when_multiple(monkeypatch):
         picked.append(instances)
         return "plan-b"
 
-    monkeypatch.setattr(cli, "select_instance", fake_pick)
-    assert cli._choose_instance_name() == "plan-b"
+    monkeypatch.setattr(picker, "select_instance", fake_pick)
+    assert _common._choose_instance_name() == "plan-b"
     assert picked == [[("plan-a", "running"), ("plan-b", "running")]]
 
 
 def test_choose_instance_cancel_is_error(monkeypatch):
     _multi_instance(monkeypatch)
-    monkeypatch.setattr(cli, "select_instance", lambda instances, **kw: None)
+    monkeypatch.setattr(picker, "select_instance", lambda instances, **kw: None)
     with pytest.raises(click.ClickException, match="No instance selected"):
-        cli._choose_instance_name()
+        _common._choose_instance_name()
 
 
 def test_down_picks_instance_when_multiple(monkeypatch):
     """The chosen instance flows through instance_context: down targets its project."""
     _multi_instance(monkeypatch)
-    monkeypatch.setattr(cli, "select_instance", lambda instances, **kw: "plan-a")
+    monkeypatch.setattr(picker, "select_instance", lambda instances, **kw: "plan-a")
     monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
     projects: list[str] = []
 
@@ -241,7 +248,7 @@ def test_down_picks_instance_when_multiple(monkeypatch):
         projects.append(current_instance().project)
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.docker.compose", fake_compose)
     result = invoke(["down"])
     assert result.exit_code == 0
     assert projects == ["epoxy-plan-a"]
@@ -249,7 +256,7 @@ def test_down_picks_instance_when_multiple(monkeypatch):
 
 def test_epoxy_instance_env_still_wins_over_picker(monkeypatch):
     """EPOXY_INSTANCE must be honored without prompting or auto-selection."""
-    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: pytest.fail("must not prompt"))
+    monkeypatch.setattr(_common, "_stdin_is_tty", lambda: pytest.fail("must not prompt"))
     monkeypatch.setattr(discovery, "_known_names", lambda: pytest.fail("must not discover"))
     projects: list[str] = []
 
@@ -257,7 +264,7 @@ def test_epoxy_instance_env_still_wins_over_picker(monkeypatch):
         projects.append(current_instance().project)
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
+    monkeypatch.setattr("epoxy.docker.compose", fake_compose)
     monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
     result = invoke(["down"])  # EPOXY_INSTANCE=epoxy from conftest
     assert result.exit_code == 0

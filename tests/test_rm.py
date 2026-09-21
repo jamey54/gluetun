@@ -41,8 +41,8 @@ def _stub_docker_ok(monkeypatch, compose_calls):
         compose_calls.append(args)
         return CompletedProcess((), 0)
 
-    monkeypatch.setattr("epoxy.cli.compose", fake_compose)
-    monkeypatch.setattr("epoxy.cli.remove_container", lambda name: None)
+    monkeypatch.setattr("epoxy.docker.compose", fake_compose)
+    monkeypatch.setattr("epoxy.docker.remove_container", lambda name: None)
 
 
 def test_rm_removes_container_and_deletes_state(monkeypatch):
@@ -119,8 +119,8 @@ def test_rm_without_compose_file_falls_back_to_docker_rm(monkeypatch):
     def no_compose(*args: str, env_overrides=None, timeout=None):
         raise AssertionError("compose file is absent, compose must not run")
 
-    monkeypatch.setattr("epoxy.cli.compose", no_compose)
-    monkeypatch.setattr("epoxy.cli.remove_container", lambda name: removed.append(name))
+    monkeypatch.setattr("epoxy.docker.compose", no_compose)
+    monkeypatch.setattr("epoxy.docker.remove_container", lambda name: removed.append(name))
     monkeypatch.setattr(discovery, "_known_names", lambda: {"epoxy"})
     monkeypatch.setattr(discovery, "consumers_of", lambda name: [])
 

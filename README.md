@@ -68,7 +68,7 @@ You only need to set credentials for providers you actually use.
 
 | Command | Description |
 |---------|-------------|
-| `epoxy --version` | Print the exact version (e.g. `epoxy 0.4.0`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
+| `epoxy --version` | Print the exact version (e.g. `epoxy 0.4.1`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
 | `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `epoxy connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
 | `epoxy status [--instance NAME] [--all] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |

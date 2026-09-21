@@ -6,8 +6,9 @@ from typing import Any
 import pytest
 
 from epoxy import apply as apply_module
-from epoxy import bench, cli, config, control
+from epoxy import bench, cli, config, control, docker, servers
 from epoxy.apply import Verification
+from epoxy.commands import _common
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -684,10 +685,10 @@ def test_cli_bench_end_to_end(monkeypatch):
         ("surfshark", "wireguard", "France", "", "fr1"),
         ("surfshark", "wireguard", "Japan", "", "jp1"),
     )
-    monkeypatch.setattr(cli, "require_api_key", lambda: None)
-    monkeypatch.setattr(cli, "container_running", lambda: True)
-    monkeypatch.setattr(cli, "get_servers", lambda: data)
-    monkeypatch.setattr(cli, "listable_servers", lambda d: d)
+    monkeypatch.setattr(_common, "require_api_key", lambda: None)
+    monkeypatch.setattr(docker, "container_running", lambda: True)
+    monkeypatch.setattr(servers, "get_servers", lambda: data)
+    monkeypatch.setattr(servers, "listable_servers", lambda d: d)
     monkeypatch.setattr(
         control,
         "get_settings",
@@ -716,20 +717,19 @@ def test_cli_bench_concurrency_flag_passes_through(monkeypatch):
     from click.testing import CliRunner
 
     seen = {}
-    monkeypatch.setattr(cli, "require_api_key", lambda: None)
-    monkeypatch.setattr(cli, "container_running", lambda: True)
+    monkeypatch.setattr(_common, "require_api_key", lambda: None)
+    monkeypatch.setattr(docker, "container_running", lambda: True)
     monkeypatch.setattr(
-        cli,
+        servers,
         "get_servers",
         lambda: rows(("surfshark", "wireguard", "France", "", "fr1")),
     )
-    monkeypatch.setattr(cli, "listable_servers", lambda d: d)
+    monkeypatch.setattr(servers, "listable_servers", lambda d: d)
     monkeypatch.setattr(
         control, "get_settings", lambda: {"type": "wireguard", "provider": {"name": "surfshark"}}
     )
     monkeypatch.setattr(
-        cli,
-        "run_bench",
+        "epoxy.commands.bench.run_bench",
         lambda _candidates, **kw: seen.update(kw) or bench.BenchReport(results=[]),
     )
     monkeypatch.setattr(bench, "probe_hosts", Recorder([{}]))
@@ -755,20 +755,20 @@ def test_cli_bench_control_error_is_friendly_exit(monkeypatch):
     a traceback (the pre-check and the baseline snapshot are separate calls)."""
     from click.testing import CliRunner
 
-    monkeypatch.setattr(cli, "require_api_key", lambda: None)
-    monkeypatch.setattr(cli, "container_running", lambda: True)
+    monkeypatch.setattr(_common, "require_api_key", lambda: None)
+    monkeypatch.setattr(docker, "container_running", lambda: True)
     monkeypatch.setattr(
-        cli,
+        servers,
         "get_servers",
         lambda: rows(("surfshark", "wireguard", "France", "", "fr1")),
     )
-    monkeypatch.setattr(cli, "listable_servers", lambda d: d)
+    monkeypatch.setattr(servers, "listable_servers", lambda d: d)
     monkeypatch.setattr(control, "get_settings", lambda: baseline_doc())
 
     def boom(*args, **kwargs):
         raise control.ControlError(None, "control server unreachable")
 
-    monkeypatch.setattr(cli, "run_bench", boom)
+    monkeypatch.setattr("epoxy.commands.bench.run_bench", boom)
     result = CliRunner().invoke(cli.main, ["bench"], catch_exceptions=False)
     assert result.exit_code != 0
     assert "control server unreachable" in result.output
@@ -778,8 +778,8 @@ def test_cli_bench_control_error_is_friendly_exit(monkeypatch):
 def test_cli_bench_requires_running_container(monkeypatch):
     from click.testing import CliRunner
 
-    monkeypatch.setattr(cli, "require_api_key", lambda: None)
-    monkeypatch.setattr(cli, "container_running", lambda: False)
+    monkeypatch.setattr(_common, "require_api_key", lambda: None)
+    monkeypatch.setattr(docker, "container_running", lambda: False)
     result = CliRunner().invoke(cli.main, ["bench"])
     assert result.exit_code != 0
     assert "not running" in result.output
@@ -793,10 +793,10 @@ def test_cli_bench_defaults_to_all_credentialed_providers(monkeypatch):
         ("surfshark", "wireguard", "France", "", "fr1"),
         ("protonvpn", "wireguard", "Japan", "", "jp1"),
     )
-    monkeypatch.setattr(cli, "require_api_key", lambda: None)
-    monkeypatch.setattr(cli, "container_running", lambda: True)
-    monkeypatch.setattr(cli, "get_servers", lambda: data)
-    monkeypatch.setattr(cli, "listable_servers", lambda d: d)
+    monkeypatch.setattr(_common, "require_api_key", lambda: None)
+    monkeypatch.setattr(docker, "container_running", lambda: True)
+    monkeypatch.setattr(servers, "get_servers", lambda: data)
+    monkeypatch.setattr(servers, "listable_servers", lambda d: d)
     monkeypatch.setattr(
         control,
         "get_settings",

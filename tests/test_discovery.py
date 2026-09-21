@@ -184,7 +184,7 @@ def test_record_without_control_port_has_null_control_server(monkeypatch):
 
 def test_ls_json_envelope(monkeypatch):
     monkeypatch.setattr(
-        cli,
+        discovery,
         "instance_records",
         lambda: [
             {
@@ -208,7 +208,7 @@ def test_ls_json_envelope(monkeypatch):
 
 def test_ls_json_filters_by_instance(monkeypatch):
     monkeypatch.setattr(
-        cli,
+        discovery,
         "instance_records",
         lambda: [
             {
@@ -229,7 +229,7 @@ def test_ls_json_filters_by_instance(monkeypatch):
 
 
 def test_ls_human_prints_table(monkeypatch):
-    monkeypatch.setattr(cli, "instance_records", lambda: [_record()])
+    monkeypatch.setattr(discovery, "instance_records", lambda: [_record()])
     result = CliRunner().invoke(cli.main, ["ls"], catch_exceptions=False)
     assert result.exit_code == 0
     assert "plan-a" in result.output
@@ -239,14 +239,14 @@ def test_ls_human_prints_table(monkeypatch):
 
 
 def test_ls_human_no_instances_message(monkeypatch):
-    monkeypatch.setattr(cli, "instance_records", lambda: [])
+    monkeypatch.setattr(discovery, "instance_records", lambda: [])
     result = CliRunner().invoke(cli.main, ["ls"], catch_exceptions=False)
     assert result.exit_code == 0
     assert "(no instances)" in result.output
 
 
 def test_ls_human_filters_by_instance(monkeypatch):
-    monkeypatch.setattr(cli, "instance_records", lambda: [_record()])
+    monkeypatch.setattr(discovery, "instance_records", lambda: [_record()])
     result = CliRunner().invoke(cli.main, ["ls", "--instance", "other"], catch_exceptions=False)
     assert "(no instances)" in result.output
     result = CliRunner().invoke(cli.main, ["ls", "--instance", "plan-a"], catch_exceptions=False)
