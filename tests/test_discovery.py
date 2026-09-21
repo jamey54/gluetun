@@ -66,9 +66,7 @@ def test_consumers_of(monkeypatch):
 
 def test_consumers_of_sorted_across_many(monkeypatch):
     def fake_run(*args, **kwargs):
-        return _proc(
-            "z-app\tcontainer:epoxy\na-app\tcontainer:epoxy\nb-app\tcontainer:epoxy\n"
-        )
+        return _proc("z-app\tcontainer:epoxy\na-app\tcontainer:epoxy\nb-app\tcontainer:epoxy\n")
 
     monkeypatch.setattr(discovery, "run", fake_run)
     assert discovery.consumers_of("epoxy") == ["a-app", "b-app", "z-app"]

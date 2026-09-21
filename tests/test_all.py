@@ -79,9 +79,7 @@ def test_down_all_stops_each_and_reports_prefixed(monkeypatch, two_instances):
     monkeypatch.setattr(
         "epoxy.control.set_tunnel_status", lambda *a, **kw: stopped.append(current_instance().name)
     )
-    monkeypatch.setattr(
-        "epoxy.cli.compose", lambda *a, **kw: CompletedProcess((), 0)
-    )
+    monkeypatch.setattr("epoxy.cli.compose", lambda *a, **kw: CompletedProcess((), 0))
     result = invoke(["down", "--all"], catch_exceptions=False)
     assert result.exit_code == 0
     assert stopped == ["a", "b"]
@@ -253,9 +251,7 @@ def test_rm_all_skips_shared_without_force(monkeypatch, two_instances):
     _seed("a")
     _seed("b")
     monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
-    monkeypatch.setattr(
-        "epoxy.cli.compose", lambda *args, **kw: CompletedProcess((), 0)
-    )
+    monkeypatch.setattr("epoxy.cli.compose", lambda *args, **kw: CompletedProcess((), 0))
     monkeypatch.setattr(discovery, "consumers_of", lambda name: ["web"] if name == "a" else [])
 
     result = invoke(["rm", "--all"])
@@ -270,9 +266,7 @@ def test_rm_all_force_removes_everything(monkeypatch, two_instances):
     _seed("a")
     _seed("b")
     monkeypatch.setattr("epoxy.control.set_tunnel_status", lambda *a, **kw: None)
-    monkeypatch.setattr(
-        "epoxy.cli.compose", lambda *args, **kw: CompletedProcess((), 0)
-    )
+    monkeypatch.setattr("epoxy.cli.compose", lambda *args, **kw: CompletedProcess((), 0))
     monkeypatch.setattr(discovery, "consumers_of", lambda name: ["web"] if name == "a" else [])
 
     result = invoke(["rm", "--all", "--force"], catch_exceptions=False)

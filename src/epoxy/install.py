@@ -61,6 +61,25 @@ def path_hint() -> str | None:
     return None
 
 
+def _append_block(rc: Path, existing: str, block: str) -> None:
+    """Append the block after existing content, separated by a blank line."""
+    rc.parent.mkdir(parents=True, exist_ok=True)
+    if not existing:
+        rc.write_text(block)
+        return
+    gap = "" if existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
+    rc.write_text(f"{existing}{gap}{block}")
+
+
+def _replace_block(rc: Path, existing: str, block: str) -> None:
+    """Swap the first marker-delimited region for the new block, keeping the rest."""
+    start = existing.index(START_MARKER)
+    end_pos = existing.find(END_MARKER, start)
+    end = end_pos + len(END_MARKER) if end_pos != -1 else len(existing)
+    updated = existing[:start] + block.rstrip("\n") + existing[end:]
+    rc.write_text(updated if updated.endswith("\n") else updated + "\n")
+
+
 def upsert_block(rc: Path, block: str, force: bool) -> str:
     """Merge the marker block into an rc file; return written|unchanged|updated.
 
@@ -70,12 +89,7 @@ def upsert_block(rc: Path, block: str, force: bool) -> str:
     """
     existing = rc.read_text() if rc.exists() else ""
     if START_MARKER not in existing:
-        rc.parent.mkdir(parents=True, exist_ok=True)
-        if not existing:
-            rc.write_text(block)
-        else:
-            gap = "" if existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
-            rc.write_text(f"{existing}{gap}{block}")
+        _append_block(rc, existing, block)
         return "written"
     if block in existing:
         return "unchanged"
@@ -84,9 +98,5 @@ def upsert_block(rc: Path, block: str, force: bool) -> str:
             f"{rc} already has an epoxy completion block with different content. "
             "Re-run with --force to replace it."
         )
-    start = existing.index(START_MARKER)
-    end_pos = existing.find(END_MARKER, start)
-    end = end_pos + len(END_MARKER) if end_pos != -1 else len(existing)
-    updated = existing[:start] + block.rstrip("\n") + existing[end:]
-    rc.write_text(updated if updated.endswith("\n") else updated + "\n")
+    _replace_block(rc, existing, block)
     return "updated"

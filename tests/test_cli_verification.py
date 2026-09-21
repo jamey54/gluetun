@@ -226,9 +226,7 @@ def test_same_country_used_for_verification():
 # ---------------------------------------------------------------------------
 
 
-def test_print_ip_status_fail_closed_when_bare_unknown_from_backup_sources(
-    monkeypatch, capsys
-):
+def test_print_ip_status_fail_closed_when_bare_unknown_from_backup_sources(monkeypatch, capsys):
     """Backup echo sources work, but with no country match and an unknown host
     bare IP the verdict is fail-closed: never a silent green (C2)."""
     probe = ipinfo._Probe({"ip": "5.6.7.8"}, sources=("cloudflare",))

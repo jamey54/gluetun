@@ -365,9 +365,7 @@ def _status_doc() -> dict[str, object]:
                 verdict, verified = classify_verdict(real_ip(), ip)
                 leak = verdict == "leak"
                 if verdict == "unknown" and last_error is None:
-                    last_error = (
-                        "could not determine the host's bare IP — tunnel unverified"
-                    )
+                    last_error = "could not determine the host's bare IP — tunnel unverified"
     return {
         "instance": inst.name,
         "container_name": inst.name,
@@ -967,9 +965,7 @@ def bench(
         try:
             control.get_settings()
         except control.ControlError as exc:
-            raise click.ClickException(
-                f"Cannot reach the control server: {exc.message}"
-            ) from None
+            raise click.ClickException(f"Cannot reach the control server: {exc.message}") from None
 
         candidates = build_candidates(by_provider, provider, protocol, country)
         if not candidates:
@@ -988,9 +984,7 @@ def bench(
         except KeyboardInterrupt:
             raise SystemExit(130) from None
         except control.ControlError as exc:
-            raise click.ClickException(
-                f"Cannot reach the control server: {exc.message}"
-            ) from None
+            raise click.ClickException(f"Cannot reach the control server: {exc.message}") from None
 
         print_report(report)
         if report.action:
@@ -1048,9 +1042,7 @@ def dns(instance: str | None, all_instances: bool, action: str | None) -> None:
                         raise click.ClickException(
                             f"Cannot reach control server: {exc.message}"
                         ) from None
-                    click.echo(
-                        f"{inst.name}: DNS {target}." if all_instances else f"DNS {target}."
-                    )
+                    click.echo(f"{inst.name}: DNS {target}." if all_instances else f"DNS {target}.")
             except (Exception, SystemExit) as exc:  # per-instance: report and continue
                 _record_failure(inst.name, exc)
                 failures += 1

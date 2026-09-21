@@ -250,9 +250,7 @@ def test_down_picks_instance_when_multiple(monkeypatch):
 def test_epoxy_instance_env_still_wins_over_picker(monkeypatch):
     """EPOXY_INSTANCE must be honored without prompting or auto-selection."""
     monkeypatch.setattr(cli, "_stdin_is_tty", lambda: pytest.fail("must not prompt"))
-    monkeypatch.setattr(
-        discovery, "_known_names", lambda: pytest.fail("must not discover")
-    )
+    monkeypatch.setattr(discovery, "_known_names", lambda: pytest.fail("must not discover"))
     projects: list[str] = []
 
     def fake_compose(*args: str, env_overrides=None, timeout=None) -> CompletedProcess[str]:
