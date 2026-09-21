@@ -30,7 +30,14 @@ This installs the `epoxy` command (and its dependencies) into your environment.
 
 ## Shell completion
 
-Add to your `.bashrc`:
+```bash
+epoxy install          # append completion to ~/.bashrc / ~/.zshrc / fish config
+epoxy install --print  # preview the snippet without writing
+```
+
+`--shell bash|zsh|fish` overrides the `$SHELL` auto-detection and `--rc-file`
+picks the file (defaults per shell). Re-running is a no-op when the block is
+already there; replacing a diverged block needs `--force`. Or wire it manually:
 
 ```bash
 eval "$(_EPOXY_COMPLETE=bash_source epoxy)"
@@ -61,7 +68,7 @@ You only need to set credentials for providers you actually use.
 
 | Command | Description |
 |---------|-------------|
-| `epoxy --version` | Print the exact version (e.g. `epoxy 0.3.0`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
+| `epoxy --version` | Print the exact version (e.g. `epoxy 0.4.0`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
 | `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `epoxy connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
 | `epoxy status [--instance NAME] [--all] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
@@ -72,6 +79,7 @@ You only need to set credentials for providers you actually use.
 | `epoxy bench [--instance NAME] [--connect]` | Benchmark locations and report the fastest (keeps current unless `--connect`) |
 | `epoxy dns [--instance NAME] [--all] [on\|off]` | Show or toggle the DNS-over-TLS resolver |
 | `epoxy update [--instance NAME] [--all]` | Trigger a server list update |
+| `epoxy install [--shell SHELL] [--rc-file FILE] [--print] [--force]` | Wire shell completion into your rc file (bash/zsh/fish) |
 
 `--instance` is the first option of every command. Set `EPOXY_INSTANCE` to avoid repeating it. See [Instances](#instances).
 
