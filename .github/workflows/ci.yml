@@ -16,7 +16,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: uv sync
+      - run: uv sync --frozen
       - run: |
           .venv/bin/ruff check src tests
           .venv/bin/ruff format --check src tests

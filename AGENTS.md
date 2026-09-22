@@ -11,7 +11,7 @@
 - Keep code clean, clear, compact, and consistent. Remove dead/obsolete code, update stale comments, refactor, and reuse shared helpers at every iteration.
 - Python 3.10+ with full type annotations (`mypy strict`); ruff line-length 100.
 - No need for backward compatibility — it's OK to make migrations and break old formats when it improves the code.
-- You may update packages/dependencies to their latest versions and install new tools when needed; re-run the full suite after any upgrade, and don't upgrade mid-task unless needed.
+- You may update packages/dependencies to their latest versions and install new tools when needed; re-run the full suite after any upgrade, and don't upgrade mid-task unless needed. After any dependency change, re-run `uv lock` so CI (`uv sync --frozen`) stays reproducible.
 
 ## Behavior changes travel together
 - A behavior change ships with tests + README + version bump in the same change set. README documents the external contract (dockerstrator consumes `ls`/`status --json`).
