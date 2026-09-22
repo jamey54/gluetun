@@ -14,8 +14,9 @@ from epoxy.config import (
     DEFAULT_PROTOCOL,
     SERVER_FETCH_TIMEOUT_S,
     cache_ttl,
+    image_ref,
 )
-from epoxy.docker import ENGINE_IMAGE, run
+from epoxy.docker import run
 from epoxy.providers import PROVIDERS, get_active_providers
 from epoxy.textutil import fold
 
@@ -98,7 +99,7 @@ def _fetch_servers(provider: str) -> list[ServerRow]:
         "docker",
         "run",
         "--rm",
-        ENGINE_IMAGE,
+        image_ref(),
         "format-servers",
         f"-{provider}",
         capture=True,
@@ -130,7 +131,7 @@ def _fetch_all_servers(providers: list[str]) -> dict[str, list[ServerRow]] | Non
         "--rm",
         "--entrypoint",
         "/bin/sh",
-        ENGINE_IMAGE,
+        image_ref(),
         "-c",
         loop,
         capture=True,

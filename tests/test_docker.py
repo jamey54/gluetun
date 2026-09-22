@@ -107,8 +107,19 @@ def test_launch_container_builds_docker_run_args(monkeypatch):
     assert args[8:11] == ("--device", "/dev/net/tun:/dev/net/tun", "-e")
     assert "VPN_SERVICE_PROVIDER=surfshark" in args
     assert "SERVER_COUNTRIES=Germany" in args
-    assert args[-1] == docker.ENGINE_IMAGE
+    assert args[-1] == config.image_ref()
     assert seen["capture"] is True and seen["check"] is False
+
+
+def test_launch_container_uses_pinned_image_by_default(monkeypatch):
+    monkeypatch.delenv("EPOXY_IMAGE", raising=False)
+    assert config.image_ref() == config.DEFAULT_IMAGE
+    assert config.DEFAULT_IMAGE == "qmcgaw/gluetun:v3.41.3"
+
+
+def test_launch_container_honors_image_override(monkeypatch):
+    monkeypatch.setenv("EPOXY_IMAGE", "qmcgaw/gluetun:v3.40.0")
+    assert config.image_ref() == "qmcgaw/gluetun:v3.40.0"
 
 
 def test_launch_container_failure_reported(monkeypatch):

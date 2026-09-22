@@ -33,7 +33,7 @@ from pathlib import Path
 import click
 
 from epoxy import config
-from epoxy.config import BASE_CONTROL_PORT, INSTANCE_ENV_VAR, JsonDoc, read_env_file
+from epoxy.config import BASE_CONTROL_PORT, INSTANCE_ENV_VAR, JsonDoc, image_ref, read_env_file
 
 INSTANCE_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 PORT_RANGE = range(BASE_CONTROL_PORT, 9001)
@@ -171,12 +171,13 @@ def compose_file_for(name: str) -> str:
 
 
 def render_compose(name: str, port: int) -> str:
-    """Per-instance compose file: bundled epoxy.yml with name and host port swapped.
+    """Per-instance compose file: bundled epoxy.yml with image, name, port swapped.
 
     The project is pinned by docker.compose via ``-p``, so the file only pins
-    the container name (== instance) and the host control port.
+    the image ref, the container name (== instance) and the host control port.
     """
     body = resource_files("epoxy").joinpath("epoxy.yml").read_text()
+    body = body.replace("image: EPOXY_IMAGE_REF", f"image: {image_ref()}")
     body = body.replace("container_name: epoxy", f"container_name: {name}")
     body = re.sub(r"127\.0\.0\.1:\d+:8000/tcp", f"127.0.0.1:{port}:8000/tcp", body)
     return body

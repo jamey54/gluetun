@@ -17,8 +17,7 @@ from epoxy.commands._common import (
     _resolve_for_command,
     add_instance_options,
 )
-from epoxy.config import COMPOSE_TIMEOUT_S, CTL_PORT_ENV_VAR, PULL_TIMEOUT_S
-from epoxy.docker import ENGINE_IMAGE
+from epoxy.config import COMPOSE_TIMEOUT_S, CTL_PORT_ENV_VAR, PULL_TIMEOUT_S, image_ref
 from epoxy.instance import (
     allocate_free_port,
     ensure_compose_file,
@@ -40,7 +39,7 @@ from epoxy.providers import get_provider_env, resolve_provider
 )
 @click.option("--country", help="Country to connect to")
 @click.option("--city", help="City within the country")
-@click.option("--pull", is_flag=True, help="Pull the latest container image first")
+@click.option("--pull", is_flag=True, help="Pull the pinned container image first")
 @click.option("--recreate", is_flag=True, help="Recreate the container from compose/.env config")
 @click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
 def up(
@@ -85,7 +84,7 @@ def up(
         current = _common.effective_selection() if was_running else None
         created = not was_running
         if pull:
-            docker.run("docker", "pull", ENGINE_IMAGE, timeout=PULL_TIMEOUT_S)
+            docker.run("docker", "pull", image_ref(), timeout=PULL_TIMEOUT_S)
             recreate = True
         if recreate:
             created = True

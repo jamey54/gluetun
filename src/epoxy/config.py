@@ -19,6 +19,7 @@ CTL_PORT_ENV_VAR = "EPOXY_CTL_PORT"
 CACHE_TTL_ENV_VAR = "EPOXY_CACHE_TTL"
 DEBUG_ENV_VAR = "EPOXY_DEBUG"
 REAL_IP_ENV_VAR = "EPOXY_REAL_IP"
+IMAGE_ENV_VAR = "EPOXY_IMAGE"
 
 # --- Paths ---------------------------------------------------------------
 
@@ -46,6 +47,18 @@ def cache_ttl() -> int:
         return int(raw) if raw else DEFAULT_CACHE_TTL
     except ValueError:
         return DEFAULT_CACHE_TTL
+
+
+# --- Container image (single source; compose/pull/server-fetch all use it) --
+
+# Pinned stable release: :latest tracks the edge of development and can break
+# unattended runs. Bump deliberately after checking the release notes.
+DEFAULT_IMAGE = "qmcgaw/gluetun:v3.41.3"
+
+
+def image_ref() -> str:
+    """Container image ref: the EPOXY_IMAGE override or the pinned default."""
+    return os.getenv(IMAGE_ENV_VAR, "") or DEFAULT_IMAGE
 
 
 # --- Lock ----------------------------------------------------------------

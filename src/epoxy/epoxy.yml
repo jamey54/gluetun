@@ -1,6 +1,6 @@
 services:
   epoxy:
-    image: qmcgaw/gluetun:latest
+    image: EPOXY_IMAGE_REF
     container_name: epoxy
     cap_add:
       - NET_ADMIN

@@ -17,7 +17,7 @@ All providers can be active simultaneously — their servers appear side by side
 ## Requirements
 
 - Python 3.10+
-- A current Gluetun image (`qmcgaw/gluetun:latest`; the settings route is mandatory; old images are not supported — run `epoxy up --pull` to update)
+- A Gluetun image (pinned to `qmcgaw/gluetun:v3.41.3` by default; the settings route is mandatory — run `epoxy up --pull` to (re)pull it, or override with `EPOXY_IMAGE`)
 - [click](https://click.palletsprojects.com/), [prompt_toolkit](https://python-prompt-toolkit.readthedocs.io/) and [rich](https://rich.readthedocs.io/) — installed automatically via `pip install .`
 
 ## Install
@@ -68,7 +68,7 @@ You only need to set credentials for providers you actually use.
 
 | Command | Description |
 |---------|-------------|
-| `epoxy --version` | Print the exact version (e.g. `epoxy 0.4.2`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
+| `epoxy --version` | Print the exact version (e.g. `epoxy 0.5.0`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
 | `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `epoxy connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
 | `epoxy status [--instance NAME] [--all] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
@@ -87,7 +87,7 @@ You only need to set credentials for providers you actually use.
 
 - **`up`** ensures the container exists and runs. On a stopped container it creates it via compose (requires `--provider`; credentials come from `.env`). Once running, explicit flags are applied as a runtime hot-swap — including cross-provider/protocol switches. With no flags on an already-running container it only verifies the tunnel.
 - **`connect`** requires a running container and *only* hot-swaps. With no arguments it opens the interactive picker; `--list` prints the servers table instead.
-- **`up --pull`** pulls the latest image and recreates the container. **`up --recreate`** recreates from compose/`.env` config without pulling — the escape hatch if a swap ever leaves the tunnel stuck.
+- **`up --pull`** pulls the pinned image and recreates the container. **`up --recreate`** recreates from compose/`.env` config without pulling — the escape hatch if a swap ever leaves the tunnel stuck.
 
 Both commands share the same target resolution:
 
@@ -268,6 +268,7 @@ Secrets live in `.env` in the working directory (copy `.env.sample` to get start
 | `EPOXY_INSTANCE` | *(required for scripts)* | Instance name; pass `--instance` or set this. Omitting both asks interactively on a terminal (pick from the known instances); non-interactive runs fail with a usage error. |
 | `EPOXY_CTL_PORT` | unset | Control-server host port for the resolved instance (equivalent to `--ctl-port`) |
 | `EPOXY_CACHE_TTL` | `3600` | Server cache TTL (seconds); missing or non-numeric values fall back to the default |
+| `EPOXY_IMAGE` | `qmcgaw/gluetun:v3.41.3` | Container image ref for compose/pull/server-fetch (bump deliberately after checking release notes) |
 | `EPOXY_DEBUG` | unset | Set to enable debug output (same as `--debug`) |
 
 ### Credentials
@@ -328,7 +329,7 @@ dockerstrator rule: if `epoxy ls --json` exits non-zero or reports an unknown fl
 {
   "instance": "epoxy",
   "container_name": "epoxy",
-  "image": "qmcgaw/gluetun:latest",
+  "image": "qmcgaw/gluetun:v3.41.3",
   "state": "running",
   "selection": { "provider": "surfshark", "protocol": "wireguard", "country": "Japan", "city": "Tokyo" },
   "drift": false,

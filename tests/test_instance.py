@@ -111,6 +111,8 @@ def test_render_compose_swaps_name_and_port():
     assert "container_name: plan-a" in body
     assert "127.0.0.1:8123:8000/tcp" in body
     assert "container_name: epoxy" not in body
+    assert f"image: {config.image_ref()}" in body
+    assert "EPOXY_IMAGE_REF" not in body
 
 
 def test_ensure_compose_file_generates_for_every_instance():

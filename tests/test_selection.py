@@ -232,6 +232,7 @@ def test_up_pull_pulls_image_and_recreates(monkeypatch, compose_calls, swaps):
     result = invoke(["up", "--pull"])
     assert result.exit_code == 0
     assert any("pull" in c for c in pulls[0])
+    assert config.image_ref() in pulls[0]
     args, _ = compose_calls[0]
     assert "--force-recreate" in args
 
