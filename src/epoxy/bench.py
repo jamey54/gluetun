@@ -31,6 +31,7 @@ from epoxy.config import (
 )
 from epoxy.control import ControlError, get_settings
 from epoxy.docker import launch_container, remove_container
+from epoxy.instance import current_instance
 from epoxy.ipinfo import current_exit_ip
 from epoxy.latency import probe_hosts
 from epoxy.providers import get_provider_env
@@ -193,11 +194,14 @@ def run_bench(
 
     current: Candidate | None = None
     prev_ip = current_exit_ip()
+    # Snapshot once: parallel workers share no instance context, so the env
+    # they need for container credentials must travel in arguments.
+    env = dict(current_instance().env)
 
     def test_stage(pool: list[BenchResult], stage: str, size_mb: int, timeout: int) -> None:
         nonlocal current, prev_ip
         if concurrency > 1:
-            _parallel_stage(pool, stage, size_mb, timeout, concurrency, say)
+            _parallel_stage(pool, stage, size_mb, timeout, concurrency, say, env)
             return
         for i, result in enumerate(pool, 1):
             candidate = result.candidate
@@ -315,18 +319,20 @@ class _ParallelResult:
     geo: str | None = None
 
 
-def _bench_container_env(candidate: Candidate) -> dict[str, str]:
+def _bench_container_env(candidate: Candidate, env: dict[str, str]) -> dict[str, str]:
     """Docker env for a disposable container matching the main container."""
-    env = get_provider_env(candidate.provider, candidate.protocol)
+    env = get_provider_env(candidate.provider, candidate.protocol, env)
     env.update(_BENCH_ENV_TUNING)
     env["SERVER_COUNTRIES"] = candidate.country
     env["SERVER_CITIES"] = candidate.city or ""
     return env
 
 
-def _test_one(candidate: Candidate, name: str, size_mb: int, timeout: int) -> _ParallelResult:
+def _test_one(
+    candidate: Candidate, name: str, size_mb: int, timeout: int, env: dict[str, str]
+) -> _ParallelResult:
     """Benchmark one candidate on its own temporary container."""
-    if not launch_container(name, _bench_container_env(candidate)):
+    if not launch_container(name, _bench_container_env(candidate, env)):
         return _ParallelResult(error="container launch failed")
     try:
         verdict = verify(candidate.selection, container=name)
@@ -344,9 +350,13 @@ def _test_one(candidate: Candidate, name: str, size_mb: int, timeout: int) -> _P
         remove_container(name)
 
 
-def _test_batch(candidates: list[Candidate], size_mb: int, timeout: int) -> list[_ParallelResult]:
+def _test_batch(
+    candidates: list[Candidate], size_mb: int, timeout: int, env: dict[str, str]
+) -> list[_ParallelResult]:
     """Run each candidate on a disposable container, in parallel.
 
+    The instance env snapshot rides along explicitly: worker threads share no
+    instance context, so anything they need must travel in arguments.
     An interrupt aborts promptly: every disposable container is removed and
     the untouched futures are cancelled, so the caller restores the previous
     settings without waiting out in-flight downloads. Workers drain on their
@@ -355,7 +365,7 @@ def _test_batch(candidates: list[Candidate], size_mb: int, timeout: int) -> list
     names = [f"{_CONTAINER_PREFIX}{os.getpid()}-{next(_container_ids)}" for _ in candidates]
     pool = ThreadPoolExecutor(max_workers=len(names))
     futures = [
-        pool.submit(_test_one, candidate, name, size_mb, timeout)
+        pool.submit(_test_one, candidate, name, size_mb, timeout, env)
         for candidate, name in zip(candidates, names, strict=True)
     ]
     try:
@@ -377,7 +387,8 @@ def _parallel_stage(
     size_mb: int,
     timeout: int,
     concurrency: int,
-    say: Callable[[str], None] = click.echo,
+    say: Callable[[str], None],
+    env: dict[str, str],
 ) -> None:
     """Run a stage over batches of concurrent disposable containers."""
     for start in range(0, len(pool), concurrency):
@@ -386,7 +397,7 @@ def _parallel_stage(
             f"[{start + 1}-{start + len(batch)}/{len(pool)}] "
             + ", ".join(r.candidate.location for r in batch)
         )
-        outcomes = _test_batch([r.candidate for r in batch], size_mb, timeout)
+        outcomes = _test_batch([r.candidate for r in batch], size_mb, timeout, env)
         for result, outcome in zip(batch, outcomes, strict=True):
             if outcome.error:
                 result.error = outcome.error

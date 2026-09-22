@@ -105,6 +105,17 @@ def test_get_provider_env_skips_unset():
     assert "WIREGUARD_PRIVATE_KEY" not in env
 
 
+def test_get_provider_env_accepts_explicit_env():
+    """An explicit snapshot wins over the instance env (parallel bench workers)."""
+    env = get_provider_env(
+        "surfshark",
+        "wireguard",
+        {"SURFSHARK_WIREGUARD_PRIVATE_KEY": "k", "SURFSHARK_WIREGUARD_ADDRESSES": "a/16"},
+    )
+    assert env["WIREGUARD_PRIVATE_KEY"] == "k"
+    assert env["WIREGUARD_ADDRESSES"] == "a/16"
+
+
 def test_registry_shapes_consistent():
     """Every required credential must be mapped to a container variable."""
     for provider, protocols in providers.PROVIDERS.items():

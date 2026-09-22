@@ -1,9 +1,10 @@
 """VPN provider registry and credential handling."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from epoxy.config import DEFAULT_PROTOCOL
-from epoxy.instance import env_lookup
+from epoxy.instance import current_instance, env_lookup
 
 # Surfshark accepts a bare private key, ProtonVPN requires the WireGuard
 # address as well -- hence the require_addresses flag below.
@@ -117,11 +118,18 @@ def validate_provider(name: str, protocol: str = DEFAULT_PROTOCOL) -> tuple[str,
     return name, protocol
 
 
-def get_provider_env(provider: str, protocol: str) -> dict[str, str]:
-    """Map provider-specific env vars to the container's generic env vars."""
+def get_provider_env(
+    provider: str, protocol: str, env: Mapping[str, str] | None = None
+) -> dict[str, str]:
+    """Map provider-specific env vars to the container's generic env vars.
+
+    ``env`` defaults to the active instance's env; pass an explicit snapshot
+    where no instance context exists (parallel bench workers).
+    """
+    source = env if env is not None else current_instance().env
     overrides: dict[str, str] = {"VPN_SERVICE_PROVIDER": provider, "VPN_TYPE": protocol}
     for container_var, provider_var in PROVIDERS[provider][protocol].env_map.items():
-        value = env_lookup(provider_var)
+        value = source.get(provider_var)
         if value:
             overrides[container_var] = value
     return overrides

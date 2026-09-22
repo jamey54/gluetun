@@ -448,7 +448,7 @@ def test_run_bench_parallel_uses_temp_containers(monkeypatch, happy_path):
     measure_containers: list[str | None] = []
 
     monkeypatch.setattr(
-        bench, "get_provider_env", lambda prov, prot: {f"{prov.upper()}_KEY": "secret"}
+        bench, "get_provider_env", lambda prov, prot, env=None: {f"{prov.upper()}_KEY": "secret"}
     )
 
     def fake_launch(name: str, env: dict[str, Any]) -> bool:
@@ -518,7 +518,7 @@ def test_run_bench_parallel_failure_keeps_going(monkeypatch, happy_path):
         launched.append(name)
         return True
 
-    monkeypatch.setattr(bench, "get_provider_env", lambda prov, prot: {})
+    monkeypatch.setattr(bench, "get_provider_env", lambda prov, prot, env=None: {})
     monkeypatch.setattr(bench, "launch_container", launch)
     monkeypatch.setattr(bench, "remove_container", removed.append)
 
@@ -564,7 +564,7 @@ def test_run_bench_parallel_winner_already_active_stays_put(monkeypatch, happy_p
     }
     monkeypatch.setattr(bench, "get_settings", Recorder([base_france]))
     monkeypatch.setattr(apply_module, "get_settings", lambda: base_france)
-    monkeypatch.setattr(bench, "get_provider_env", lambda prov, prot: {})
+    monkeypatch.setattr(bench, "get_provider_env", lambda prov, prot, env=None: {})
     monkeypatch.setattr(bench, "launch_container", lambda name, env: True)
     monkeypatch.setattr(bench, "remove_container", lambda name: None)
     swaps = Recorder()
@@ -599,7 +599,7 @@ def test_test_batch_interrupt_removes_containers(monkeypatch):
     removed: list[str] = []
 
     def raise_interrupt(
-        candidate: bench.Candidate, name: str, size_mb: int, timeout: int
+        candidate: bench.Candidate, name: str, size_mb: int, timeout: int, env: dict[str, str]
     ) -> bench._ParallelResult:
         raise KeyboardInterrupt()
 
@@ -611,9 +611,45 @@ def test_test_batch_interrupt_removes_containers(monkeypatch):
         candidate("surfshark", "wireguard", "Spain", None, "es"),
     ]
     with pytest.raises(KeyboardInterrupt):
-        bench._test_batch(candidates, 10, 90)
+        bench._test_batch(candidates, 10, 90, {})
     assert len(removed) == len(candidates)
     assert all(n.startswith("epoxy-bench-") for n in removed)
+
+
+def test_test_batch_needs_no_instance_context(monkeypatch):
+    """Parallel workers run on an explicit env snapshot, never resolving instances.
+
+    Regression: worker threads share no instance context, so without instance
+    state every candidate used to fail with "No instance selected".
+    """
+    monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
+    launched: list[tuple[str, dict[str, str]]] = []
+
+    def fake_launch(name: str, env: dict[str, str]) -> bool:
+        launched.append((name, env))
+        return True
+
+    monkeypatch.setattr(bench, "launch_container", fake_launch)
+    monkeypatch.setattr(bench, "remove_container", lambda n: None)
+    monkeypatch.setattr(
+        bench,
+        "verify",
+        lambda sel, prev_ip=None, container=None: Verification(ok=True, ip="9.9.9.9"),
+    )
+    monkeypatch.setattr(
+        bench,
+        "measure",
+        lambda size_mb, timeout=90, container=None: {"mbits": 10.0, "seconds": 1.0, "mbytes": 1.0},
+    )
+    env = {
+        "SURFSHARK_WIREGUARD_PRIVATE_KEY": "k",
+        "SURFSHARK_WIREGUARD_ADDRESSES": "a/16",
+    }
+    outcomes = bench._test_batch(
+        [candidate("surfshark", "wireguard", "France", None, "fr")], 10, 90, env
+    )
+    assert [o.error for o in outcomes] == [None]
+    assert launched[0][1]["WIREGUARD_PRIVATE_KEY"] == "k"
 
 
 def test_run_bench_parallel_crashed_candidate_is_recorded(monkeypatch, happy_path):
@@ -625,7 +661,7 @@ def test_run_bench_parallel_crashed_candidate_is_recorded(monkeypatch, happy_pat
         launched.append(name)
         return True
 
-    monkeypatch.setattr(bench, "get_provider_env", lambda prov, prot: {})
+    monkeypatch.setattr(bench, "get_provider_env", lambda prov, prot, env=None: {})
     monkeypatch.setattr(bench, "launch_container", launch)
     monkeypatch.setattr(bench, "remove_container", removed.append)
 

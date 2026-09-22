@@ -68,7 +68,7 @@ You only need to set credentials for providers you actually use.
 
 | Command | Description |
 |---------|-------------|
-| `epoxy --version` | Print the exact version (e.g. `epoxy 0.4.1`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
+| `epoxy --version` | Print the exact version (e.g. `epoxy 0.4.2`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
 | `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `epoxy connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
 | `epoxy status [--instance NAME] [--all] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
@@ -190,7 +190,7 @@ All swaps go through the same locked runtime engine as `connect`: concurrent CLI
 Notes:
 
 - Candidates default to every credentialed provider/protocol; use `--provider`, `--protocol`, or `--country` to narrow, or `-n/--max-candidates` to cap the ones entering the latency stage.
-- Parallel mode (`-c > 1`) is limited by the credentials your provider permits: if a provider caps simultaneous sessions, some candidates will simply be reported as failures (`no public IP`) while the rest keep benching — it won't abort the run.
+- Parallel mode (`-c > 1`) is limited by the credentials your provider permits: if a provider caps simultaneous sessions, some candidates will simply be reported as failures (`no public IP`) while the rest keep benching — it won't abort the run. Temporary containers inherit the resolved instance env (including `--env-file`), snapshotted before the run, so no exported variables are needed.
 - Bench state is applied at runtime only — recreating the container (see [Runtime selections and drift](#runtime-selections-and-drift)) reverts to the env-file selection.
 
 ## Instances
