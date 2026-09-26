@@ -52,6 +52,11 @@ from epoxy.config import (
 INSTANCE_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 # Inclusive range of host ports auto-allocation may hand out.
 PORT_RANGE = range(BASE_CONTROL_PORT, MAX_ALLOC_CTL_PORT + 1)
+#: Compose service name in the bundled epoxy.yml, identical for every instance.
+#: Distinct from the *container* name, which render_compose sets to the instance
+#: name. `docker compose logs` takes a service name, so passing the container
+#: name works only for an instance that happens to be named `epoxy`.
+COMPOSE_SERVICE = "epoxy"
 
 
 def parse_instance_name(name: str) -> str:
@@ -202,15 +207,36 @@ def compose_file_for(name: str) -> str:
     return str(config.INSTANCES_DIR / name / "compose.yml")
 
 
+def compose_services(compose_body: str) -> set[str]:
+    """Service names declared by a rendered compose file.
+
+    ``docker compose <verb>`` takes service names, which are fixed by the
+    template and independent of the instance name -- so they must never be
+    confused with the container name. Parsed from the body (rather than assumed)
+    so a template change surfaces as a test failure instead of a broken command.
+    """
+    return {
+        line.strip().rstrip(":")
+        for line in compose_body.splitlines()
+        if line.startswith("  ") and not line.startswith("    ") and line.strip().endswith(":")
+    }
+
+
 def render_compose(name: str, port: int) -> str:
     """Per-instance compose file: bundled epoxy.yml with image, name, port swapped.
 
     The project is pinned by docker.compose via ``-p``, so the file only pins
     the image ref, the container name (== instance) and the host control port.
+    The service name stays ``COMPOSE_SERVICE`` for every instance.
     """
     body = resource_files("epoxy").joinpath("epoxy.yml").read_text()
+    if compose_services(body) != {COMPOSE_SERVICE}:
+        raise SystemExit(
+            f"Error: bundled epoxy.yml declares services {sorted(compose_services(body))}, "
+            f"expected only {COMPOSE_SERVICE!r}; update COMPOSE_SERVICE to match."
+        )
     body = body.replace("image: EPOXY_IMAGE_REF", f"image: {image_ref()}")
-    body = body.replace("container_name: epoxy", f"container_name: {name}")
+    body = body.replace(f"container_name: {COMPOSE_SERVICE}", f"container_name: {name}")
     body = re.sub(
         rf"127\.0\.0\.1:\d+:{CONTAINER_CTL_PORT}/tcp",
         f"127.0.0.1:{port}:{CONTAINER_CTL_PORT}/tcp",

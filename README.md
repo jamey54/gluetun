@@ -221,6 +221,8 @@ Each instance publishes the control server on `127.0.0.1:<port>`. **Every** comm
 
 `bench -c N` temporary one-off containers never publish host ports.
 
+Each instance's generated compose file declares exactly one service, always named `epoxy`, while `container_name` is set to the instance name. The two are different things: `docker compose` verbs take the *service* name, while `docker` container operations take the container name. So a container named `plan-a` is reached as service `epoxy` under project `epoxy-plan-a`. epoxy passes the service name to compose and the container name to docker; the instance name is only ever used for the latter.
+
 All control-server traffic (hot-swap `GET/PUT /v1/vpn/settings`, DNS, updater, status) targets the instance's own published port — never a hardcoded `8000`.
 
 ### Per-instance env files

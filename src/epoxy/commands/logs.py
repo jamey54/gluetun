@@ -9,7 +9,7 @@ from epoxy.commands._common import (
     all_option,
     for_each_instance,
 )
-from epoxy.instance import Instance, current_instance, instance_context
+from epoxy.instance import COMPOSE_SERVICE, Instance, instance_context
 
 
 @click.command()
@@ -28,7 +28,10 @@ def logs(instance: str | None, all_instances: bool, follow: bool, tail: str) -> 
             args: list[str] = ["logs"]
             if follow:
                 args.append("-f")
-            args.extend(["--tail", tail, current_instance().container])
+            # `docker compose logs` takes a SERVICE name, which the template fixes
+            # at COMPOSE_SERVICE for every instance -- not the container name,
+            # which is only `epoxy` for the instance of that name.
+            args.extend(["--tail", tail, COMPOSE_SERVICE])
             docker.compose(*args)
 
     for_each_instance(targets, show_one, all_instances, header=True)

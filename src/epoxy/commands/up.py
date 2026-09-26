@@ -69,11 +69,7 @@ def up(
     # EPOXY_CTL_PORT is tested for truthiness, matching how _resolve_for_command
     # reads it: an empty value means unset, so it must not suppress allocation
     # (that would strand the instance on the hardcoded BASE_CONTROL_PORT).
-    if (
-        ctl_port is None
-        and not inst.env.get(CTL_PORT_ENV_VAR)
-        and read_registry(inst.name) is None
-    ):
+    if ctl_port is None and not inst.env.get(CTL_PORT_ENV_VAR) and read_registry(inst.name) is None:
         if docker.container_running(name=inst.name):
             published = docker.container_control_port(name=inst.name)
             if published is not None and published != inst.control_port:

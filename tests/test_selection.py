@@ -10,6 +10,7 @@ from epoxy import apply, cli, config, control, docker, ipinfo, picker, servers
 from epoxy.apply import Selection
 from epoxy.commands import _common
 from epoxy.control import ControlError
+from epoxy.instance import compose_services, render_compose, resolve_instance
 
 
 @pytest.fixture(autouse=True)
@@ -366,7 +367,7 @@ def test_up_does_not_wait_when_settings_are_readable(monkeypatch):
     assert "Waiting for control server..." not in result.output
 
 
-def test_logs_tails_container_by_default(monkeypatch, compose_calls):
+def test_logs_tails_the_compose_service_by_default(monkeypatch, compose_calls):
     result = invoke(["logs"])
     assert result.exit_code == 0
     assert compose_calls[0][0] == ("logs", "--tail", "50", "epoxy")
@@ -376,6 +377,24 @@ def test_logs_follows_and_tails_custom(monkeypatch, compose_calls):
     result = invoke(["logs", "--follow", "-n", "200"])
     assert result.exit_code == 0
     assert compose_calls[0][0] == ("logs", "-f", "--tail", "200", "epoxy")
+
+
+def test_logs_targets_a_real_service_for_a_renamed_instance(monkeypatch, compose_calls):
+    """`docker compose logs` takes a service name, not the container name.
+
+    Every other test in the suite runs the default instance, whose name happens
+    to equal the compose service name -- so a container name slips through
+    unnoticed. Pin the real invariant instead: whatever name is passed must be a
+    service in the instance's own generated compose file.
+    """
+    inst = resolve_instance("plan-a", control_port=8123)
+    services = compose_services(render_compose("plan-a", 8123))
+    assert inst.container not in services, "test premise: names must differ to catch a mix-up"
+
+    result = invoke(["logs", "--instance", "plan-a"])
+    assert result.exit_code == 0
+    passed = compose_calls[0][0][-1]
+    assert passed in services, f"logs passed {passed!r}, not a service in {sorted(services)}"
 
 
 def test_up_explicit_protocol_requires_its_own_creds(monkeypatch, compose_calls, swaps):

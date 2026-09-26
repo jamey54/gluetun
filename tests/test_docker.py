@@ -225,7 +225,5 @@ def test_inspect_container_reads_missing_docker_as_absent(monkeypatch):
 def test_container_control_port_reads_the_container_port(monkeypatch):
     """The published-port lookup keys on the in-container port, not the host one."""
     published = f'{{"{config.CONTAINER_CTL_PORT}/tcp": [{{"HostPort": "8123"}}]}}'
-    monkeypatch.setattr(
-        docker, "inspect_container", lambda fmt, name=None: published
-    )
+    monkeypatch.setattr(docker, "inspect_container", lambda fmt, name=None: published)
     assert docker.container_control_port("epoxy") == 8123

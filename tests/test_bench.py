@@ -463,9 +463,7 @@ def test_run_bench_parallel_uses_temp_containers(monkeypatch, happy_path):
         verify_containers.append(container)
         return Verification(ok=True, ip=f"10.{(len(verify_containers) + 1) // 2}.0.1")
 
-    def fake_measure(
-        size_mb: int, timeout: int = 120, container: str | None = None
-    ) -> Result:
+    def fake_measure(size_mb: int, timeout: int = 120, container: str | None = None) -> Result:
         measure_containers.append(container)
         return Result(mbits=10.0, seconds=1.0, mbytes=float(size_mb))
 
@@ -526,9 +524,7 @@ def test_run_bench_parallel_failure_keeps_going(monkeypatch, happy_path):
             return Verification(ok=False, reason="no public IP")
         return Verification(ok=True, ip="10.1.0.1")
 
-    def fake_measure(
-        size_mb: int, timeout: int = 120, container: str | None = None
-    ) -> Result:
+    def fake_measure(size_mb: int, timeout: int = 120, container: str | None = None) -> Result:
         return Result(mbits=25.0, seconds=1.0, mbytes=float(size_mb))
 
     monkeypatch.setattr(bench, "verify", fake_verify)
@@ -572,9 +568,7 @@ def test_run_bench_parallel_winner_already_active_stays_put(monkeypatch, happy_p
     ) -> Verification:
         return Verification(ok=True, ip="10.1.0.1")
 
-    def fake_measure(
-        size_mb: int, timeout: int = 120, container: str | None = None
-    ) -> Result:
+    def fake_measure(size_mb: int, timeout: int = 120, container: str | None = None) -> Result:
         return Result(mbits=10.0, seconds=1.0, mbytes=float(size_mb))
 
     monkeypatch.setattr(bench, "verify", fake_verify)
@@ -669,9 +663,7 @@ def test_run_bench_parallel_crashed_candidate_is_recorded(monkeypatch, happy_pat
             raise ValueError("boom")
         return Verification(ok=True, ip="10.1.0.1")
 
-    def fake_measure(
-        size_mb: int, timeout: int = 120, container: str | None = None
-    ) -> Result:
+    def fake_measure(size_mb: int, timeout: int = 120, container: str | None = None) -> Result:
         return Result(mbits=25.0, seconds=1.0, mbytes=float(size_mb))
 
     monkeypatch.setattr(bench, "verify", fake_verify)
