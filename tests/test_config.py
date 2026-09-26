@@ -1,7 +1,7 @@
 """Tests for .env file parsing."""
 
 from epoxy import config
-from epoxy.config import DEFAULT_CACHE_TTL, cache_ttl, read_env_file
+from epoxy.config import DEFAULT_CACHE_TTL, read_env_file
 
 
 def test_read_env_file_missing(tmp_path):
@@ -49,10 +49,6 @@ def test_default_cache_dir_is_epoxy(tmp_path, monkeypatch):
     assert config.default_cache_dir() == tmp_path / ".cache" / "epoxy"
 
 
-def test_cache_ttl_default_and_fallback(monkeypatch):
-    monkeypatch.delenv("EPOXY_CACHE_TTL", raising=False)
-    assert cache_ttl() == DEFAULT_CACHE_TTL
-    monkeypatch.setenv("EPOXY_CACHE_TTL", "60")
-    assert cache_ttl() == 60
-    monkeypatch.setenv("EPOXY_CACHE_TTL", "garbage")
-    assert cache_ttl() == DEFAULT_CACHE_TTL
+def test_cache_ttl_is_a_plain_constant():
+    """The server cache TTL is internal tuning, not an env knob."""
+    assert DEFAULT_CACHE_TTL == 3600

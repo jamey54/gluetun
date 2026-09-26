@@ -369,6 +369,16 @@ def test_down_picks_instance_when_multiple(monkeypatch):
     assert projects == ["epoxy-plan-a"]
 
 
+def test_epoxy_instance_env_is_ignored(compose_calls, cold, monkeypatch):
+    """The removed EPOXY_INSTANCE knob must stay dead: setting it changes nothing."""
+    monkeypatch.setenv("EPOXY_INSTANCE", "bogus")
+    monkeypatch.setattr(_common, "_stdin_is_tty", lambda: False)
+    result = run_bare_cli(["up", "--provider", "surfshark"])
+    assert result.exit_code == 2
+    assert "--instance" in result.output
+    assert compose_calls == []
+
+
 def test_version_flag_reports_exact_package_version():
     result = run_cli(["--version"])
     assert result.exit_code == 0

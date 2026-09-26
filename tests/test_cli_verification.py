@@ -33,7 +33,6 @@ def no_sleep(_seconds: float) -> None:
 @pytest.fixture(autouse=True)
 def offline_real_ip(monkeypatch):
     """Host bare-IP fetch fails fast (offline stub); cache reset between tests."""
-    monkeypatch.delenv("EPOXY_REAL_IP", raising=False)
     monkeypatch.setattr(ipinfo, "_real_ip_cache", None)
     monkeypatch.setattr(ipinfo, "_real_ip_info", None)
 
@@ -76,9 +75,20 @@ def test_log_env_silent_when_debug_off(capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_real_ip_env_override(monkeypatch):
+def test_real_ip_has_no_env_override(monkeypatch):
+    """Deliberately no EPOXY_REAL_IP knob: the env var is ignored in production.
+
+    Tests that need a bare IP stub real_ip() directly (as below).
+    """
     monkeypatch.setenv("EPOXY_REAL_IP", "203.0.113.7")
-    assert ipinfo.real_ip() == "203.0.113.7"
+    monkeypatch.setattr(
+        ipinfo,
+        "urlopen",
+        lambda *a, **k: _FakeResponse('{"ip": "198.51.100.9", "country": "GB"}'),
+    )
+    monkeypatch.setattr(ipinfo, "_real_ip_cache", None)
+    monkeypatch.setattr(ipinfo, "_real_ip_info", None)
+    assert ipinfo.real_ip() == "198.51.100.9"
 
 
 def test_real_ip_fetched_from_host_and_cached(monkeypatch):
@@ -260,7 +270,7 @@ def test_print_ip_status_still_detects_leak_from_backup_sources(monkeypatch):
 
 def test_current_exit_ip_returns_accepted_observation(monkeypatch):
     probe, _ = stub_probe([{"ip": "9.9.9.9", "country": "DE"}])
-    monkeypatch.setenv("EPOXY_REAL_IP", "1.1.1.1")
+    monkeypatch.setattr(ipinfo, "real_ip", lambda: "1.1.1.1")
     monkeypatch.setattr(ipinfo, "probe", probe)
     assert ipinfo.current_exit_ip() == "9.9.9.9"
 
@@ -269,7 +279,7 @@ def test_current_exit_ip_falls_back_to_last_observation(monkeypatch):
     """When every observation is excluded (e.g. still on the bare IP), the
     single-shot still reports what was last seen rather than None."""
     probe, _ = stub_probe([{"ip": "1.1.1.1", "country": "Egypt"}])
-    monkeypatch.setenv("EPOXY_REAL_IP", "1.1.1.1")
+    monkeypatch.setattr(ipinfo, "real_ip", lambda: "1.1.1.1")
     monkeypatch.setattr(ipinfo, "probe", probe)
     assert ipinfo.current_exit_ip() == "1.1.1.1"
 

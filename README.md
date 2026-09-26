@@ -149,7 +149,7 @@ Selections made through the control server live at **runtime only** — `.env` s
 
 ## Connection verification
 
-Verification is **leak-first**: a connection counts as up only when the exit IP observed from inside the container differs from the host's bare public IP. The bare IP is fetched host-side once per run (overridable with `EPOXY_REAL_IP` for testing; when unavailable, leak detection degrades to country heuristics only).
+Verification is **leak-first**: a connection counts as up only when the exit IP observed from inside the container differs from the host's bare public IP. The bare IP is fetched host-side once per run; when unavailable, leak detection degrades to country heuristics only.
 
 After connecting (and after every swap), the CLI probes the public IP from inside the container and reports one of three verdicts. The probe mirrors the upstream resilient fetch: four echo services (ipinfo.io, Cloudflare `one.one.one.one/cdn-cgi/trace`, ifconfig.co, ip2location) are queried in parallel from inside the container and the most-agreed result wins, so a rate-limited provider (e.g. ipinfo returning HTTP 429) is absorbed by the rest instead of stalling the retry loop. The verdict notes via yellow when the IP was confirmed by a service other than ipinfo:
 
@@ -268,10 +268,8 @@ Secrets live in `.env` in the working directory (copy `.env.sample` to get start
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `EPOXY_CTL_PORT` | unset | Control-server host port for the resolved instance (equivalent to `--ctl-port`; must be `1`–`65535`, and an empty value counts as unset) |
-| `EPOXY_CACHE_TTL` | `3600` | Server cache TTL (seconds); missing or non-numeric values fall back to the default |
 | `EPOXY_IMAGE` | `qmcgaw/gluetun:latest` | Container image ref for compose/pull/server-fetch; set a tag to pin while a Gluetun release is being investigated |
 | `EPOXY_DEBUG` | unset | Set to enable debug output (same as `--debug`) |
-| `EPOXY_REAL_IP` | unset | Override the host's bare public IP used for leak detection (for testing); without it the IP is fetched once per run, and leak detection degrades to country heuristics when unavailable |
 
 `EPOXY_CTL_PORT` and `EPOXY_IMAGE` are read from the instance's env, so `.env` works for them. The remaining variables are read from the process environment only and are ignored in `.env`.
 

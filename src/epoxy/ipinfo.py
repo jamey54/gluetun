@@ -12,7 +12,6 @@ being rate-limited (HTTP 429) no longer blocks everyone else.
 """
 
 import json
-import os
 import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -28,7 +27,6 @@ from epoxy.config import (
     IP_INFO_URL,
     PROBE_EXEC_TIMEOUT_S,
     PROBE_TIMEOUT,
-    REAL_IP_ENV_VAR,
     REAL_IP_TIMEOUT_S,
     JsonDoc,
 )
@@ -60,11 +58,12 @@ class IpOutcome:
 
 
 def real_ip() -> str | None:
-    """The host's bare public IP, cached per process. None if it can't be fetched."""
+    """The host's bare public IP, cached per process. None if it can't be fetched.
+
+    Tests stub this (or ``_fetch_real_ip_info``) instead of setting an env var:
+    there is deliberately no override knob in production.
+    """
     global _real_ip_cache
-    override = os.getenv(REAL_IP_ENV_VAR)
-    if override:
-        return override
     if _real_ip_cache is not None:
         return _real_ip_cache
     _fetch_real_ip_info()
@@ -82,10 +81,6 @@ def real_ip_info() -> JsonDoc | None:
 def _fetch_real_ip_info() -> None:
     """Fetch and cache the full host IP response from ipinfo.io."""
     global _real_ip_cache, _real_ip_info
-    override = os.getenv(REAL_IP_ENV_VAR)
-    if override:
-        _real_ip_cache = override
-        return
     try:
         with urlopen(IP_INFO_URL, timeout=REAL_IP_TIMEOUT_S) as response:
             data = json.loads(response.read().decode(errors="replace"))

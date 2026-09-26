@@ -11,9 +11,9 @@ from epoxy.config import (
     CACHE_DIR,
     CACHE_FILE,
     CACHE_VERSION,
+    DEFAULT_CACHE_TTL,
     DEFAULT_PROTOCOL,
     SERVER_FETCH_TIMEOUT_S,
-    cache_ttl,
 )
 from epoxy.docker import run
 from epoxy.instance import image_ref
@@ -175,7 +175,7 @@ def _read_cache() -> dict[str, list[ServerRow]] | None:
         servers = data["servers"]
         if not isinstance(servers, dict):
             return None
-        if time.time() - data["ts"] < cache_ttl():
+        if time.time() - data["ts"] < DEFAULT_CACHE_TTL:
             return servers
     except (json.JSONDecodeError, KeyError, TypeError):
         pass

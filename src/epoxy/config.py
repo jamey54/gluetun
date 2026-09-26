@@ -5,7 +5,6 @@ duplicated. Per-instance state (name, control port, env, compose file, lock)
 lives in epoxy.instance.
 """
 
-import os
 from pathlib import Path
 
 # A JSON-ish document (status records, registry entries, probe observations).
@@ -15,9 +14,7 @@ JsonDoc = dict[str, object]
 # --- stay untouched in epoxy.yml / control.py) ------------------------------
 
 CTL_PORT_ENV_VAR = "EPOXY_CTL_PORT"
-CACHE_TTL_ENV_VAR = "EPOXY_CACHE_TTL"
 DEBUG_ENV_VAR = "EPOXY_DEBUG"
-REAL_IP_ENV_VAR = "EPOXY_REAL_IP"
 IMAGE_ENV_VAR = "EPOXY_IMAGE"
 
 # --- Paths ---------------------------------------------------------------
@@ -35,17 +32,10 @@ INSTANCES_DIR = CACHE_DIR / "instances"
 
 # --- Caching -------------------------------------------------------------
 
+# Server cache TTL in seconds. A plain constant by design: it is internal
+# tuning, not user configuration.
 DEFAULT_CACHE_TTL = 3600
 CACHE_VERSION = 4
-
-
-def cache_ttl() -> int:
-    """Server cache TTL in seconds; missing/garbage values fall back to default."""
-    raw = os.getenv(CACHE_TTL_ENV_VAR, "")
-    try:
-        return int(raw) if raw else DEFAULT_CACHE_TTL
-    except ValueError:
-        return DEFAULT_CACHE_TTL
 
 
 # --- Container image (single source; compose/pull/server-fetch all use it) --
