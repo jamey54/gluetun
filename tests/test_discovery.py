@@ -4,10 +4,10 @@ import json
 from subprocess import CompletedProcess
 
 import pytest
-from click.testing import CliRunner
 
-from epoxy import cli, config, discovery, statusdoc
+from epoxy import config, discovery, statusdoc
 from epoxy.apply import Selection
+from tests.harness import run_cli
 
 
 def _proc(stdout: str) -> CompletedProcess[str]:
@@ -198,7 +198,7 @@ def test_ls_json_envelope(monkeypatch):
             }
         ],
     )
-    result = CliRunner().invoke(cli.main, ["ls", "--json"], catch_exceptions=False)
+    result = run_cli(["ls", "--json"], catch_exceptions=False)
     assert result.exit_code == 0
     doc = json.loads(result.output)
     assert set(doc) == {"instances"}
@@ -222,15 +222,13 @@ def test_ls_json_filters_by_instance(monkeypatch):
             }
         ],
     )
-    result = CliRunner().invoke(
-        cli.main, ["ls", "--json", "--instance", "other"], catch_exceptions=False
-    )
+    result = run_cli(["ls", "--json", "--instance", "other"], catch_exceptions=False)
     assert json.loads(result.output) == {"instances": []}
 
 
 def test_ls_human_prints_table(monkeypatch):
     monkeypatch.setattr(discovery, "instance_records", lambda: [_record()])
-    result = CliRunner().invoke(cli.main, ["ls"], catch_exceptions=False)
+    result = run_cli(["ls"], catch_exceptions=False)
     assert result.exit_code == 0
     assert "plan-a" in result.output
     assert "INSTANCE" in result.output
@@ -240,16 +238,16 @@ def test_ls_human_prints_table(monkeypatch):
 
 def test_ls_human_no_instances_message(monkeypatch):
     monkeypatch.setattr(discovery, "instance_records", lambda: [])
-    result = CliRunner().invoke(cli.main, ["ls"], catch_exceptions=False)
+    result = run_cli(["ls"], catch_exceptions=False)
     assert result.exit_code == 0
     assert "(no instances)" in result.output
 
 
 def test_ls_human_filters_by_instance(monkeypatch):
     monkeypatch.setattr(discovery, "instance_records", lambda: [_record()])
-    result = CliRunner().invoke(cli.main, ["ls", "--instance", "other"], catch_exceptions=False)
+    result = run_cli(["ls", "--instance", "other"], catch_exceptions=False)
     assert "(no instances)" in result.output
-    result = CliRunner().invoke(cli.main, ["ls", "--instance", "plan-a"], catch_exceptions=False)
+    result = run_cli(["ls", "--instance", "plan-a"], catch_exceptions=False)
     assert "plan-a" in result.output
 
 

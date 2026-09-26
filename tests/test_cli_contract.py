@@ -14,6 +14,7 @@ mode. These tests pin the flag spellings so that rename breaks the build instead
 import pytest
 
 from epoxy import cli
+from tests.harness import FILTER_ONLY, run_bare_cli
 
 #: Every long flag and short alias each command accepts today. Adding one is
 #: allowed (the contract is additions-only); removing or renaming one is not, so
@@ -123,3 +124,23 @@ def test_commands_that_fan_out_accept_all_and_others_do_not():
 def test_version_option_is_preserved():
     """`epoxy --version` is part of the capability probe."""
     assert "--version" in {opt for param in cli.main.params for opt in param.opts}
+
+
+def test_only_ls_treats_instance_as_a_filter():
+    """Every --instance command but `ls` must *require* a name.
+
+    This is the invariant the test harness leans on when it injects `--instance`
+    for its own calls: those commands error without one, so naming the test
+    instance changes nothing about what they require. A new command that quietly
+    starts treating --instance as an optional filter would slip past the flag
+    contract and break the harness silently, so pin the behaviour instead.
+    """
+    for name in sorted(EXPECTED_FLAGS):
+        if "--instance" not in EXPECTED_FLAGS[name]:
+            continue
+        result = run_bare_cli([name], catch_exceptions=False)
+        if name in FILTER_ONLY:
+            assert result.exit_code == 0, f"{name} should not require an instance"
+        else:
+            assert result.exit_code == 2, f"{name} must require --instance"
+            assert "--instance" in result.output, name

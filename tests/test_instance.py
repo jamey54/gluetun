@@ -39,20 +39,13 @@ def test_parse_instance_name_trims_padding():
     assert parse_instance_name("  plan-a  ") == "plan-a"
 
 
-def test_required_name_from_explicit(monkeypatch):
-    monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
+def test_required_name_from_explicit():
     assert required_name("plan-a") == "plan-a"
 
 
-def test_required_name_from_env(monkeypatch):
-    monkeypatch.setenv("EPOXY_INSTANCE", "plan-a")
-    assert required_name(None) == "plan-a"
-
-
-def test_required_name_without_source_exits(monkeypatch):
-    """No --instance and no EPOXY_INSTANCE is a usage error, not a hidden default."""
-    monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
-    with pytest.raises(click.UsageError, match="EPOXY_INSTANCE"):
+def test_required_name_without_name_is_usage_error():
+    """No name is a usage error, not a hidden default."""
+    with pytest.raises(click.UsageError, match="--instance"):
         required_name(None)
 
 

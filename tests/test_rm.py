@@ -4,13 +4,8 @@ import json
 from pathlib import Path
 from subprocess import CompletedProcess
 
-from click.testing import CliRunner
-
 from epoxy import cli, config
-
-
-def invoke(args):
-    return CliRunner().invoke(cli.main, args, catch_exceptions=False)
+from tests.harness import run_cli
 
 
 def _seed_state(name: str = "epoxy") -> None:
@@ -54,7 +49,7 @@ def test_rm_removes_container_and_deletes_state(monkeypatch):
     monkeypatch.setattr(discovery, "known_names", lambda: {"epoxy"})
     monkeypatch.setattr(discovery, "consumers_of", lambda name: [])
 
-    result = invoke(["rm", "--instance", "epoxy"])
+    result = run_cli(["rm", "--instance", "epoxy"])
     assert result.exit_code == 0
     assert "Instance 'epoxy' removed." in result.output
     assert compose_calls == [("down",)]
@@ -70,7 +65,7 @@ def test_rm_refuses_consumers_without_force(monkeypatch):
     monkeypatch.setattr(discovery, "known_names", lambda: {"epoxy"})
     monkeypatch.setattr(discovery, "consumers_of", lambda name: ["web-app"])
 
-    result = CliRunner().invoke(cli.main, ["rm", "--instance", "epoxy"])
+    result = run_cli(["rm", "--instance", "epoxy"])
     assert result.exit_code == 1
     assert "web-app" in result.output
     assert "--force" in result.output
@@ -87,7 +82,7 @@ def test_rm_force_removes_with_consumers(monkeypatch):
     monkeypatch.setattr(discovery, "known_names", lambda: {"epoxy"})
     monkeypatch.setattr(discovery, "consumers_of", lambda name: ["web-app"])
 
-    result = invoke(["rm", "--instance", "epoxy", "--force"])
+    result = run_cli(["rm", "--instance", "epoxy", "--force"])
     assert result.exit_code == 0
     assert compose_calls == [("down",)]
     assert [p.exists() for p in _state_paths()] == [False, False, False]
@@ -100,7 +95,7 @@ def test_rm_unknown_instance_is_friendly(monkeypatch):
     _stub_docker_ok(monkeypatch, compose_calls)
     monkeypatch.setattr(discovery, "known_names", lambda: {"other"})
 
-    result = CliRunner().invoke(cli.main, ["rm", "--instance", "epoxy"])
+    result = run_cli(["rm", "--instance", "epoxy"])
     assert result.exit_code == 1
     assert "Unknown instance 'epoxy'." in result.output
     assert compose_calls == []
@@ -124,7 +119,7 @@ def test_rm_without_compose_file_falls_back_to_docker_rm(monkeypatch):
     monkeypatch.setattr(discovery, "known_names", lambda: {"epoxy"})
     monkeypatch.setattr(discovery, "consumers_of", lambda name: [])
 
-    result = invoke(["rm", "--instance", "epoxy"])
+    result = run_cli(["rm", "--instance", "epoxy"])
     assert result.exit_code == 0
     assert removed == ["epoxy"]
     assert not (config.INSTANCES_DIR / "epoxy.json").exists()

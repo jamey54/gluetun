@@ -14,7 +14,6 @@ JsonDoc = dict[str, object]
 # --- Env var names (the CLI's own contract; the container's VPN_*/HTTP_* names
 # --- stay untouched in epoxy.yml / control.py) ------------------------------
 
-INSTANCE_ENV_VAR = "EPOXY_INSTANCE"
 CTL_PORT_ENV_VAR = "EPOXY_CTL_PORT"
 CACHE_TTL_ENV_VAR = "EPOXY_CACHE_TTL"
 DEBUG_ENV_VAR = "EPOXY_DEBUG"

@@ -3,10 +3,10 @@
 import json
 
 import pytest
-from click.testing import CliRunner
 
-from epoxy import cli, control, docker, ipinfo
+from epoxy import control, docker, ipinfo
 from epoxy.control import ControlError
+from tests.harness import run_cli
 
 
 def _settings(provider: str = "surfshark", country: str | None = None) -> dict[str, object]:
@@ -73,7 +73,7 @@ def invoke_status(
         probe = ipinfo.Probe({"ip": probe_ip, "country": "DE"}, sources=("ipinfo",))
         monkeypatch.setattr(ipinfo, "probe", lambda: probe)
     monkeypatch.setattr(ipinfo, "real_ip", lambda: "1.1.1.1")
-    return CliRunner().invoke(cli.main, ["status", "--json"], catch_exceptions=False)
+    return run_cli(["status", "--json"], catch_exceptions=False)
 
 
 def test_status_json_schema_running(monkeypatch):
@@ -183,7 +183,7 @@ def test_status_json_uses_published_port_without_registry(monkeypatch):
     probe = ipinfo.Probe({"ip": "9.9.9.9", "country": "DE"}, sources=("ipinfo",))
     monkeypatch.setattr(ipinfo, "probe", lambda: probe)
     monkeypatch.setattr(ipinfo, "real_ip", lambda: "1.1.1.1")
-    result = CliRunner().invoke(cli.main, ["status", "--json"], catch_exceptions=False)
+    result = run_cli(["status", "--json"], catch_exceptions=False)
     assert result.exit_code == 0
     doc = json.loads(result.output)
     assert doc["control_server"] == {"port": 8123, "enabled": True}

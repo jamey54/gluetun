@@ -1,6 +1,5 @@
 """Shared CLI plumbing: instance resolution, runtime helpers, fan-out."""
 
-import os
 import sys
 from collections.abc import Callable
 from dataclasses import replace
@@ -14,7 +13,6 @@ from epoxy.config import (
     CTL_PORT_ENV_VAR,
     DEFAULT_PROTOCOL,
     DEFAULT_SIZE_MB,
-    INSTANCE_ENV_VAR,
     PORT_MAX,
     PORT_MIN,
 )
@@ -88,7 +86,7 @@ def add_instance_options(ctl_port: bool = False, env_file: bool = False) -> Call
         func = click.option(
             "--instance",
             default=None,
-            help=f"Instance name (default: ${INSTANCE_ENV_VAR}; required when unset)",
+            help="Instance name (required; prompted for on a terminal)",
         )(func)
         return func
 
@@ -96,8 +94,8 @@ def add_instance_options(ctl_port: bool = False, env_file: bool = False) -> Call
 
 
 def _no_instance_error() -> NoReturn:
-    """The documented no-target error: --instance or EPOXY_INSTANCE required."""
-    raise click.UsageError(f"No instance selected: pass --instance or set {INSTANCE_ENV_VAR}.")
+    """The documented no-target error: --instance is the only way to name one."""
+    raise click.UsageError("No instance selected: pass --instance NAME.")
 
 
 def _stdin_is_tty() -> bool:
@@ -106,7 +104,7 @@ def _stdin_is_tty() -> bool:
 
 
 def _choose_instance_name() -> str:
-    """Resolve the target when neither --instance nor EPOXY_INSTANCE is set.
+    """Resolve the target when --instance was not passed.
 
     Interactive terminals pick among the known instances (auto-selecting the
     sole instance without prompting); scripts keep the documented usage error —
@@ -130,13 +128,10 @@ def _resolve_for_command(
     ctl_port: int | None = None,
     env_file: str | None = None,
 ) -> Instance:
-    """Resolve the target instance: --instance > EPOXY_INSTANCE > interactive
-    choice > usage error, honoring EPOXY_CTL_PORT. A registry-less instance
-    falls back to its published control port so imported/shared containers stay
-    addressable."""
-    name = instance or os.getenv(INSTANCE_ENV_VAR)
-    if name is None:
-        name = _choose_instance_name()
+    """Resolve the target instance: --instance > interactive choice > usage
+    error, honoring EPOXY_CTL_PORT. A registry-less instance falls back to its
+    published control port so imported/shared containers stay addressable."""
+    name = instance or _choose_instance_name()
     base = resolve_instance(name, env_file=env_file)
     port = ctl_port
     if port is None:
@@ -188,9 +183,9 @@ def _apply_published_fallback(base: Instance) -> Instance:
 def _resolve_targets(instance: str | None, all_instances: bool) -> list[Instance]:
     """Resolve one instance, or every known instance for --all (sorted by name).
 
-    --all conflicts with --instance; it ignores EPOXY_INSTANCE and never
-    prompts. Registry-less targets fall back to their published control port,
-    mirroring single-instance resolution.
+    --all conflicts with --instance; it never prompts. Registry-less targets
+    fall back to their published control port, mirroring single-instance
+    resolution.
     """
     if all_instances:
         if instance is not None:

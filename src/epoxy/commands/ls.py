@@ -5,11 +5,14 @@ import json
 import click
 
 from epoxy import discovery
-from epoxy.commands._common import add_instance_options
 
 
 @click.command()
-@add_instance_options()
+@click.option(
+    "--instance",
+    default=None,
+    help="Only show this instance (filters the listing; no instance is required)",
+)
 @click.option(
     "--json",
     "json_output",

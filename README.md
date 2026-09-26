@@ -81,7 +81,7 @@ You only need to set credentials for providers you actually use.
 | `epoxy update [--instance NAME] [--all]` | Trigger a server list update |
 | `epoxy install [--shell SHELL] [--rc-file FILE] [--print] [--force]` | Wire shell completion into your rc file (bash/zsh/fish) |
 
-`--instance` is the first option of every command. Set `EPOXY_INSTANCE` to avoid repeating it. See [Instances](#instances).
+`--instance` is the first option of every command. Scripts must always pass it. See [Instances](#instances).
 
 ### up vs connect
 
@@ -203,7 +203,7 @@ epoxy 0.3 runs several independent VPN containers side by side, each its own *in
 - an optional `--env-file` replacing `.env` for that instance;
 - a registry record `~/.cache/epoxy/instances/<instance>.json` (control port + env file).
 
-Every command requires an instance. Resolution order: `--instance NAME` → `EPOXY_INSTANCE` env var → interactive choice → error. On an interactive terminal with no `--instance` and no env var, commands that target an instance (`status`, `down`, `connect`, `logs`, `bench`, `dns`, `update`, `up`) ask you to pick one: the sole known instance is used automatically, otherwise a picker lists them by name and state — filter it by typing, and the column-filter keys (`Tab`, `←`/`→`) are inert there, since only the name is a real column. Non-interactive runs (pipes, scripts) keep the usage error — automation must always name its instance explicitly. `epoxy ls` always lists everything and never prompts.
+Every command requires an instance. Resolution order: `--instance NAME` → interactive choice → error. On an interactive terminal with no `--instance`, commands that target an instance (`status`, `down`, `connect`, `logs`, `bench`, `dns`, `update`, `up`) ask you to pick one: the sole known instance is used automatically, otherwise a picker lists them by name and state — filter it by typing, and the column-filter keys (`Tab`, `←`/`→`) are inert there, since only the name is a real column. Non-interactive runs (pipes, scripts) keep the usage error — automation must always name its instance explicitly. `epoxy ls` always lists everything and never prompts.
 
 Container names are **exact matches only**: epoxy never touches a container other than the one named after the instance, so a shared container owned by another tool is never matched.
 
@@ -254,7 +254,7 @@ $ epoxy status --all --no-speedtest
 
 Rules:
 
-- `--instance` and `--all` together are a usage error (exit `2`). `--all` ignores `EPOXY_INSTANCE` and never prompts.
+- `--instance` and `--all` together are a usage error (exit `2`). `--all` never prompts.
 - `up`, `connect`, and `bench` take no `--all`: applying one selection to every instance is never what you want — target them explicitly. `ls` already lists everything.
 - Failures are per instance: the run continues past a failing instance, reports it as `<name>: <error>`, and exits `1` when any instance failed. With no known instances, commands print `(no instances)` and exit `0`.
 - `status --all --json` emits an `{"instances": [...]}` envelope (one status document per instance, same schema as `status --json`); it exits `1` when any instance trips the single-instance exit-1 rules.
@@ -267,7 +267,6 @@ Secrets live in `.env` in the working directory (copy `.env.sample` to get start
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EPOXY_INSTANCE` | *(required for scripts)* | Instance name; pass `--instance` or set this. Omitting both asks interactively on a terminal (pick from the known instances); non-interactive runs fail with a usage error. |
 | `EPOXY_CTL_PORT` | unset | Control-server host port for the resolved instance (equivalent to `--ctl-port`; must be `1`–`65535`, and an empty value counts as unset) |
 | `EPOXY_CACHE_TTL` | `3600` | Server cache TTL (seconds); missing or non-numeric values fall back to the default |
 | `EPOXY_IMAGE` | `qmcgaw/gluetun:latest` | Container image ref for compose/pull/server-fetch; set a tag to pin while a Gluetun release is being investigated |
@@ -301,7 +300,7 @@ This is the contract `dockerstrator` consumes from `epoxy`. Stable schemas — a
 
 Instance names follow docker-safe rules (`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`); anything else is a usage error (exit `2`). The container name is **always** the instance name and is never derived from the compose project. The compose project is pinned to `epoxy-<instance>` via `docker compose -p`, independent of the file location.
 
-Resolution order for every command: `--instance NAME` → `EPOXY_INSTANCE` → interactive choice (TTY only) → error. There is no default instance; a non-interactive run with neither flag is a usage error (exit `2`).
+Resolution order for every command: `--instance NAME` → interactive choice (TTY only) → error. There is no default instance; a non-interactive run without the flag is a usage error (exit `2`).
 
 ### Exit codes
 
@@ -318,13 +317,13 @@ Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` 
 | Purpose | Command |
 |---------|---------|
 | Ensure shared container is running (idempotent; verify-only when already up) | `epoxy up --instance epoxy` |
-| Shared container health probe | `epoxy status --json` |
+| Shared container health probe | `epoxy status --instance epoxy --json` |
 | Capability probe (is epoxy 0.3+ implemented?) | `epoxy ls --json` (or `epoxy --version` for the exact version) |
 | Create a dedicated instance (creds from `.env`) | `epoxy up --instance <plan>-epoxy --provider P [--protocol T] [--country C] [--city Ci]` |
 | Verify a dedicated instance after create | `epoxy status --instance <plan>-epoxy --json` |
 | Tear down when the plan container is removed | `epoxy down --instance <plan>-epoxy` |
 
-dockerstrator rule: if `epoxy ls --json` exits non-zero or reports an unknown flag, treat epoxy as pre-0.3 and hide the *dedicated* container option (shared-only falls back to plain `epoxy up`). Since 0.3.0 every call names its instance explicitly (`--instance` or `EPOXY_INSTANCE`) — there is no default instance anymore. dockerstrator keeps its own container inventory from `docker ps`; `epoxy ls` is used only for instance/control-port/selection state.
+dockerstrator rule: if `epoxy ls --json` exits non-zero or reports an unknown flag, treat epoxy as pre-0.3 and hide the *dedicated* container option (shared-only falls back to plain `epoxy up`). Since 0.3.0 every call names its instance explicitly (`--instance`) — there is no default instance anymore. dockerstrator keeps its own container inventory from `docker ps`; `epoxy ls` is used only for instance/control-port/selection state.
 
 `--json` output is deterministic single-line JSON on stdout (no colors, no progress). `--instance` filters `epoxy ls` output to one instance.
 

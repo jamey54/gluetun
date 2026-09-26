@@ -77,8 +77,12 @@ def up(
                 inst = replace(inst, control_port=published)
         else:
             inst = replace(inst, control_port=allocate_free_port())
-    ensure_compose_file(inst)
     with instance_context(inst):
+        # Rendering resolves image_ref() through the active instance's env, so
+        # the compose file must be written inside the context: outside of it
+        # current_instance() falls back to default_instance(), which is a usage
+        # error in production.
+        ensure_compose_file(inst)
         _common.require_api_key()
         requested = any(v is not None for v in (provider, protocol, country, city))
         was_running = docker.container_running()

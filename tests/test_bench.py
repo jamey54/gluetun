@@ -6,10 +6,11 @@ from typing import Any
 import pytest
 
 from epoxy import apply as apply_module
-from epoxy import bench, cli, config, control, docker, servers
+from epoxy import bench, config, control, docker, servers
 from epoxy.apply import Verification
 from epoxy.commands import _common
 from epoxy.speedtest import Result
+from tests.harness import run_cli
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -613,7 +614,6 @@ def test_test_batch_needs_no_instance_context(monkeypatch):
     Regression: worker threads share no instance context, so without instance
     state every candidate used to fail with "No instance selected".
     """
-    monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
     launched: list[tuple[str, dict[str, str]]] = []
 
     def fake_launch(name: str, env: dict[str, str]) -> bool:
@@ -704,7 +704,6 @@ def test_sorted_results_finalists_first_failures_last():
 
 
 def test_cli_bench_end_to_end(monkeypatch):
-    from click.testing import CliRunner
 
     data = rows(
         ("surfshark", "wireguard", "France", "", "fr1"),
@@ -730,7 +729,7 @@ def test_cli_bench_end_to_end(monkeypatch):
 
     monkeypatch.setattr(bench, "measure", fake_measure)
 
-    result = CliRunner().invoke(cli.main, ["bench", "--connect"])
+    result = run_cli(["bench", "--connect"])
     assert result.exit_code == 0, result.output
     # default scope = running pair; latency-ranked screening; winner France connected
     assert "Benchmarking 2 locations" in result.output
@@ -739,7 +738,6 @@ def test_cli_bench_end_to_end(monkeypatch):
 
 
 def test_cli_bench_concurrency_flag_passes_through(monkeypatch):
-    from click.testing import CliRunner
 
     seen = {}
     monkeypatch.setattr(_common, "require_api_key", lambda: None)
@@ -759,17 +757,17 @@ def test_cli_bench_concurrency_flag_passes_through(monkeypatch):
     )
     monkeypatch.setattr(bench, "probe_hosts", Recorder([{}]))
 
-    result = CliRunner().invoke(cli.main, ["bench", "-c", "3"])
+    result = run_cli(["bench", "-c", "3"])
     assert result.exit_code == 0, result.output
     assert seen["concurrency"] == 3
     assert seen["connect_winner"] is False  # no connect by default
 
-    result = CliRunner().invoke(cli.main, ["bench"])
+    result = run_cli(["bench"])
     assert result.exit_code == 0, result.output
     assert seen["concurrency"] == config.DEFAULT_TEST_CONCURRENCY
     assert seen["connect_winner"] is False
 
-    result = CliRunner().invoke(cli.main, ["bench", "--connect"])
+    result = run_cli(["bench", "--connect"])
     assert result.exit_code == 0, result.output
     assert seen["concurrency"] == config.DEFAULT_TEST_CONCURRENCY
     assert seen["connect_winner"] is True
@@ -778,7 +776,6 @@ def test_cli_bench_concurrency_flag_passes_through(monkeypatch):
 def test_cli_bench_control_error_is_friendly_exit(monkeypatch):
     """A control-server failure during the bench run is a friendly error, never
     a traceback (the pre-check and the baseline snapshot are separate calls)."""
-    from click.testing import CliRunner
 
     monkeypatch.setattr(_common, "require_api_key", lambda: None)
     monkeypatch.setattr(docker, "container_running", lambda: True)
@@ -794,25 +791,23 @@ def test_cli_bench_control_error_is_friendly_exit(monkeypatch):
         raise control.ControlError(None, "control server unreachable")
 
     monkeypatch.setattr("epoxy.commands.bench.run_bench", boom)
-    result = CliRunner().invoke(cli.main, ["bench"], catch_exceptions=False)
+    result = run_cli(["bench"], catch_exceptions=False)
     assert result.exit_code != 0
     assert "control server unreachable" in result.output
     assert "Traceback" not in result.output
 
 
 def test_cli_bench_requires_running_container(monkeypatch):
-    from click.testing import CliRunner
 
     monkeypatch.setattr(_common, "require_api_key", lambda: None)
     monkeypatch.setattr(docker, "container_running", lambda: False)
-    result = CliRunner().invoke(cli.main, ["bench"])
+    result = run_cli(["bench"])
     assert result.exit_code != 0
     assert "not running" in result.output
 
 
 def test_cli_bench_defaults_to_all_credentialed_providers(monkeypatch):
     """A bare `epoxy bench` benches every provider, not just the running pair."""
-    from click.testing import CliRunner
 
     data = rows(
         ("surfshark", "wireguard", "France", "", "fr1"),
@@ -834,7 +829,7 @@ def test_cli_bench_defaults_to_all_credentialed_providers(monkeypatch):
 
     monkeypatch.setattr(bench, "measure", fake_measure)
 
-    result = CliRunner().invoke(cli.main, ["bench"])
+    result = run_cli(["bench"])
     assert result.exit_code == 0, result.output
     # running pair is surfshark/wireguard; protonvpn must still be benched
     assert "Benchmarking 2 locations" in result.output

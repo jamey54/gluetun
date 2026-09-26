@@ -4,13 +4,13 @@ from subprocess import CompletedProcess
 from typing import Any
 
 import pytest
-from click.testing import CliRunner
 
-from epoxy import apply, cli, config, control, docker, ipinfo, picker, servers
+from epoxy import apply, config, control, docker, ipinfo, picker, servers
 from epoxy.apply import Selection
 from epoxy.commands import _common
 from epoxy.control import ControlError
 from epoxy.instance import compose_services, image_ref, render_compose, resolve_instance
+from tests.harness import run_cli
 
 
 @pytest.fixture(autouse=True)
@@ -93,10 +93,6 @@ def compose_calls(monkeypatch):
     return calls
 
 
-def invoke(args: list[str]):
-    return CliRunner().invoke(cli.main, args, catch_exceptions=False)
-
-
 # ---------------------------------------------------------------------------
 # up
 # ---------------------------------------------------------------------------
@@ -104,7 +100,7 @@ def invoke(args: list[str]):
 
 def test_up_cold_start_bakes_provider_env(monkeypatch, compose_calls, swaps):
     running(monkeypatch, None)
-    result = invoke(["up", "--provider", "surfshark"])
+    result = run_cli(["up", "--provider", "surfshark"])
     assert result.exit_code == 0
     args, overrides = compose_calls[0]
     assert "--force-recreate" not in args
@@ -116,7 +112,7 @@ def test_up_cold_start_bakes_provider_env(monkeypatch, compose_calls, swaps):
 
 def test_up_cold_start_requires_provider(monkeypatch, compose_calls, swaps):
     running(monkeypatch, None)
-    result = invoke(["up"])
+    result = run_cli(["up"])
     assert result.exit_code != 0
     assert "--provider" in result.output
     assert compose_calls == [] and swaps == []
@@ -125,7 +121,7 @@ def test_up_cold_start_requires_provider(monkeypatch, compose_calls, swaps):
 def test_up_cold_start_with_country_swaps_after_start(monkeypatch, compose_calls, swaps, verified):
     running(monkeypatch, None)
     monkeypatch.setattr(control, "wait_for_settings", lambda **kwargs: {})
-    result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
+    result = run_cli(["up", "--provider", "protonvpn", "--country", "Japan"])
     assert result.exit_code == 0
     _, overrides = compose_calls[0]
     assert "SERVER_COUNTRIES" not in overrides  # location applied at runtime instead
@@ -142,7 +138,7 @@ def test_up_cold_start_waits_for_control_before_swap(monkeypatch, compose_calls,
         return {}
 
     monkeypatch.setattr(control, "wait_for_settings", fake_wait)
-    result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
+    result = run_cli(["up", "--provider", "protonvpn", "--country", "Japan"])
     assert result.exit_code == 0
     assert len(waits) == 1
     assert swaps == [Selection("protonvpn", "wireguard", "Japan")]
@@ -161,14 +157,14 @@ def test_up_cold_start_unready_control_is_friendly(monkeypatch, compose_calls):
 
     monkeypatch.setattr(control, "wait_for_settings", no_server)
     monkeypatch.setattr("epoxy.apply.apply_location", down)
-    result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
+    result = run_cli(["up", "--provider", "protonvpn", "--country", "Japan"])
     assert result.exit_code != 0
     assert "Could not switch to" in result.output
 
 
 def test_up_running_no_flags_only_verifies(monkeypatch, compose_calls, swaps):
     running(monkeypatch)
-    result = invoke(["up"])
+    result = run_cli(["up"])
     assert result.exit_code == 0
     assert compose_calls == [] and swaps == []
 
@@ -176,21 +172,21 @@ def test_up_running_no_flags_only_verifies(monkeypatch, compose_calls, swaps):
 def test_up_running_no_flags_verifies_against_running_country(monkeypatch, verified):
     """A plain `epoxy up` must still flag a geo mismatch (yellow), not blind green."""
     running(monkeypatch)
-    result = invoke(["up"])
+    result = run_cli(["up"])
     assert result.exit_code == 0
     assert verified[0]["expected_country"] == "Germany"
 
 
 def test_up_running_already_on_verifies_against_target_country(monkeypatch, verified):
     running(monkeypatch)
-    result = invoke(["up", "--country", "Germany"])
+    result = run_cli(["up", "--country", "Germany"])
     assert result.exit_code == 0
     assert verified[0]["expected_country"] == "Germany"
 
 
 def test_up_running_country_hot_swaps(monkeypatch, compose_calls, swaps, verified):
     running(monkeypatch)
-    result = invoke(["up", "--country", "Japan"])
+    result = run_cli(["up", "--country", "Japan"])
     assert result.exit_code == 0
     assert compose_calls == []
     assert swaps == [Selection("surfshark", "wireguard", "Japan")]
@@ -199,7 +195,7 @@ def test_up_running_country_hot_swaps(monkeypatch, compose_calls, swaps, verifie
 
 def test_up_running_same_target_short_circuits(monkeypatch, compose_calls, swaps):
     running(monkeypatch)
-    result = invoke(["up", "--country", "Germany"])
+    result = run_cli(["up", "--country", "Germany"])
     assert result.exit_code == 0
     assert swaps == []
     assert "Already on" in result.output
@@ -207,14 +203,14 @@ def test_up_running_same_target_short_circuits(monkeypatch, compose_calls, swaps
 
 def test_up_provider_switch_resets_location(monkeypatch, compose_calls, swaps):
     running(monkeypatch)
-    result = invoke(["up", "--provider", "protonvpn"])
+    result = run_cli(["up", "--provider", "protonvpn"])
     assert result.exit_code == 0
     assert swaps == [Selection("protonvpn", "wireguard", None)]
 
 
 def test_up_city_only_keeps_country(monkeypatch, compose_calls, swaps):
     running(monkeypatch)
-    result = invoke(["up", "--city", "Munich"])
+    result = run_cli(["up", "--city", "Munich"])
     assert result.exit_code == 0
     assert swaps == [Selection("surfshark", "wireguard", "Germany", "Munich")]
 
@@ -230,7 +226,7 @@ def test_up_pull_pulls_image_and_recreates(monkeypatch, compose_calls, swaps):
         return CompletedProcess((), 1, stdout="", stderr="")
 
     monkeypatch.setattr("epoxy.docker.run", fake_pull)
-    result = invoke(["up", "--pull"])
+    result = run_cli(["up", "--pull"])
     assert result.exit_code == 0
     assert any("pull" in c for c in pulls[0])
     assert image_ref() in pulls[0]
@@ -240,7 +236,7 @@ def test_up_pull_pulls_image_and_recreates(monkeypatch, compose_calls, swaps):
 
 def test_up_recreate_reverts_to_env_config(monkeypatch, compose_calls, swaps):
     running(monkeypatch)
-    result = invoke(["up", "--recreate"])
+    result = run_cli(["up", "--recreate"])
     assert result.exit_code == 0
     args, _ = compose_calls[0]
     assert "--force-recreate" in args
@@ -260,7 +256,7 @@ def test_up_recreate_verifies_baked_country(monkeypatch, compose_calls, swaps, v
             "SERVER_COUNTRIES": "Germany",
         },
     )
-    result = invoke(["up", "--recreate"])
+    result = run_cli(["up", "--recreate"])
     assert result.exit_code == 0
     assert compose_calls[0][0] == ("up", "-d", "--force-recreate")
     assert swaps == []
@@ -272,7 +268,7 @@ def test_up_recreate_same_country_still_swaps(monkeypatch, compose_calls, swaps,
     matching the pre-recreate selection must still be applied."""
     running(monkeypatch)  # on Germany before the recreate
     monkeypatch.setattr(control, "wait_for_settings", lambda **kwargs: {})
-    result = invoke(["up", "--recreate", "--country", "Germany"])
+    result = run_cli(["up", "--recreate", "--country", "Germany"])
     assert result.exit_code == 0
     args, _ = compose_calls[0]
     assert "--force-recreate" in args
@@ -282,7 +278,7 @@ def test_up_recreate_same_country_still_swaps(monkeypatch, compose_calls, swaps,
 
 def test_up_city_without_any_country_fails_clearly(monkeypatch, compose_calls, swaps):
     running(monkeypatch, Selection("surfshark", "wireguard", None))
-    result = invoke(["up", "--city", "Munich"])
+    result = run_cli(["up", "--city", "Munich"])
     assert result.exit_code != 0
     assert "--country" in result.output
     assert swaps == [] and compose_calls == []
@@ -291,7 +287,7 @@ def test_up_city_without_any_country_fails_clearly(monkeypatch, compose_calls, s
 def test_up_running_unreachable_control_server_exits(monkeypatch, compose_calls, swaps):
     running(monkeypatch, None)
     monkeypatch.setattr(docker, "container_running", lambda name=None: True)
-    result = invoke(["up", "--country", "Japan"])
+    result = run_cli(["up", "--country", "Japan"])
     assert result.exit_code != 0
     assert "control server" in result.output
     assert swaps == [] and compose_calls == []
@@ -301,7 +297,7 @@ def test_up_recreate_works_with_unreachable_control_server(monkeypatch, compose_
     """--recreate is the escape hatch: it must not block on the control server."""
     running(monkeypatch)
     monkeypatch.setattr(_common, "effective_selection", lambda: None)
-    result = invoke(["up", "--provider", "surfshark", "--recreate"])
+    result = run_cli(["up", "--provider", "surfshark", "--recreate"])
     assert result.exit_code == 0
     assert compose_calls[0][0] == ("up", "-d", "--force-recreate")
 
@@ -330,7 +326,7 @@ def test_up_exits_1_when_control_server_is_unreachable(monkeypatch):
     """
     _running_but_unreadable(monkeypatch)
     _never_ready(monkeypatch)
-    result = invoke(["up", "--no-speedtest"])
+    result = run_cli(["up", "--no-speedtest"])
     assert result.exit_code == 1
     assert "Cannot read runtime settings" in result.output
 
@@ -339,7 +335,7 @@ def test_up_requested_swap_still_fails_on_unreachable_control_server(monkeypatch
     """The pre-existing guard keeps its exit 1 for a requested swap."""
     _running_but_unreadable(monkeypatch)
     _never_ready(monkeypatch)
-    result = invoke(["up", "--country", "France", "--no-speedtest"])
+    result = run_cli(["up", "--country", "France", "--no-speedtest"])
     assert result.exit_code == 1
     assert "Cannot read runtime settings" in result.output
     assert swaps == []
@@ -350,7 +346,7 @@ def test_up_waits_out_a_booting_control_server(monkeypatch):
     _running_but_unreadable(monkeypatch)
     _control_down(monkeypatch)
     monkeypatch.setattr("epoxy.control.wait_for_settings", lambda *a, **k: _settings(RUNNING))
-    result = invoke(["up", "--no-speedtest"])
+    result = run_cli(["up", "--no-speedtest"])
     assert result.exit_code == 0
     assert "Waiting for control server..." in result.output
 
@@ -362,19 +358,19 @@ def test_up_does_not_wait_when_settings_are_readable(monkeypatch):
         "epoxy.control.wait_for_settings",
         lambda *a, **k: pytest.fail("must not wait on a reachable control server"),
     )
-    result = invoke(["up", "--no-speedtest"])
+    result = run_cli(["up", "--no-speedtest"])
     assert result.exit_code == 0
     assert "Waiting for control server..." not in result.output
 
 
 def test_logs_tails_the_compose_service_by_default(monkeypatch, compose_calls):
-    result = invoke(["logs"])
+    result = run_cli(["logs"])
     assert result.exit_code == 0
     assert compose_calls[0][0] == ("logs", "--tail", "50", "epoxy")
 
 
 def test_logs_follows_and_tails_custom(monkeypatch, compose_calls):
-    result = invoke(["logs", "--follow", "-n", "200"])
+    result = run_cli(["logs", "--follow", "-n", "200"])
     assert result.exit_code == 0
     assert compose_calls[0][0] == ("logs", "-f", "--tail", "200", "epoxy")
 
@@ -391,7 +387,7 @@ def test_logs_targets_a_real_service_for_a_renamed_instance(monkeypatch, compose
     services = compose_services(render_compose("plan-a", 8123))
     assert inst.container not in services, "test premise: names must differ to catch a mix-up"
 
-    result = invoke(["logs", "--instance", "plan-a"])
+    result = run_cli(["logs", "--instance", "plan-a"])
     assert result.exit_code == 0
     passed = compose_calls[0][0][-1]
     assert passed in services, f"logs passed {passed!r}, not a service in {sorted(services)}"
@@ -399,7 +395,7 @@ def test_logs_targets_a_real_service_for_a_renamed_instance(monkeypatch, compose
 
 def test_up_explicit_protocol_requires_its_own_creds(monkeypatch, compose_calls, swaps):
     running(monkeypatch)
-    result = invoke(["up", "--protocol", "openvpn"])
+    result = run_cli(["up", "--protocol", "openvpn"])
     assert result.exit_code != 0
     assert "Missing env vars" in result.output
     assert swaps == [] and compose_calls == []
@@ -409,7 +405,7 @@ def test_up_fails_closed_without_api_key(monkeypatch, compose_calls, swaps):
     running(monkeypatch, None)
     monkeypatch.delenv("HTTP_CONTROL_SERVER_API_KEY")
     monkeypatch.setattr("epoxy.commands._common.env_lookup", lambda name: None)
-    result = invoke(["up", "--provider", "surfshark"])
+    result = run_cli(["up", "--provider", "surfshark"])
     assert result.exit_code != 0
     assert "HTTP_CONTROL_SERVER_API_KEY" in result.output
     assert compose_calls == [] and swaps == []
@@ -422,7 +418,7 @@ def test_up_fails_closed_without_api_key(monkeypatch, compose_calls, swaps):
 
 def test_connect_requires_running_container(monkeypatch):
     running(monkeypatch, None)
-    result = invoke(["connect", "--country", "Japan"])
+    result = run_cli(["connect", "--country", "Japan"])
     assert result.exit_code != 0
     assert "not running" in result.output
 
@@ -430,7 +426,7 @@ def test_connect_requires_running_container(monkeypatch):
 def test_connect_swap_excludes_previous_exit(monkeypatch, swaps, verified):
     running(monkeypatch)
     monkeypatch.setattr(ipinfo, "current_exit_ip", lambda: "9.9.9.9")
-    result = invoke(["connect", "--country", "Japan"])
+    result = run_cli(["connect", "--country", "Japan"])
     assert result.exit_code == 0
     assert swaps == [Selection("surfshark", "wireguard", "Japan")]
     assert verified[0]["expected_country"] == "Japan"
@@ -441,7 +437,7 @@ def test_connect_already_on_keeps_current_exit_valid(monkeypatch, swaps, verifie
     """No swap happened: the tunnel's current IP must not be excluded."""
     running(monkeypatch)
     monkeypatch.setattr(ipinfo, "current_exit_ip", lambda: "1.1.1.1")
-    result = invoke(["connect", "--country", "Germany"])
+    result = run_cli(["connect", "--country", "Germany"])
     assert result.exit_code == 0
     assert swaps == []
     assert "Already on" in result.output
@@ -451,7 +447,7 @@ def test_connect_already_on_keeps_current_exit_valid(monkeypatch, swaps, verifie
 def test_up_running_swap_excludes_previous_exit(monkeypatch, compose_calls, swaps, verified):
     running(monkeypatch)
     monkeypatch.setattr(ipinfo, "current_exit_ip", lambda: "8.8.8.8")
-    result = invoke(["up", "--country", "Japan"])
+    result = run_cli(["up", "--country", "Japan"])
     assert result.exit_code == 0
     assert swaps == [Selection("surfshark", "wireguard", "Japan")]
     assert verified[0]["exclude_ips"] == {"8.8.8.8"}
@@ -467,7 +463,7 @@ def test_up_cold_start_has_no_previous_exit_to_exclude(monkeypatch, compose_call
     monkeypatch.setattr(ipinfo, "current_exit_ip", probe)
     monkeypatch.setattr(control, "wait_for_settings", lambda **kwargs: {})
     running(monkeypatch, None)
-    result = invoke(["up", "--provider", "protonvpn", "--country", "Japan"])
+    result = run_cli(["up", "--provider", "protonvpn", "--country", "Japan"])
     assert result.exit_code == 0
     assert calls == []  # nothing to exclude before a fresh start
     assert verified[0]["exclude_ips"] is None
@@ -477,7 +473,7 @@ def test_connect_picker_selection(monkeypatch, swaps):
     running(monkeypatch)
     _stub_server_rows(monkeypatch)
     monkeypatch.setattr(picker, "select_server", lambda rows: "[surfshark/wireguard] Japan - Tokyo")
-    result = invoke(["connect"])
+    result = run_cli(["connect"])
     assert result.exit_code == 0
     assert swaps == [Selection("surfshark", "wireguard", "Japan", "Tokyo")]
 
@@ -495,7 +491,7 @@ def test_up_cold_start_verifies_baked_country(monkeypatch, compose_calls, swaps,
             "SERVER_CITIES": "Berlin",
         },
     )
-    result = invoke(["up", "--provider", "surfshark"])
+    result = run_cli(["up", "--provider", "surfshark"])
     assert result.exit_code == 0
     assert swaps == []  # no hot-swap: baked config already applies
     assert verified[0]["expected_country"] == "Germany"
@@ -503,7 +499,7 @@ def test_up_cold_start_verifies_baked_country(monkeypatch, compose_calls, swaps,
 
 def test_connect_city_without_country_fails_clearly(monkeypatch, swaps):
     running(monkeypatch, Selection("surfshark", "wireguard", None))
-    result = invoke(["connect", "--city", "Tokyo"])
+    result = run_cli(["connect", "--city", "Tokyo"])
     assert result.exit_code != 0
     assert "--country" in result.output
     assert swaps == []
@@ -513,7 +509,7 @@ def test_connect_cancelled_picker_exits(monkeypatch, swaps):
     running(monkeypatch)
     _stub_server_rows(monkeypatch)
     monkeypatch.setattr(picker, "select_server", lambda rows: None)
-    result = invoke(["connect"])
+    result = run_cli(["connect"])
     assert result.exit_code != 0
     assert "No selection." in result.output
     assert swaps == []
@@ -523,7 +519,7 @@ def test_connect_list_prints_table(monkeypatch, swaps):
     _stub_server_rows(monkeypatch)
     printed: list[Any] = []
     monkeypatch.setattr("epoxy.servers.print_servers_table", printed.append)
-    result = invoke(["connect", "--list"])
+    result = run_cli(["connect", "--list"])
     assert result.exit_code == 0
     assert printed and printed[0]["surfshark"]
     assert swaps == []
@@ -543,14 +539,14 @@ def _stub_server_rows(monkeypatch) -> None:
 def test_status_unknown_when_control_server_down(monkeypatch):
     monkeypatch.setattr(docker, "container_status", lambda: "running")
     monkeypatch.setattr(_common, "_runtime_selection_or_error", lambda: (None, False))
-    result = invoke(["status", "--no-speedtest"])
+    result = run_cli(["status", "--no-speedtest"])
     assert result.exit_code == 1
     assert "unknown" in result.output
 
 
 def test_status_missing_container(monkeypatch):
     monkeypatch.setattr(docker, "container_status", lambda: None)
-    result = invoke(["status"])
+    result = run_cli(["status"])
     assert result.exit_code == 1
     assert "not found" in result.output
 
@@ -561,7 +557,7 @@ def test_status_shows_vpn_and_dns(monkeypatch):
     monkeypatch.setattr("epoxy.control.get_tunnel_status", lambda: "running")
     monkeypatch.setattr("epoxy.control.get_dns_status", lambda: "running")
     monkeypatch.setattr("epoxy.control.get_port_forward", lambda: 5914)
-    result = invoke(["status", "--no-speedtest"])
+    result = run_cli(["status", "--no-speedtest"])
     assert result.exit_code == 0
     assert "Tunnel      running" in result.output
     assert "DNS         running" in result.output
@@ -574,7 +570,7 @@ def test_status_flags_running_country_mismatch(monkeypatch, verified):
     """`epoxy status` must pass the running country so a geo mismatch shows yellow."""
     monkeypatch.setattr(docker, "container_status", lambda: "running")
     monkeypatch.setattr(_common, "_runtime_selection_or_error", lambda: (RUNNING, True))
-    result = invoke(["status", "--no-speedtest"])
+    result = run_cli(["status", "--no-speedtest"])
     assert result.exit_code == 0
     assert verified and verified[0]["expected_country"] == "Germany"
 
@@ -594,7 +590,7 @@ def test_status_does_not_probe_when_not_running(monkeypatch):
     monkeypatch.setattr(_common, "effective_selection", lambda: None)
     monkeypatch.setattr("epoxy.control.get_tunnel_status", boom)
     monkeypatch.setattr(_common, "finish_connection", record_connection)
-    result = invoke(["status", "--no-speedtest"])
+    result = run_cli(["status", "--no-speedtest"])
     assert result.exit_code == 0
     assert calls == []
     assert "exited" in result.output
@@ -609,7 +605,7 @@ def test_hotswap_control_error_shows_friendly_exit(monkeypatch):
 
     running(monkeypatch)
     monkeypatch.setattr(apply, "apply_location", boom)
-    result = invoke(["up", "--country", "France"])
+    result = run_cli(["up", "--country", "France"])
     assert result.exit_code != 0
     assert "France" in result.output
     assert "control server unreachable" in result.output
@@ -627,7 +623,7 @@ def test_status_hides_dns_and_port_when_unreachable(monkeypatch):
     monkeypatch.setattr("epoxy.control.get_tunnel_status", _control_error_noarg)
     monkeypatch.setattr("epoxy.control.get_dns_status", _control_error_noarg)
     monkeypatch.setattr("epoxy.control.get_port_forward", _control_error_noarg)
-    result = invoke(["status", "--no-speedtest"])
+    result = run_cli(["status", "--no-speedtest"])
     assert result.exit_code == 0
     assert "VPN:" not in result.output
     assert "DNS:" not in result.output
@@ -645,7 +641,7 @@ def test_down_stops_vpn_before_compose(monkeypatch, compose_calls):
         "epoxy.control.set_tunnel_status",
         lambda s, timeout=10: stopped.append((s, timeout)),
     )
-    result = invoke(["down"])
+    result = run_cli(["down"])
     assert result.exit_code == 0
     assert stopped == [("stopped", config.DOWN_TIMEOUT_S)]
     assert compose_calls[0][0] == ("down",)
@@ -659,7 +655,7 @@ def test_down_succeeds_when_control_server_unreachable(monkeypatch, compose_call
         raise ControlError(None, "no")
 
     monkeypatch.setattr("epoxy.control.set_tunnel_status", boom)
-    result = invoke(["down"])
+    result = run_cli(["down"])
     assert result.exit_code == 0
     assert compose_calls[0][0] == ("down",)
     assert "VPN stopped." in result.output
@@ -670,7 +666,7 @@ def test_down_succeeds_when_control_server_times_out(monkeypatch, compose_calls)
         raise TimeoutError("timed out")
 
     monkeypatch.setattr("epoxy.control.set_tunnel_status", boom)
-    result = invoke(["down"])
+    result = run_cli(["down"])
     assert result.exit_code == 0
     assert compose_calls[0][0] == ("down",)
     assert "VPN stopped." in result.output
@@ -683,7 +679,7 @@ def test_down_succeeds_when_control_server_times_out(monkeypatch, compose_calls)
 
 def test_dns_no_action_shows_status(monkeypatch):
     monkeypatch.setattr("epoxy.control.get_dns_status", lambda: "running")
-    result = invoke(["dns"])
+    result = run_cli(["dns"])
     assert result.exit_code == 0
     assert "DNS: running" in result.output
 
@@ -691,7 +687,7 @@ def test_dns_no_action_shows_status(monkeypatch):
 def test_dns_on_starts_resolver(monkeypatch):
     calls: list[str] = []
     monkeypatch.setattr("epoxy.control.set_dns_status", lambda s: calls.append(s))
-    result = invoke(["dns", "on"])
+    result = run_cli(["dns", "on"])
     assert result.exit_code == 0
     assert calls == ["running"]
     assert "DNS running." in result.output
@@ -700,7 +696,7 @@ def test_dns_on_starts_resolver(monkeypatch):
 def test_dns_off_stops_resolver(monkeypatch):
     calls: list[str] = []
     monkeypatch.setattr("epoxy.control.set_dns_status", lambda s: calls.append(s))
-    result = invoke(["dns", "off"])
+    result = run_cli(["dns", "off"])
     assert result.exit_code == 0
     assert calls == ["stopped"]
     assert "DNS stopped." in result.output
@@ -713,7 +709,7 @@ def test_dns_command_fails_without_control_server(monkeypatch):
         "epoxy.control.get_dns_status",
         lambda: (_ for _ in ()).throw(ControlError(None, "no")),
     )
-    result = invoke(["dns"])
+    result = run_cli(["dns"])
     assert result.exit_code != 0
     assert "Cannot reach control server" in result.output
 
@@ -726,7 +722,7 @@ def test_dns_command_fails_without_control_server(monkeypatch):
 def test_update_triggers_updater(monkeypatch):
     called = []
     monkeypatch.setattr("epoxy.control.trigger_updater", lambda: called.append(True))
-    result = invoke(["update"])
+    result = run_cli(["update"])
     assert result.exit_code == 0
     assert called == [True]
     assert "triggered" in result.output
@@ -739,6 +735,6 @@ def test_update_fails_without_control_server(monkeypatch):
         raise ControlError(None, "no")
 
     monkeypatch.setattr("epoxy.control.trigger_updater", boom)
-    result = invoke(["update"])
+    result = run_cli(["update"])
     assert result.exit_code != 0
     assert "Cannot reach control server" in result.output

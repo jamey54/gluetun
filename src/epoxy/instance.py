@@ -5,8 +5,8 @@ docker container name (== instance name). Commands resolve an instance up front
 and run inside ``instance_context``; everything else reads the active instance
 through ``current_instance()``.
 
-An instance name comes from ``--instance`` or else ``EPOXY_INSTANCE``; with
-neither, resolution is a usage error — there is no hidden default instance.
+An instance name comes from ``--instance``; with neither that nor an interactive
+pick, resolution is a usage error — there is no hidden default instance.
 
 Isolation invariants:
 - container name is always the instance name (never derived from the compose
@@ -44,7 +44,6 @@ from epoxy.config import (
     CONTAINER_CTL_PORT,
     DEFAULT_IMAGE,
     IMAGE_ENV_VAR,
-    INSTANCE_ENV_VAR,
     MAX_ALLOC_CTL_PORT,
     JsonDoc,
     read_env_file,
@@ -71,11 +70,15 @@ def parse_instance_name(name: str) -> str:
 
 
 def required_name(instance: str | None) -> str:
-    """An explicit instance name wins; else EPOXY_INSTANCE; else a usage error."""
-    name = instance or os.getenv(INSTANCE_ENV_VAR)
-    if not name:
-        raise click.UsageError(f"No instance selected: pass --instance or set {INSTANCE_ENV_VAR}.")
-    return parse_instance_name(name)
+    """Validate an explicit instance name; usage error when it is missing.
+
+    Callers reach this only after the interactive picker has declined to choose
+    (see commands/_common._choose_instance_name), so "no name" here means a
+    non-interactive run, where a usage error is the documented outcome.
+    """
+    if not instance:
+        raise click.UsageError("No instance selected: pass --instance NAME.")
+    return parse_instance_name(instance)
 
 
 @dataclass(frozen=True)
@@ -274,8 +277,9 @@ def resolve_instance(
 ) -> Instance:
     """Build an instance, applying explicit values over persisted registry state.
 
-    ``name`` may be None: it then resolves via ``required_name`` (env, else
-    error).
+    ``name`` may be None: it then falls to ``required_name``, which errors when
+    no name was given. Interactive selection happens upstream, in the command
+    layer, before this is reached.
     """
     name = required_name(name)
     registry = read_registry(name)
