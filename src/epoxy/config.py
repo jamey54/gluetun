@@ -68,6 +68,11 @@ LOCK_FILE_PERMS = 0o600
 # --- HTTP / Control server -----------------------------------------------
 
 BASE_CONTROL_PORT = 8000
+# Port the control server listens on *inside* the container. Fixed by the image
+# and by the bundled epoxy.yml, so it is never the host port we publish it on.
+CONTAINER_CTL_PORT = 8000
+# Last host port auto-allocation may pick (the allocation range is inclusive).
+MAX_ALLOC_CTL_PORT = 9000
 # Valid host-port bounds, shared by --ctl-port and EPOXY_CTL_PORT so the flag and
 # its env twin cannot drift apart.
 PORT_MIN = 1

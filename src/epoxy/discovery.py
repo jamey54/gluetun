@@ -9,6 +9,8 @@ Consumers are containers sharing the instance's network namespace
 from datetime import datetime
 from typing import cast
 
+import click
+
 from epoxy import control
 from epoxy.apply import Selection
 from epoxy.config import CONTAINER_OP_TIMEOUT_S, JsonDoc
@@ -159,8 +161,6 @@ def _local_started(value: str) -> str:
 
 def print_ls_table(records: list[JsonDoc]) -> None:
     """Human-readable ls output."""
-    import click
-
     if not records:
         click.echo("(no instances)")
         return

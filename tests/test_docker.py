@@ -200,3 +200,32 @@ def test_inspect_container_timeout_reads_as_absent(monkeypatch):
         docker, "run", lambda *args, **kw: CompletedProcess(args, 124, stdout="", stderr="timeout")
     )
     assert docker.container_status("epoxy") is None
+
+
+def test_inspect_container_reads_missing_docker_as_absent(monkeypatch):
+    """A missing docker binary is absence, not a crash, for read-only probes.
+
+    run(check=False) turns the OSError out of subprocess into returncode 127
+    rather than raising, so inspect_container's non-zero-returncode check already
+    covers it and needs no handler of its own.
+    """
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise OSError("no such file or directory: 'docker'")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    assert docker.inspect_container("{{.State.Status}}", name="epoxy") is None
+    assert docker.container_status("epoxy") is None
+    # check=True keeps treating the same OSError as a hard, reported failure.
+    with pytest.raises(SystemExit) as ei:
+        docker.run("docker", "inspect", "epoxy")
+    assert ei.value.code == 127
+
+
+def test_container_control_port_reads_the_container_port(monkeypatch):
+    """The published-port lookup keys on the in-container port, not the host one."""
+    published = f'{{"{config.CONTAINER_CTL_PORT}/tcp": [{{"HostPort": "8123"}}]}}'
+    monkeypatch.setattr(
+        docker, "inspect_container", lambda fmt, name=None: published
+    )
+    assert docker.container_control_port("epoxy") == 8123

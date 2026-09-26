@@ -39,10 +39,19 @@ from pathlib import Path
 import click
 
 from epoxy import config
-from epoxy.config import BASE_CONTROL_PORT, INSTANCE_ENV_VAR, JsonDoc, image_ref, read_env_file
+from epoxy.config import (
+    BASE_CONTROL_PORT,
+    CONTAINER_CTL_PORT,
+    INSTANCE_ENV_VAR,
+    MAX_ALLOC_CTL_PORT,
+    JsonDoc,
+    image_ref,
+    read_env_file,
+)
 
 INSTANCE_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
-PORT_RANGE = range(BASE_CONTROL_PORT, 9001)
+# Inclusive range of host ports auto-allocation may hand out.
+PORT_RANGE = range(BASE_CONTROL_PORT, MAX_ALLOC_CTL_PORT + 1)
 
 
 def parse_instance_name(name: str) -> str:
@@ -202,7 +211,11 @@ def render_compose(name: str, port: int) -> str:
     body = resource_files("epoxy").joinpath("epoxy.yml").read_text()
     body = body.replace("image: EPOXY_IMAGE_REF", f"image: {image_ref()}")
     body = body.replace("container_name: epoxy", f"container_name: {name}")
-    body = re.sub(r"127\.0\.0\.1:\d+:8000/tcp", f"127.0.0.1:{port}:8000/tcp", body)
+    body = re.sub(
+        rf"127\.0\.0\.1:\d+:{CONTAINER_CTL_PORT}/tcp",
+        f"127.0.0.1:{port}:{CONTAINER_CTL_PORT}/tcp",
+        body,
+    )
     return body
 
 
@@ -289,8 +302,11 @@ def _port_in_use(port: int) -> bool:
 
 
 def allocate_free_port() -> int:
-    """First free host port in [8000, 9000], or a scripted error."""
+    """First free host port in the allocation range, or a scripted error."""
     for port in PORT_RANGE:
         if not _port_in_use(port):
             return port
-    raise SystemExit("No free control port in [8000, 9000]; pass --ctl-port explicitly.")
+    raise SystemExit(
+        f"No free control port in [{PORT_RANGE.start}, {PORT_RANGE.stop - 1}]; "
+        "pass --ctl-port explicitly."
+    )

@@ -10,7 +10,7 @@ import os
 import subprocess
 import sys
 
-from epoxy.config import CONTAINER_OP_TIMEOUT_S, image_ref
+from epoxy.config import CONTAINER_CTL_PORT, CONTAINER_OP_TIMEOUT_S, image_ref
 from epoxy.instance import current_instance
 
 
@@ -48,21 +48,23 @@ def run(
 
 
 def inspect_container(format_string: str, name: str | None = None) -> str | None:
-    """Inspect the active instance's container with a Go template. None if absent."""
+    """Inspect the active instance's container with a Go template. None if absent.
+
+    Docker being unavailable lands here too, not as an exception: run() with
+    check=False turns an OSError into returncode 127, which is non-zero, so an
+    absent container and a missing binary both yield None for read-only probes.
+    """
     container = name or current_instance().container
-    try:
-        result = run(
-            "docker",
-            "inspect",
-            "--format",
-            format_string,
-            container,
-            capture=True,
-            check=False,
-            timeout=CONTAINER_OP_TIMEOUT_S,
-        )
-    except OSError:
-        return None  # docker unavailable: treat as absent for read-only probes
+    result = run(
+        "docker",
+        "inspect",
+        "--format",
+        format_string,
+        container,
+        capture=True,
+        check=False,
+        timeout=CONTAINER_OP_TIMEOUT_S,
+    )
     return result.stdout if result.returncode == 0 else None
 
 
@@ -110,7 +112,7 @@ def container_started_at(name: str | None = None) -> str | None:
 
 
 def container_control_port(name: str | None = None) -> int | None:
-    """Host port published for the container's control server (8000/tcp), if any."""
+    """Host port published for the container's control server, if any."""
     out = inspect_container("{{json .NetworkSettings.Ports}}", name=name)
     if not out:
         return None
@@ -118,7 +120,7 @@ def container_control_port(name: str | None = None) -> int | None:
         ports = json.loads(out)
     except json.JSONDecodeError:
         return None
-    bindings = ports.get("8000/tcp") or []
+    bindings = ports.get(f"{CONTAINER_CTL_PORT}/tcp") or []
     if not bindings or not bindings[0].get("HostPort"):
         return None
     try:

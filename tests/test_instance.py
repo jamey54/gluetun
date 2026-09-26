@@ -8,6 +8,7 @@ import pytest
 
 from epoxy import config
 from epoxy.instance import (
+    PORT_RANGE,
     Instance,
     allocate_free_port,
     compose_file_for,
@@ -132,7 +133,7 @@ def test_resolve_instance_uses_registry_port():
 
 def test_allocate_free_port_returns_bindable_port():
     port = allocate_free_port()
-    assert 8000 <= port <= 9000
+    assert PORT_RANGE.start <= port <= PORT_RANGE.stop - 1
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", port))
 
@@ -147,6 +148,24 @@ def test_allocate_free_port_full_range_is_friendly_error(monkeypatch):
     monkeypatch.setattr("epoxy.instance._port_in_use", lambda p: True)
     with pytest.raises(SystemExit, match="--ctl-port"):
         allocate_free_port()
+
+
+def test_exhausted_range_error_names_the_configured_bounds(monkeypatch):
+    """The message is derived from the range, so a config change cannot desync it."""
+    monkeypatch.setattr("epoxy.instance._port_in_use", lambda p: True)
+    with pytest.raises(SystemExit) as ei:
+        allocate_free_port()
+    lo, hi = config.BASE_CONTROL_PORT, config.MAX_ALLOC_CTL_PORT
+    assert f"[{lo}, {hi}]" in str(ei.value.code)
+
+
+def test_render_compose_publishes_the_host_port_only():
+    """The host port moves; the in-container port is fixed by the image."""
+    body = render_compose("plan-a", 8399)
+    assert f"127.0.0.1:8399:{config.CONTAINER_CTL_PORT}/tcp" in body
+    assert f"HTTP_CONTROL_SERVER_ADDRESS=:{config.CONTAINER_CTL_PORT}" in body
+    assert "8000:8000" not in body  # the template's default host port is replaced
+    assert "container_name: plan-a" in body
 
 
 def test_registry_json_matches_documented_schema():
