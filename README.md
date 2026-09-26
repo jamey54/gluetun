@@ -85,7 +85,7 @@ You only need to set credentials for providers you actually use.
 
 ### up vs connect
 
-- **`up`** ensures the container exists and runs. On a stopped container it creates it via compose (requires `--provider`; credentials come from `.env`). Once running, explicit flags are applied as a runtime hot-swap — including cross-provider/protocol switches. With no flags on an already-running container it only verifies the tunnel.
+- **`up`** ensures the container exists and runs. On a stopped container it creates it via compose (requires `--provider`; credentials come from `.env`). Once running, explicit flags are applied as a runtime hot-swap — including cross-provider/protocol switches. With no flags on an already-running container it only verifies the tunnel. A running container whose control server never answers is an error (exit 1), not a silent success.
 - **`connect`** requires a running container and *only* hot-swaps. With no arguments it opens the interactive picker; `--list` prints the servers table instead.
 - **`up --pull`** pulls the pinned image and recreates the container. **`up --recreate`** recreates from compose/`.env` config without pulling — the escape hatch if a swap ever leaves the tunnel stuck.
 
@@ -306,7 +306,7 @@ Resolution order for every command: `--instance NAME` → `EPOXY_INSTANCE` → i
 | `1`  | scripted error / VPN failed / leak (verdict in JSON under `--json`) |
 | `2`  | usage error |
 
-Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` when the connection cannot be verified; `epoxy status --json` returns `1` when `leak` is `true` or the control server is unreachable while the container is running/restarting; it returns `0` for any other emitted JSON (probe health failures are reported in `last_error`, never as a leak). `epoxy bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run.
+Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` when the connection cannot be verified; `epoxy status --json` returns `1` when `leak` is `true` or the control server is unreachable while the container is running/restarting; it returns `0` for any other emitted JSON (probe health failures are reported in `last_error`, never as a leak). `epoxy up` applies the same rule as `status`: a container that is *running* but whose control server cannot be reached returns `1`, whether or not a location was requested — it waits up to ~15s first, so a container that is merely mid-restart is not failed, but one that never answers is a friendly `Cannot read runtime settings` error rather than a success epoxy could not act on. `epoxy bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run.
 
 ### The calls dockerstrator makes
 

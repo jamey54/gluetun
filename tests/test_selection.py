@@ -305,6 +305,67 @@ def test_up_recreate_works_with_unreachable_control_server(monkeypatch, compose_
     assert compose_calls[0][0] == ("up", "-d", "--force-recreate")
 
 
+def _running_but_unreadable(monkeypatch) -> None:
+    """Container reports running while its runtime settings cannot be read."""
+    monkeypatch.setattr(docker, "container_running", lambda name=None: True)
+    monkeypatch.setattr(_common, "effective_selection", lambda: None)
+
+
+def _never_ready(monkeypatch) -> None:
+    """The control server never answers, even after the bounded wait."""
+    _control_down(monkeypatch)
+    monkeypatch.setattr(
+        "epoxy.control.wait_for_settings",
+        lambda *a, **k: (_ for _ in ()).throw(ControlError(None, "no")),
+    )
+
+
+def test_up_exits_1_when_control_server_is_unreachable(monkeypatch):
+    """A running instance with no control server is an error, flags or not.
+
+    The tunnel may well verify, but epoxy can neither read nor change the
+    selection, so succeeding would hand automation an instance it cannot
+    manage -- `status` already reports this same state as exit 1.
+    """
+    _running_but_unreadable(monkeypatch)
+    _never_ready(monkeypatch)
+    result = invoke(["up", "--no-speedtest"])
+    assert result.exit_code == 1
+    assert "Cannot read runtime settings" in result.output
+
+
+def test_up_requested_swap_still_fails_on_unreachable_control_server(monkeypatch, swaps):
+    """The pre-existing guard keeps its exit 1 for a requested swap."""
+    _running_but_unreadable(monkeypatch)
+    _never_ready(monkeypatch)
+    result = invoke(["up", "--country", "France", "--no-speedtest"])
+    assert result.exit_code == 1
+    assert "Cannot read runtime settings" in result.output
+    assert swaps == []
+
+
+def test_up_waits_out_a_booting_control_server(monkeypatch):
+    """Running but still booting: the bounded wait recovers instead of failing."""
+    _running_but_unreadable(monkeypatch)
+    _control_down(monkeypatch)
+    monkeypatch.setattr("epoxy.control.wait_for_settings", lambda *a, **k: _settings(RUNNING))
+    result = invoke(["up", "--no-speedtest"])
+    assert result.exit_code == 0
+    assert "Waiting for control server..." in result.output
+
+
+def test_up_does_not_wait_when_settings_are_readable(monkeypatch):
+    """The happy path pays no latency cost: no wait when the first read works."""
+    running(monkeypatch)
+    monkeypatch.setattr(
+        "epoxy.control.wait_for_settings",
+        lambda *a, **k: pytest.fail("must not wait on a reachable control server"),
+    )
+    result = invoke(["up", "--no-speedtest"])
+    assert result.exit_code == 0
+    assert "Waiting for control server..." not in result.output
+
+
 def test_logs_tails_container_by_default(monkeypatch, compose_calls):
     result = invoke(["logs"])
     assert result.exit_code == 0

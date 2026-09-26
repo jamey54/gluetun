@@ -94,7 +94,13 @@ def up(
         # only an explicit location constitutes a further hot-swap request there.
         if created:
             requested = country is not None or city is not None
-        if was_running and requested and current is None and not recreate:
+        if was_running and not recreate and current is None:
+            # Running but unreadable is not yet broken: the control server may
+            # still be booting (e.g. mid-restart), so wait before giving up.
+            current = _common.await_selection()
+        if was_running and not recreate and current is None:
+            # Mirrors `status`: a running instance whose control server never
+            # answers is an error, whether or not a swap was requested.
             raise click.ClickException(
                 "Cannot read runtime settings — is the control server reachable?"
             )

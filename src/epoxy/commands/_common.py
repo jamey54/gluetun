@@ -282,6 +282,21 @@ def _require_selection() -> Selection:
     return sel
 
 
+def await_selection() -> Selection | None:
+    """Wait for the control server, then re-read the runtime selection.
+
+    A container that is running while its control server is still coming up (e.g.
+    mid-restart, with ``restart: always``) is not broken yet, so give it a bounded
+    grace period before the caller reports it unreachable. None when it never
+    answers.
+    """
+    click.echo("Waiting for control server...")
+    try:
+        return Selection.from_doc(control.wait_for_settings())
+    except control.ControlError:
+        return None
+
+
 def _baked_selection() -> Selection | None:
     """Selection baked into the container at create time (its compose env)."""
     env = docker.container_env()
