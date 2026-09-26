@@ -104,6 +104,50 @@ def test_up_epoxy_ctl_port_env_honored(compose_calls, cold, monkeypatch):
     assert read_registry("epoxy")["control_port"] == 8450
 
 
+@pytest.mark.parametrize("value", ["0", "-5", "65536", "70000", "99999999999999999999"])
+def test_up_epoxy_ctl_port_out_of_range_is_a_usage_error(value, compose_calls, cold, monkeypatch):
+    """The env twin of --ctl-port gets the same 1..65535 bounds, as exit 2."""
+    monkeypatch.setenv("EPOXY_CTL_PORT", value)
+    result = invoke(["up", "--provider", "surfshark"])
+    assert result.exit_code == 2
+    assert "EPOXY_CTL_PORT" in result.output
+    assert compose_calls == []  # rejected before touching docker
+
+
+@pytest.mark.parametrize("value", ["abc", "84a50", " "])
+def test_up_epoxy_ctl_port_non_numeric_is_a_usage_error(value, compose_calls, cold, monkeypatch):
+    monkeypatch.setenv("EPOXY_CTL_PORT", value)
+    result = invoke(["up", "--provider", "surfshark"])
+    assert result.exit_code == 2
+    assert compose_calls == []
+
+
+def test_up_empty_epoxy_ctl_port_means_unset(compose_calls, cold, monkeypatch):
+    """An empty value is absent, not invalid: it falls through to allocation."""
+    monkeypatch.setenv("EPOXY_CTL_PORT", "")
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda: 8123)
+    result = invoke(["up", "--provider", "surfshark"])
+    assert result.exit_code == 0
+    assert read_registry("epoxy")["control_port"] == 8123
+
+
+@pytest.mark.parametrize(
+    ("value", "valid"),
+    [("1", True), ("8000", True), ("65535", True), ("0", False), ("65536", False), ("-1", False)],
+)
+def test_ctl_port_flag_and_env_share_the_same_bounds(value, valid, monkeypatch):
+    """Guard against --ctl-port and its env twin drifting apart again."""
+    flag = {p.name: p for p in cli.main.commands["up"].params}["ctl_port"]
+    assert isinstance(flag.type, click.IntRange)
+    assert (flag.type.min, flag.type.max) == (config.PORT_MIN, config.PORT_MAX)
+    monkeypatch.setenv("EPOXY_CTL_PORT", value)
+    if valid:
+        assert _common._resolve_for_command(None).control_port == int(value)
+    else:
+        with pytest.raises(click.UsageError, match="between"):
+            _common._resolve_for_command(None)
+
+
 def test_up_running_without_registry_adopts_published_port(monkeypatch):
     """A container not owned by a registry record stays addressable via its port."""
     monkeypatch.setattr(docker, "container_running", lambda name=None: True)

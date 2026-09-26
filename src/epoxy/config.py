@@ -68,6 +68,10 @@ LOCK_FILE_PERMS = 0o600
 # --- HTTP / Control server -----------------------------------------------
 
 BASE_CONTROL_PORT = 8000
+# Valid host-port bounds, shared by --ctl-port and EPOXY_CTL_PORT so the flag and
+# its env twin cannot drift apart.
+PORT_MIN = 1
+PORT_MAX = 65535
 GET_TIMEOUT_S = 10
 PUT_TIMEOUT_S = 60
 DOWN_TIMEOUT_S = 3

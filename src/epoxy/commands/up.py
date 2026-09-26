@@ -66,9 +66,12 @@ def up(
     # another instance. A registry-less but running instance instead adopts its
     # published control port, so an imported/legacy container stays addressable
     # even though its registry record is gone.
+    # EPOXY_CTL_PORT is tested for truthiness, matching how _resolve_for_command
+    # reads it: an empty value means unset, so it must not suppress allocation
+    # (that would strand the instance on the hardcoded BASE_CONTROL_PORT).
     if (
         ctl_port is None
-        and inst.env.get(CTL_PORT_ENV_VAR) is None
+        and not inst.env.get(CTL_PORT_ENV_VAR)
         and read_registry(inst.name) is None
     ):
         if docker.container_running(name=inst.name):

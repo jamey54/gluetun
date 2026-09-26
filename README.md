@@ -266,7 +266,7 @@ Secrets live in `.env` in the working directory (copy `.env.sample` to get start
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `EPOXY_INSTANCE` | *(required for scripts)* | Instance name; pass `--instance` or set this. Omitting both asks interactively on a terminal (pick from the known instances); non-interactive runs fail with a usage error. |
-| `EPOXY_CTL_PORT` | unset | Control-server host port for the resolved instance (equivalent to `--ctl-port`) |
+| `EPOXY_CTL_PORT` | unset | Control-server host port for the resolved instance (equivalent to `--ctl-port`; must be `1`–`65535`, and an empty value counts as unset) |
 | `EPOXY_CACHE_TTL` | `3600` | Server cache TTL (seconds); missing or non-numeric values fall back to the default |
 | `EPOXY_IMAGE` | `qmcgaw/gluetun:v3.41.3` | Container image ref for compose/pull/server-fetch (bump deliberately after checking release notes) |
 | `EPOXY_DEBUG` | unset | Set to enable debug output (same as `--debug`) |

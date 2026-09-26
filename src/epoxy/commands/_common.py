@@ -15,6 +15,8 @@ from epoxy.config import (
     DEFAULT_PROTOCOL,
     DEFAULT_SIZE_MB,
     INSTANCE_ENV_VAR,
+    PORT_MAX,
+    PORT_MIN,
 )
 from epoxy.instance import (
     Instance,
@@ -79,7 +81,7 @@ def add_instance_options(ctl_port: bool = False, env_file: bool = False) -> Call
         if ctl_port:
             func = click.option(
                 "--ctl-port",
-                type=click.IntRange(1, 65535),
+                type=click.IntRange(PORT_MIN, PORT_MAX),
                 default=None,
                 help="Control server host port (defaults to the instance's registered port)",
             )(func)
@@ -146,6 +148,13 @@ def _resolve_for_command(
                 raise click.UsageError(
                     f"{CTL_PORT_ENV_VAR} must be a port number, got {env_port!r}"
                 ) from None
+            # Same bounds as --ctl-port, so a bad value is a usage error here too
+            # rather than an unbuildable http://127.0.0.1:<port> base URL.
+            if not PORT_MIN <= port <= PORT_MAX:
+                raise click.UsageError(
+                    f"{CTL_PORT_ENV_VAR} must be a port between {PORT_MIN} and "
+                    f"{PORT_MAX}, got {env_port!r}"
+                )
     if port is None:
         return _apply_published_fallback(base)
     if port != base.control_port:
