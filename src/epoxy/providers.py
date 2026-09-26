@@ -1,4 +1,9 @@
-"""VPN provider registry and credential handling."""
+"""VPN provider registry and credential handling.
+
+Failures here raise ``SystemExit(<message>)``: the string code is printed to
+stderr and exits 1, and commands/_common._record_failure reads that form back to
+report ``<name>: <message>`` inside an ``--all`` loop.
+"""
 
 from collections.abc import Mapping
 from dataclasses import dataclass

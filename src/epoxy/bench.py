@@ -232,7 +232,7 @@ def run_bench(
             say(f"    ↓ {mbits:.1f} Mbit/s")
 
     try:
-        screen_pool = ranked[: max(top, 0)]
+        screen_pool = ranked[:top]
         say(f"Screening top {len(screen_pool)} ({scan_size_mb} MB each)...")
         test_stage(screen_pool, "screen", scan_size_mb, SCAN_TIMEOUT_S)
 

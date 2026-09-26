@@ -15,6 +15,12 @@ Isolation invariants:
   instance only;
 - every docker exec / IP probe / status read targets the instance's container
   name explicitly.
+
+Note for the error raises in this module (and in providers/docker): they use
+``SystemExit(<message>)``, whose non-int code is printed to stderr and exits 1.
+commands/_common._record_failure reads that string form back to report
+``<name>: <message>`` inside an ``--all`` loop, so keep the message first and the
+code a string.
 """
 
 import contextlib

@@ -1,4 +1,9 @@
-"""Docker / docker compose helpers."""
+"""Docker / docker compose helpers.
+
+Failures raise ``SystemExit(<message>)``: the string code is printed to stderr
+and exits 1, and commands/_common._record_failure reads that form back to report
+``<name>: <message>`` inside an ``--all`` loop.
+"""
 
 import json
 import os
