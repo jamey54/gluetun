@@ -42,10 +42,11 @@ from epoxy import config
 from epoxy.config import (
     BASE_CONTROL_PORT,
     CONTAINER_CTL_PORT,
+    DEFAULT_IMAGE,
+    IMAGE_ENV_VAR,
     INSTANCE_ENV_VAR,
     MAX_ALLOC_CTL_PORT,
     JsonDoc,
-    image_ref,
     read_env_file,
 )
 
@@ -195,6 +196,17 @@ def build_env(env_file: Path | None) -> dict[str, str]:
 def env_lookup(name: str) -> str | None:
     """Effective value for a variable: the active instance's env first."""
     return current_instance().env.get(name)
+
+
+def image_ref() -> str:
+    """Container image ref: the EPOXY_IMAGE override or the default.
+
+    Read through the instance env rather than ``os.environ`` so it behaves like
+    ``EPOXY_CTL_PORT`` and can be set in ``.env``. Lived in config.py until the
+    env sources were unified; it needs ``env_lookup``, and config.py is imported
+    *by* instance.py, so it could not live there.
+    """
+    return env_lookup(IMAGE_ENV_VAR) or DEFAULT_IMAGE
 
 
 # ---------------------------------------------------------------------------

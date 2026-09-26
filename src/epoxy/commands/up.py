@@ -17,10 +17,11 @@ from epoxy.commands._common import (
     _resolve_for_command,
     add_instance_options,
 )
-from epoxy.config import COMPOSE_TIMEOUT_S, CTL_PORT_ENV_VAR, PULL_TIMEOUT_S, image_ref
+from epoxy.config import COMPOSE_TIMEOUT_S, CTL_PORT_ENV_VAR, PULL_TIMEOUT_S
 from epoxy.instance import (
     allocate_free_port,
     ensure_compose_file,
+    image_ref,
     instance_context,
     read_registry,
     sync_registry,

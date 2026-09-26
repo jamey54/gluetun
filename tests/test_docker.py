@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from epoxy import config, docker
+from epoxy import config, docker, instance
 
 
 @pytest.fixture()
@@ -107,19 +107,34 @@ def test_launch_container_builds_docker_run_args(monkeypatch):
     assert args[8:11] == ("--device", "/dev/net/tun:/dev/net/tun", "-e")
     assert "VPN_SERVICE_PROVIDER=surfshark" in args
     assert "SERVER_COUNTRIES=Germany" in args
-    assert args[-1] == config.image_ref()
+    assert args[-1] == instance.image_ref()
     assert seen["capture"] is True and seen["check"] is False
 
 
 def test_launch_container_tracks_upstream_image_by_default(monkeypatch):
     monkeypatch.delenv("EPOXY_IMAGE", raising=False)
-    assert config.image_ref() == config.DEFAULT_IMAGE
+    assert instance.image_ref() == config.DEFAULT_IMAGE
     assert config.DEFAULT_IMAGE == "qmcgaw/gluetun:latest"
 
 
 def test_launch_container_honors_image_override(monkeypatch):
     monkeypatch.setenv("EPOXY_IMAGE", "qmcgaw/gluetun:v3.41.3")
-    assert config.image_ref() == "qmcgaw/gluetun:v3.41.3"
+    assert instance.image_ref() == "qmcgaw/gluetun:v3.41.3"
+
+
+def test_image_override_is_readable_from_an_env_file(tmp_path, monkeypatch):
+    """EPOXY_IMAGE must come from the instance env, not just os.environ.
+
+    It used to be a bare os.getenv in config.py, so putting it in .env -- the
+    place every other setting goes, and the file the README points at -- was
+    silently ignored. This is the test that says otherwise.
+    """
+    monkeypatch.delenv("EPOXY_IMAGE", raising=False)
+    env = tmp_path / "instance.env"
+    env.write_text("EPOXY_IMAGE=qmcgaw/gluetun:v3.41.3\n")
+    inst = instance.resolve_instance("epoxy", env_file=env)
+    with instance.instance_context(inst):
+        assert instance.image_ref() == "qmcgaw/gluetun:v3.41.3"
 
 
 def test_launch_container_failure_reported(monkeypatch):

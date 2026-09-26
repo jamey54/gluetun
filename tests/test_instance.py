@@ -13,6 +13,7 @@ from epoxy.instance import (
     allocate_free_port,
     compose_file_for,
     ensure_compose_file,
+    image_ref,
     list_registry,
     parse_instance_name,
     read_registry,
@@ -112,7 +113,7 @@ def test_render_compose_swaps_name_and_port():
     assert "container_name: plan-a" in body
     assert "127.0.0.1:8123:8000/tcp" in body
     assert "container_name: epoxy" not in body
-    assert f"image: {config.image_ref()}" in body
+    assert f"image: {image_ref()}" in body
     assert "EPOXY_IMAGE_REF" not in body
 
 

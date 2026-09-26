@@ -10,8 +10,8 @@ import os
 import subprocess
 import sys
 
-from epoxy.config import CONTAINER_CTL_PORT, CONTAINER_OP_TIMEOUT_S, image_ref
-from epoxy.instance import current_instance
+from epoxy.config import CONTAINER_CTL_PORT, CONTAINER_OP_TIMEOUT_S
+from epoxy.instance import current_instance, image_ref
 
 
 def run(

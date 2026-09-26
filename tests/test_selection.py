@@ -10,7 +10,7 @@ from epoxy import apply, cli, config, control, docker, ipinfo, picker, servers
 from epoxy.apply import Selection
 from epoxy.commands import _common
 from epoxy.control import ControlError
-from epoxy.instance import compose_services, render_compose, resolve_instance
+from epoxy.instance import compose_services, image_ref, render_compose, resolve_instance
 
 
 @pytest.fixture(autouse=True)
@@ -233,7 +233,7 @@ def test_up_pull_pulls_image_and_recreates(monkeypatch, compose_calls, swaps):
     result = invoke(["up", "--pull"])
     assert result.exit_code == 0
     assert any("pull" in c for c in pulls[0])
-    assert config.image_ref() in pulls[0]
+    assert image_ref() in pulls[0]
     args, _ = compose_calls[0]
     assert "--force-recreate" in args
 

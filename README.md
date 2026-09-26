@@ -274,6 +274,8 @@ Secrets live in `.env` in the working directory (copy `.env.sample` to get start
 | `EPOXY_DEBUG` | unset | Set to enable debug output (same as `--debug`) |
 | `EPOXY_REAL_IP` | unset | Override the host's bare public IP used for leak detection (for testing); without it the IP is fetched once per run, and leak detection degrades to country heuristics when unavailable |
 
+`EPOXY_CTL_PORT` and `EPOXY_IMAGE` are read from the instance's env, so `.env` works for them. The remaining variables are read from the process environment only and are ignored in `.env`.
+
 ### Credentials
 
 A provider/protocol pair only appears in listings and can only be started when all of its *required* variables are set.

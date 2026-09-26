@@ -14,9 +14,9 @@ from epoxy.config import (
     DEFAULT_PROTOCOL,
     SERVER_FETCH_TIMEOUT_S,
     cache_ttl,
-    image_ref,
 )
 from epoxy.docker import run
+from epoxy.instance import image_ref
 from epoxy.providers import PROVIDERS, get_active_providers
 from epoxy.textutil import fold
 

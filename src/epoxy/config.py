@@ -58,11 +58,6 @@ def cache_ttl() -> int:
 DEFAULT_IMAGE = "qmcgaw/gluetun:latest"
 
 
-def image_ref() -> str:
-    """Container image ref: the EPOXY_IMAGE override or the default."""
-    return os.getenv(IMAGE_ENV_VAR, "") or DEFAULT_IMAGE
-
-
 # --- Lock ----------------------------------------------------------------
 
 LOCK_FILE_PERMS = 0o600
