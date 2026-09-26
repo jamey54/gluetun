@@ -23,6 +23,7 @@ from epoxy.instance import (
     ensure_compose_file,
     instance_context,
     read_registry,
+    sync_registry,
     write_registry,
 )
 from epoxy.providers import get_provider_env, resolve_provider
@@ -145,5 +146,9 @@ def up(
             run_speedtest=not no_speedtest,
             exclude_ips={prev_ip} if (prev_ip and swapped) else None,
         )
+        # The compose file above was written with the resolved port, so keep the
+        # registry in step with it — an explicit --ctl-port must not be lost to a
+        # stale record on the next command.
+        sync_registry(inst)
     if not verified:
         raise SystemExit(1)

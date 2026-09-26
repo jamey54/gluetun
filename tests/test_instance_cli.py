@@ -131,6 +131,63 @@ def test_up_env_file_replaces_dotenv(compose_calls, cold, monkeypatch, tmp_path)
     assert read_registry("plan-a")["env_file"] == str(env_file)
 
 
+def test_up_ctl_port_override_persists_over_stale_record(compose_calls, monkeypatch):
+    """An explicit --ctl-port on a running instance is remembered, not lost.
+
+    The compose file is written with the resolved port on every `up`, so the
+    registry must follow it or every later command resolves the stale port.
+    """
+    config.INSTANCES_DIR.mkdir(parents=True, exist_ok=True)
+    (config.INSTANCES_DIR / "plan-b.json").write_text(
+        json.dumps({"instance": "plan-b", "control_port": 8000, "env_file": None})
+    )
+    monkeypatch.setattr(docker, "container_running", lambda name=None: True)
+    monkeypatch.setattr(
+        _common,
+        "effective_selection",
+        lambda: Selection("surfshark", "wireguard", "Germany"),
+    )
+    result = invoke(["up", "--instance", "plan-b", "--ctl-port", "8399"])
+    assert result.exit_code == 0
+    assert read_registry("plan-b")["control_port"] == 8399
+    body = (config.INSTANCES_DIR / "plan-b" / "compose.yml").read_text()
+    assert "127.0.0.1:8399:8000/tcp" in body
+
+
+def test_up_ctl_port_env_override_persists_over_stale_record(compose_calls, monkeypatch):
+    """EPOXY_CTL_PORT is the env twin of --ctl-port, so it persists the same way."""
+    config.INSTANCES_DIR.mkdir(parents=True, exist_ok=True)
+    (config.INSTANCES_DIR / "plan-b.json").write_text(
+        json.dumps({"instance": "plan-b", "control_port": 8000, "env_file": None})
+    )
+    monkeypatch.setenv("EPOXY_CTL_PORT", "8450")
+    monkeypatch.setattr(docker, "container_running", lambda name=None: True)
+    monkeypatch.setattr(
+        _common,
+        "effective_selection",
+        lambda: Selection("surfshark", "wireguard", "Germany"),
+    )
+    result = invoke(["up", "--instance", "plan-b"])
+    assert result.exit_code == 0
+    assert read_registry("plan-b")["control_port"] == 8450
+
+
+def test_up_without_registry_does_not_create_a_record(compose_calls, monkeypatch):
+    """sync_registry only updates: an imported container stays registry-less."""
+    monkeypatch.setattr(docker, "container_running", lambda name=None: True)
+    monkeypatch.setattr(docker, "container_control_port", lambda name=None: 8123)
+    monkeypatch.setattr(
+        _common,
+        "effective_selection",
+        lambda: Selection("surfshark", "wireguard", "Germany"),
+    )
+    result = invoke(["up", "--instance", "plan-a"])
+    assert result.exit_code == 0
+    assert not (config.INSTANCES_DIR / "plan-a.json").exists()
+    body = (config.INSTANCES_DIR / "plan-a" / "compose.yml").read_text()
+    assert "127.0.0.1:8123:8000/tcp" in body
+
+
 def test_up_invalid_instance_name_exits_2():
     result = CliRunner().invoke(cli.main, ["up", "--instance", "bad name"])
     assert result.exit_code == 2

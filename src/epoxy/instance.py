@@ -105,15 +105,32 @@ def read_registry(name: str) -> JsonDoc | None:
     return data if isinstance(data, dict) else None
 
 
-def write_registry(instance: Instance) -> None:
-    """Persist the instance's control port and env file for later reuse."""
-    config.INSTANCES_DIR.mkdir(parents=True, exist_ok=True)
-    data = {
+def _registry_record(instance: Instance) -> JsonDoc:
+    return {
         "instance": instance.name,
         "control_port": instance.control_port,
         "env_file": str(instance.env_file) if instance.env_file else None,
     }
+
+
+def write_registry(instance: Instance) -> None:
+    """Persist the instance's control port and env file for later reuse."""
+    config.INSTANCES_DIR.mkdir(parents=True, exist_ok=True)
+    data = _registry_record(instance)
     registry_path(instance.name).write_text(json.dumps(data, indent=2) + "\n")
+
+
+def sync_registry(instance: Instance) -> None:
+    """Update an existing registry record so it matches the resolved instance.
+
+    Keeps the registry in step with the generated compose file after an explicit
+    ``--ctl-port`` / ``EPOXY_CTL_PORT`` override, so the next command resolves the
+    same port. Never *creates* a record: creating is the create path's job, and a
+    registry-less (imported) container stays registry-less.
+    """
+    record = read_registry(instance.name)
+    if record is not None and record != _registry_record(instance):
+        write_registry(instance)
 
 
 def list_registry() -> list[str]:
