@@ -272,6 +272,7 @@ Secrets live in `.env` in the working directory (copy `.env.sample` to get start
 | `EPOXY_CACHE_TTL` | `3600` | Server cache TTL (seconds); missing or non-numeric values fall back to the default |
 | `EPOXY_IMAGE` | `qmcgaw/gluetun:v3.41.3` | Container image ref for compose/pull/server-fetch (bump deliberately after checking release notes) |
 | `EPOXY_DEBUG` | unset | Set to enable debug output (same as `--debug`) |
+| `EPOXY_REAL_IP` | unset | Override the host's bare public IP used for leak detection (for testing); without it the IP is fetched once per run, and leak detection degrades to country heuristics when unavailable |
 
 ### Credentials
 

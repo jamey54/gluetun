@@ -1,6 +1,6 @@
 """Runtime configuration engine: selection changes via the control server.
 
-Every provider/protocol/location change hot-swaps through the container's settings
+Every provider/protocol/location change hot-swaps through Gluetun's settings
 route (`GET/PUT /v1/vpn/settings`) in single-digit seconds — the container is
 never recreated. An advisory lockfile serializes read-modify-write round-trips
 across concurrent CLI processes (e.g. a bench running while a server is

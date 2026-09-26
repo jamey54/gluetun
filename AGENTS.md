@@ -1,9 +1,9 @@
 # AGENTS.md — Epoxy Working Guidelines
 
 ## How to work
-- Set up a working environment first: editable install plus dev tools (pytest, ruff, mypy), and get a green baseline (`pytest`, `ruff check`, `mypy`) before changing code.
+- Set up a working environment first: editable install plus dev tools (pytest, ruff, mypy), and get a green baseline (`pytest`, `ruff check`, `ruff format --check src tests`, `mypy`) before changing code.
 - Work in small iterations — one focused step at a time. One change per commit set; confirm with the user before expanding scope.
-- A step is done only when `pytest`, `ruff check`, and `mypy` are all green. Verify before each commit and before finishing.
+- A step is done only when `pytest`, `ruff check`, `ruff format --check src tests`, and `mypy` are all green. Verify before each commit and before finishing. CI runs the same four, so a step that skips `ruff format` locally can still fail the build.
 - Commit after each successful step. Small, frequent commits; never one big commit at the end.
 - Re-review the user's prompt before finishing and confirm every request was addressed. If something was deferred, state it clearly in the progress report summary.
 

@@ -1,4 +1,4 @@
-"""Tests for `vpn rm`: container removal plus registry-state deletion."""
+"""Tests for `epoxy rm`: container removal plus registry-state deletion."""
 
 import json
 from pathlib import Path

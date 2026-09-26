@@ -811,7 +811,7 @@ def test_cli_bench_requires_running_container(monkeypatch):
 
 
 def test_cli_bench_defaults_to_all_credentialed_providers(monkeypatch):
-    """A bare `vpn bench` benches every provider, not just the running pair."""
+    """A bare `epoxy bench` benches every provider, not just the running pair."""
     from click.testing import CliRunner
 
     data = rows(

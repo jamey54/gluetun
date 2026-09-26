@@ -174,7 +174,7 @@ def test_up_running_no_flags_only_verifies(monkeypatch, compose_calls, swaps):
 
 
 def test_up_running_no_flags_verifies_against_running_country(monkeypatch, verified):
-    """A plain `vpn up` must still flag a geo mismatch (yellow), not blind green."""
+    """A plain `epoxy up` must still flag a geo mismatch (yellow), not blind green."""
     running(monkeypatch)
     result = invoke(["up"])
     assert result.exit_code == 0
@@ -571,7 +571,7 @@ def test_status_shows_vpn_and_dns(monkeypatch):
 
 
 def test_status_flags_running_country_mismatch(monkeypatch, verified):
-    """`vpn status` must pass the running country so a geo mismatch shows yellow."""
+    """`epoxy status` must pass the running country so a geo mismatch shows yellow."""
     monkeypatch.setattr(docker, "container_status", lambda: "running")
     monkeypatch.setattr(_common, "_runtime_selection_or_error", lambda: (RUNNING, True))
     result = invoke(["status", "--no-speedtest"])

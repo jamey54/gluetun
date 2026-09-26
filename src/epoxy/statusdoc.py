@@ -7,8 +7,8 @@ verdict classifier here means the two output paths cannot drift, and the
 documented schemas (README §"Machine-readable output") are enforced by the
 module-level field tuples below.
 
-Import-safe by design: no vpn module imports (``apply.Selection`` satisfies
-``SelectionLike`` structurally), so any layer can depend on this module.
+Import-safe by design: no application-module imports (``apply.Selection``
+satisfies ``SelectionLike`` structurally), so any layer can depend on this module.
 """
 
 from typing import Any, Literal, Protocol

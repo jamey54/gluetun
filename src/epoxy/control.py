@@ -1,6 +1,6 @@
-"""Container control server client and settings document building (stdlib only).
+"""Gluetun control server client and settings document building (stdlib only).
 
-The settings routes (`GET/PUT /v1/vpn/settings`) exist on recent
+The settings routes (`GET/PUT /v1/vpn/settings`) exist on recent Gluetun
 images. PUT merges the posted document over the running settings via
 `OverrideWith`, where an empty JSON list is a real override — so a full
 GET → mutate → PUT round-trip both updates the location and clears stale

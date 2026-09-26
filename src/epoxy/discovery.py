@@ -1,7 +1,7 @@
 """Instance discovery for `epoxy ls`: registry plus `epoxy-*` compose containers.
 
 Discovery only ever matches exact container names — it never reaches for "any
-VPN container" (that is what would let epoxy touch a foreign container).
+Gluetun container" (that is what would let epoxy touch a foreign Gluetun).
 Consumers are containers sharing the instance's network namespace
 (``NetworkMode == container:<instance>``, referenced by name or container ID).
 """

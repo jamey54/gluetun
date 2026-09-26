@@ -5,9 +5,9 @@ observed exit IP differs from the host's bare public IP. Country matching is
 advisory — a VPN exit that geolocates elsewhere (virtual locations) is a
 warning, not a failure.
 
-Probability of getting a public IP, the upstream way: instead of one echo service
+Probability of getting a public IP, Gluetun's way: instead of one echo service
 (ipinfo.io) whose rate limit stalls the retry loop, probe the same services
-the container image uses, in parallel, and accept the most-agreed answer. One provider
+Gluetun uses, in parallel, and accept the most-agreed answer. One provider
 being rate-limited (HTTP 429) no longer blocks everyone else.
 """
 
