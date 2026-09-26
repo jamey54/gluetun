@@ -205,7 +205,7 @@ def test_probe_survives_rate_limited_primary(monkeypatch):
             _URLS["ip2location"]: (4, ""),
         },
     )
-    result = ipinfo._probe("epoxy")
+    result = ipinfo.probe("epoxy")
     assert result is not None
     assert result.info["ip"] == "5.6.7.8"
     assert result.sources == ("cloudflare",)
@@ -221,7 +221,7 @@ def test_probe_majority_across_providers(monkeypatch):
             _URLS["ip2location"]: (4, ""),
         },
     )
-    result = ipinfo._probe("epoxy")
+    result = ipinfo.probe("epoxy")
     assert result is not None
     assert result.info["ip"] == "1.1.1.1"
     assert result.sources == ("ipinfo", "cloudflare")
@@ -229,7 +229,7 @@ def test_probe_majority_across_providers(monkeypatch):
 
 def test_probe_returns_none_when_every_provider_fails(monkeypatch):
     stub_run(monkeypatch, {})
-    assert ipinfo._probe("epoxy") is None
+    assert ipinfo.probe("epoxy") is None
 
 
 def test_probe_uses_explicit_container(monkeypatch):
@@ -240,7 +240,7 @@ def test_probe_uses_explicit_container(monkeypatch):
         return CompletedProcess(("docker", "exec", "c"), 1, stdout="", stderr="")
 
     monkeypatch.setattr(ipinfo, "run", fake_run)
-    assert ipinfo._probe("plan-a") is None
+    assert ipinfo.probe("plan-a") is None
     assert all(args[:3] == ("docker", "exec", "plan-a") for args in seen)
     assert len(seen) == len(ipinfo._PROVIDERS)
 
@@ -254,7 +254,7 @@ def test_probe_provider_bounds_the_docker_exec(monkeypatch):
         return CompletedProcess(args, 0, stdout="5.6.7.8")
 
     monkeypatch.setattr(ipinfo, "run", fake_run)
-    assert ipinfo._probe_provider("epoxy", "https://echo/") == "5.6.7.8"
+    assert ipinfo.probe_provider("epoxy", "https://echo/") == "5.6.7.8"
     assert seen["timeout"] == PROBE_EXEC_TIMEOUT_S
 
 
@@ -265,7 +265,7 @@ def test_probe_provider_timeout_counts_as_provider_failure(monkeypatch):
         return CompletedProcess(args, 124, stdout="", stderr="timed out after 20s")
 
     monkeypatch.setattr(ipinfo, "run", fake_run)
-    assert ipinfo._probe_provider("epoxy", "https://echo/") == ""
+    assert ipinfo.probe_provider("epoxy", "https://echo/") == ""
 
 
 def test_probe_provider_missing_docker_reads_as_failure(monkeypatch):
@@ -275,4 +275,4 @@ def test_probe_provider_missing_docker_reads_as_failure(monkeypatch):
         return CompletedProcess(args, 127, stdout="", stderr="no such file")
 
     monkeypatch.setattr(ipinfo, "run", fake_run)
-    assert ipinfo._probe_provider("epoxy", "https://echo/") == ""
+    assert ipinfo.probe_provider("epoxy", "https://echo/") == ""

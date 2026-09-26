@@ -19,7 +19,7 @@ from epoxy.instance import Instance, delete_instance_state, instance_context
 def _remove_one(inst: Instance, force: bool) -> None:
     """Remove one resolved instance: guard, stop, compose down, delete state."""
     name = inst.name
-    if name not in discovery._known_names():
+    if name not in discovery.known_names():
         raise click.ClickException(f"Unknown instance '{name}'.")
     consumers = discovery.consumers_of(name)
     if consumers and not force:

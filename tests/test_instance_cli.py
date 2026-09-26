@@ -292,8 +292,8 @@ def test_commands_require_instance_or_env(compose_calls, cold, monkeypatch):
 def _multi_instance(monkeypatch):
     monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
     monkeypatch.setattr(_common, "_stdin_is_tty", lambda: True)
-    monkeypatch.setattr(discovery, "_known_names", lambda: {"plan-a", "plan-b"})
-    monkeypatch.setattr(discovery, "_state", lambda name: "running")
+    monkeypatch.setattr(discovery, "known_names", lambda: {"plan-a", "plan-b"})
+    monkeypatch.setattr(discovery, "instance_state", lambda name: "running")
 
 
 def test_choose_instance_non_tty_is_usage_error(monkeypatch):
@@ -306,7 +306,7 @@ def test_choose_instance_non_tty_is_usage_error(monkeypatch):
 def test_choose_instance_zero_known_is_usage_error(monkeypatch):
     monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
     monkeypatch.setattr(_common, "_stdin_is_tty", lambda: True)
-    monkeypatch.setattr(discovery, "_known_names", lambda: set())
+    monkeypatch.setattr(discovery, "known_names", lambda: set())
     with pytest.raises(click.UsageError, match="EPOXY_INSTANCE"):
         _common._choose_instance_name()
 
@@ -314,7 +314,7 @@ def test_choose_instance_zero_known_is_usage_error(monkeypatch):
 def test_choose_instance_auto_uses_sole_instance(monkeypatch):
     monkeypatch.delenv("EPOXY_INSTANCE", raising=False)
     monkeypatch.setattr(_common, "_stdin_is_tty", lambda: True)
-    monkeypatch.setattr(discovery, "_known_names", lambda: {"plan-a"})
+    monkeypatch.setattr(discovery, "known_names", lambda: {"plan-a"})
     assert _common._choose_instance_name() == "plan-a"
 
 
@@ -358,7 +358,7 @@ def test_down_picks_instance_when_multiple(monkeypatch):
 def test_epoxy_instance_env_still_wins_over_picker(monkeypatch):
     """EPOXY_INSTANCE must be honored without prompting or auto-selection."""
     monkeypatch.setattr(_common, "_stdin_is_tty", lambda: pytest.fail("must not prompt"))
-    monkeypatch.setattr(discovery, "_known_names", lambda: pytest.fail("must not discover"))
+    monkeypatch.setattr(discovery, "known_names", lambda: pytest.fail("must not discover"))
     projects: list[str] = []
 
     def fake_compose(*args: str, env_overrides=None, timeout=None) -> CompletedProcess[str]:

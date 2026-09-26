@@ -65,13 +65,13 @@ def invoke_status(
         )
     probe_ip = "1.1.1.1" if leak else "9.9.9.9"
     if probe_fail:
-        monkeypatch.setattr(ipinfo, "_probe", lambda: None)
+        monkeypatch.setattr(ipinfo, "probe", lambda: None)
     elif not probe_geo:
-        probe = ipinfo._Probe({"ip": probe_ip}, sources=("cloudflare",))
-        monkeypatch.setattr(ipinfo, "_probe", lambda: probe)
+        probe = ipinfo.Probe({"ip": probe_ip}, sources=("cloudflare",))
+        monkeypatch.setattr(ipinfo, "probe", lambda: probe)
     else:
-        probe = ipinfo._Probe({"ip": probe_ip, "country": "DE"}, sources=("ipinfo",))
-        monkeypatch.setattr(ipinfo, "_probe", lambda: probe)
+        probe = ipinfo.Probe({"ip": probe_ip, "country": "DE"}, sources=("ipinfo",))
+        monkeypatch.setattr(ipinfo, "probe", lambda: probe)
     monkeypatch.setattr(ipinfo, "real_ip", lambda: "1.1.1.1")
     return CliRunner().invoke(cli.main, ["status", "--json"], catch_exceptions=False)
 
@@ -180,8 +180,8 @@ def test_status_json_uses_published_port_without_registry(monkeypatch):
     monkeypatch.setattr(docker, "container_image", lambda: "qmcgaw/gluetun:latest")
     monkeypatch.setattr(docker, "container_control_port", lambda name=None: 8123)
     monkeypatch.setattr(control, "get_settings", lambda: _settings(country="Germany"))
-    probe = ipinfo._Probe({"ip": "9.9.9.9", "country": "DE"}, sources=("ipinfo",))
-    monkeypatch.setattr(ipinfo, "_probe", lambda: probe)
+    probe = ipinfo.Probe({"ip": "9.9.9.9", "country": "DE"}, sources=("ipinfo",))
+    monkeypatch.setattr(ipinfo, "probe", lambda: probe)
     monkeypatch.setattr(ipinfo, "real_ip", lambda: "1.1.1.1")
     result = CliRunner().invoke(cli.main, ["status", "--json"], catch_exceptions=False)
     assert result.exit_code == 0

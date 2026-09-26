@@ -2,10 +2,12 @@
 
 from subprocess import CompletedProcess
 
+import pytest
+
 from epoxy import speedtest
 from epoxy.config import DEFAULT_SIZE_MB
 from epoxy.ipinfo import _same_country
-from epoxy.speedtest import mbps
+from epoxy.speedtest import Result, format_result, mbps
 
 
 def test_mbps():
@@ -28,9 +30,9 @@ def test_measure_computes_throughput(monkeypatch):
     monkeypatch.setattr(speedtest, "run", fake_run)
     result = speedtest.measure(size_mb=25)
     assert result is not None
-    assert abs(result["mbits"] - 20.0) < 1e-9
-    assert result["seconds"] == 10.0
-    assert result["mbytes"] == 25.0
+    assert abs(result.mbits - 20.0) < 1e-9
+    assert result.seconds == 10.0
+    assert result.mbytes == 25.0
 
 
 def test_measure_failure_returns_none(monkeypatch):
@@ -39,6 +41,22 @@ def test_measure_failure_returns_none(monkeypatch):
 
     monkeypatch.setattr(speedtest, "run", fake_run)
     assert speedtest.measure() is None
+
+
+def test_result_is_a_frozen_record():
+    """Attributes, not string keys, and no in-place mutation of a shared record."""
+    r = Result(mbits=20.0, seconds=10.0, mbytes=25.0)
+    assert (r.mbits, r.seconds, r.mbytes) == (20.0, 10.0, 25.0)
+    with pytest.raises((AttributeError, TypeError)):
+        r.mbits = 1.0  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        r["mbits"] = 1.0  # type: ignore[index]
+    assert r == Result(mbits=20.0, seconds=10.0, mbytes=25.0)  # value semantics
+
+
+def test_format_result_renders_the_record():
+    text = format_result(Result(mbits=20.0, seconds=10.0, mbytes=25.0))
+    assert text == "↓ 20.0 Mbit/s (25 MB in 10.0s)"
 
 
 def test_measure_bounds_the_docker_exec(monkeypatch):
@@ -76,8 +94,8 @@ def test_measure_instant_exec_never_divide_by_zero(monkeypatch):
     monkeypatch.setattr(speedtest, "run", fake_run)
     result = speedtest.measure(size_mb=25)
     assert result is not None
-    assert result["seconds"] > 0  # clamped, not a divide-by-zero crash
-    assert result["mbits"] > 0 and result["mbits"] != float("inf")
+    assert result.seconds > 0  # clamped, not a divide-by-zero crash
+    assert result.mbits > 0 and result.mbits != float("inf")
 
 
 def test_same_country_code_vs_name():

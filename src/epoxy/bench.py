@@ -221,10 +221,10 @@ def run_bench(
                 result.actual_geo = verdict.geo
                 say(f"    note: exits via {verdict.geo} (requested {candidate.country})")
             downloaded = measure(size_mb, timeout=timeout)
-            if not downloaded:
+            if downloaded is None:
                 result.error = "download failed"
                 continue
-            mbits = downloaded["mbits"]
+            mbits = downloaded.mbits
             if stage == "screen":
                 result.scan_mbps = mbits
             else:
@@ -339,9 +339,9 @@ def _test_one(
         if not verdict.ok:
             return _ParallelResult(error=verdict.reason)
         downloaded = measure(size_mb, timeout=timeout, container=name)
-        if not downloaded:
+        if downloaded is None:
             return _ParallelResult(error="download failed")
-        return _ParallelResult(mbits=downloaded["mbits"], geo=verdict.geo)
+        return _ParallelResult(mbits=downloaded.mbits, geo=verdict.geo)
     except KeyboardInterrupt:
         raise
     except Exception as exc:  # a broken candidate must not kill the batch

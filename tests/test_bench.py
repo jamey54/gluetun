@@ -9,6 +9,7 @@ from epoxy import apply as apply_module
 from epoxy import bench, cli, config, control, docker, servers
 from epoxy.apply import Verification
 from epoxy.commands import _common
+from epoxy.speedtest import Result
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -35,8 +36,8 @@ def baseline_doc() -> dict[str, Any]:
 
 
 def speed(mbits: float):
-    def fake_measure(size_mb: int, timeout: int = 120) -> dict[str, float]:
-        return {"mbits": mbits, "seconds": 1.0, "mbytes": float(size_mb)}
+    def fake_measure(size_mb: int, timeout: int = 120) -> Result:
+        return Result(mbits=mbits, seconds=1.0, mbytes=float(size_mb))
 
     return fake_measure
 
@@ -163,13 +164,11 @@ def test_run_bench_restores_baseline_by_default(monkeypatch, happy_path):
     monkeypatch.setattr(bench, "get_settings", Recorder([base]))
     counter = {"n": 0}
 
-    def fake_measure(size_mb: int, timeout: int = 120) -> dict[str, float]:
+    def fake_measure(size_mb: int, timeout: int = 120) -> Result:
         counter["n"] += 1
-        return {
-            "mbits": 30.0 - 10.0 * ((counter["n"] - 1) % 3),
-            "seconds": 1.0,
-            "mbytes": float(size_mb),
-        }
+        return Result(
+            mbits=30.0 - 10.0 * ((counter["n"] - 1) % 3), seconds=1.0, mbytes=float(size_mb)
+        )
 
     monkeypatch.setattr(bench, "measure", fake_measure)
 
@@ -194,13 +193,11 @@ def test_run_bench_connects_winner_when_requested(monkeypatch, happy_path):
 
     counter = {"n": 0}
 
-    def fake_measure(size_mb: int, timeout: int = 120) -> dict[str, float]:
+    def fake_measure(size_mb: int, timeout: int = 120) -> Result:
         counter["n"] += 1
-        return {
-            "mbits": 30.0 - 10.0 * ((counter["n"] - 1) % 2),
-            "seconds": 1.0,
-            "mbytes": float(size_mb),
-        }
+        return Result(
+            mbits=30.0 - 10.0 * ((counter["n"] - 1) % 2), seconds=1.0, mbytes=float(size_mb)
+        )
 
     monkeypatch.setattr(bench, "measure", fake_measure)
 
@@ -327,7 +324,7 @@ def test_run_bench_winner_adoption_after_swap_excludes_prev_exit(monkeypatch, ha
     monkeypatch.setattr(  # scans tie so finals keep input order (Spain, France);
         bench,
         "measure",  # Spain 45 beats France 30 -> winner differs from last tested
-        Recorder([{"mbits": m, "seconds": 1.0, "mbytes": 10.0} for m in (10.0, 10.0, 45.0, 30.0)]),
+        Recorder([Result(mbits=m, seconds=1.0, mbytes=10.0) for m in (10.0, 10.0, 45.0, 30.0)]),
     )
     seen: list[tuple[str | None, str | None]] = []
 
@@ -369,7 +366,7 @@ def test_run_bench_interrupt_restores_partial_results(monkeypatch, happy_path):
     base = baseline_doc()
     monkeypatch.setattr(bench, "get_settings", Recorder([base]))
 
-    def boom(size_mb: int, timeout: int = 120) -> dict[str, float]:
+    def boom(size_mb: int, timeout: int = 120) -> Result:
         raise KeyboardInterrupt()
 
     monkeypatch.setattr(bench, "measure", boom)
@@ -468,9 +465,9 @@ def test_run_bench_parallel_uses_temp_containers(monkeypatch, happy_path):
 
     def fake_measure(
         size_mb: int, timeout: int = 120, container: str | None = None
-    ) -> dict[str, float]:
+    ) -> Result:
         measure_containers.append(container)
-        return {"mbits": 10.0, "seconds": 1.0, "mbytes": float(size_mb)}
+        return Result(mbits=10.0, seconds=1.0, mbytes=float(size_mb))
 
     monkeypatch.setattr(bench, "verify", fake_verify)
     monkeypatch.setattr(bench, "measure", fake_measure)
@@ -531,8 +528,8 @@ def test_run_bench_parallel_failure_keeps_going(monkeypatch, happy_path):
 
     def fake_measure(
         size_mb: int, timeout: int = 120, container: str | None = None
-    ) -> dict[str, float]:
-        return {"mbits": 25.0, "seconds": 1.0, "mbytes": float(size_mb)}
+    ) -> Result:
+        return Result(mbits=25.0, seconds=1.0, mbytes=float(size_mb))
 
     monkeypatch.setattr(bench, "verify", fake_verify)
     monkeypatch.setattr(bench, "measure", fake_measure)
@@ -577,8 +574,8 @@ def test_run_bench_parallel_winner_already_active_stays_put(monkeypatch, happy_p
 
     def fake_measure(
         size_mb: int, timeout: int = 120, container: str | None = None
-    ) -> dict[str, float]:
-        return {"mbits": 10.0, "seconds": 1.0, "mbytes": float(size_mb)}
+    ) -> Result:
+        return Result(mbits=10.0, seconds=1.0, mbytes=float(size_mb))
 
     monkeypatch.setattr(bench, "verify", fake_verify)
     monkeypatch.setattr(bench, "measure", fake_measure)
@@ -639,7 +636,7 @@ def test_test_batch_needs_no_instance_context(monkeypatch):
     monkeypatch.setattr(
         bench,
         "measure",
-        lambda size_mb, timeout=90, container=None: {"mbits": 10.0, "seconds": 1.0, "mbytes": 1.0},
+        lambda size_mb, timeout=90, container=None: Result(mbits=10.0, seconds=1.0, mbytes=1.0),
     )
     env = {
         "SURFSHARK_WIREGUARD_PRIVATE_KEY": "k",
@@ -674,8 +671,8 @@ def test_run_bench_parallel_crashed_candidate_is_recorded(monkeypatch, happy_pat
 
     def fake_measure(
         size_mb: int, timeout: int = 120, container: str | None = None
-    ) -> dict[str, float]:
-        return {"mbits": 25.0, "seconds": 1.0, "mbytes": float(size_mb)}
+    ) -> Result:
+        return Result(mbits=25.0, seconds=1.0, mbytes=float(size_mb))
 
     monkeypatch.setattr(bench, "verify", fake_verify)
     monkeypatch.setattr(bench, "measure", fake_measure)
@@ -735,9 +732,9 @@ def test_cli_bench_end_to_end(monkeypatch):
     monkeypatch.setattr(bench, "probe_hosts", Recorder([probes]))
     counter = {"n": 0}
 
-    def fake_measure(size_mb: int, timeout: int = 120) -> dict[str, float]:
+    def fake_measure(size_mb: int, timeout: int = 120) -> Result:
         counter["n"] += 1
-        return {"mbits": 100.0 - counter["n"], "seconds": 1.0, "mbytes": float(size_mb)}
+        return Result(mbits=100.0 - counter["n"], seconds=1.0, mbytes=float(size_mb))
 
     monkeypatch.setattr(bench, "measure", fake_measure)
 
@@ -840,8 +837,8 @@ def test_cli_bench_defaults_to_all_credentialed_providers(monkeypatch):
     )
     monkeypatch.setattr(bench, "probe_hosts", Recorder([{"fr1": 0.05, "jp1": 0.20}]))
 
-    def fake_measure(size_mb: int, timeout: int = 120) -> dict[str, float]:
-        return {"mbits": 50.0, "seconds": 1.0, "mbytes": float(size_mb)}
+    def fake_measure(size_mb: int, timeout: int = 120) -> Result:
+        return Result(mbits=50.0, seconds=1.0, mbytes=float(size_mb))
 
     monkeypatch.setattr(bench, "measure", fake_measure)
 

@@ -52,9 +52,9 @@ def test_state_mapping(monkeypatch):
         ("created", "stopped"),
     ]:
         monkeypatch.setattr(discovery, "container_status", lambda n, status=status: status)
-        assert discovery._state("epoxy") == expected
+        assert discovery.instance_state("epoxy") == expected
     monkeypatch.setattr(discovery, "container_status", lambda n: None)
-    assert discovery._state("epoxy") == "absent"
+    assert discovery.instance_state("epoxy") == "absent"
 
 
 def test_consumers_of(monkeypatch):
@@ -127,7 +127,7 @@ def test_known_names_from_registry_and_projects(monkeypatch):
 
     (config.INSTANCES_DIR / "from-registry.json").parent.mkdir(parents=True, exist_ok=True)
     (config.INSTANCES_DIR / "from-registry.json").write_text("{}")
-    assert discovery._known_names() == {"epoxy", "plan-a", "from-registry"}
+    assert discovery.known_names() == {"epoxy", "plan-a", "from-registry"}
 
 
 def test_instance_records_schema(monkeypatch):
@@ -277,8 +277,8 @@ def test_instance_records_ordered_oldest_first(monkeypatch):
         "plan-b": "2026-05-01T08:00:00Z",
         "plan-a": "2026-03-01T08:00:00Z",
     }
-    monkeypatch.setattr(discovery, "_known_names", lambda: set(times))
-    monkeypatch.setattr(discovery, "_state", lambda name: "running")
+    monkeypatch.setattr(discovery, "known_names", lambda: set(times))
+    monkeypatch.setattr(discovery, "instance_state", lambda name: "running")
     monkeypatch.setattr(discovery, "_control_port", lambda name: 8000)
     monkeypatch.setattr(discovery, "_runtime_selection", lambda name, port: None)
     monkeypatch.setattr(discovery, "container_started_at", lambda name: times[name])
@@ -294,9 +294,9 @@ def test_instance_records_ordered_oldest_first(monkeypatch):
 
 def test_instance_records_unknown_started_sorts_last(monkeypatch):
     """Absent/never-started instances (no start time) sort after started ones."""
-    monkeypatch.setattr(discovery, "_known_names", lambda: {"new-one", "old-one"})
+    monkeypatch.setattr(discovery, "known_names", lambda: {"new-one", "old-one"})
     monkeypatch.setattr(
-        discovery, "_state", lambda name: "running" if name == "old-one" else "absent"
+        discovery, "instance_state", lambda name: "running" if name == "old-one" else "absent"
     )
     monkeypatch.setattr(discovery, "_control_port", lambda name: 8000)
     monkeypatch.setattr(discovery, "_runtime_selection", lambda name, port: None)
@@ -313,8 +313,8 @@ def test_instance_records_unknown_started_sorts_last(monkeypatch):
 
 def test_instance_records_absent_instance_reports_null_start(monkeypatch):
     """Absent containers carry no start time (registry-only records stay clean)."""
-    monkeypatch.setattr(discovery, "_known_names", lambda: {"plan-a"})
-    monkeypatch.setattr(discovery, "_state", lambda name: "absent")
+    monkeypatch.setattr(discovery, "known_names", lambda: {"plan-a"})
+    monkeypatch.setattr(discovery, "instance_state", lambda name: "absent")
     monkeypatch.setattr(discovery, "container_started_at", lambda name: pytest.fail("not called"))
     monkeypatch.setattr(discovery, "consumers_of", lambda name: [])
     record = discovery.instance_records()[0]

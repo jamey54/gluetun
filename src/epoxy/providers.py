@@ -7,6 +7,7 @@ report ``<name>: <message>`` inside an ``--all`` loop.
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from epoxy.config import DEFAULT_PROTOCOL
 from epoxy.instance import current_instance, env_lookup
@@ -17,10 +18,18 @@ from epoxy.instance import current_instance, env_lookup
 
 @dataclass(frozen=True)
 class ProtocolConfig:
-    """How a provider's credentials map onto the container's generic env vars."""
+    """How a provider's credentials map onto the container's generic env vars.
+
+    frozen=True only holds as far as the field types allow, so env_map is a
+    read-only mapping: a plain dict would let any caller rewrite a provider's
+    credential mapping while the dataclass still claimed to be immutable.
+    """
 
     required_env: tuple[str, ...]
-    env_map: dict[str, str]
+    env_map: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "env_map", MappingProxyType(dict(self.env_map)))
 
 
 def _wireguard(provider: str, *, require_addresses: bool = False) -> ProtocolConfig:

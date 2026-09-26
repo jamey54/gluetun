@@ -114,12 +114,12 @@ def _choose_instance_name() -> str:
     """
     if not _stdin_is_tty():
         _no_instance_error()
-    names = sorted(discovery._known_names())
+    names = sorted(discovery.known_names())
     if not names:
         _no_instance_error()
     if len(names) == 1:
         return names[0]
-    chosen = picker.select_instance([(name, discovery._state(name)) for name in names])
+    chosen = picker.select_instance([(name, discovery.instance_state(name)) for name in names])
     if chosen is None:
         raise click.ClickException("No instance selected.")
     return chosen
@@ -195,7 +195,7 @@ def _resolve_targets(instance: str | None, all_instances: bool) -> list[Instance
     if all_instances:
         if instance is not None:
             raise click.UsageError("--instance and --all are mutually exclusive.")
-        names = sorted(discovery._known_names())
+        names = sorted(discovery.known_names())
         targets = [_apply_published_fallback(resolve_instance(name)) for name in names]
         return targets
     return [_resolve_for_command(instance)]
@@ -259,7 +259,7 @@ def finish_connection(
     if verified and run_speedtest:
         click.echo("Running speed test...")
         result = speedtest.measure(size)
-        if result:
+        if result is not None:
             click.echo(speedtest.format_result(result))
         else:
             click.echo("Speed test failed.")

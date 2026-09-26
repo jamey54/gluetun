@@ -162,14 +162,14 @@ _PROVIDERS: list[tuple[str, str, Callable[[str], JsonDoc | None]]] = [
 
 
 @dataclass(frozen=True)
-class _Probe:
+class Probe:
     """One accepted probe observation and the providers that supplied it."""
 
     info: JsonDoc
     sources: tuple[str, ...]
 
 
-def _probe_provider(container: str, url: str) -> str:
+def probe_provider(container: str, url: str) -> str:
     """One echo fetch from inside the container; '' on failure."""
     result = run(
         "docker",
@@ -190,7 +190,7 @@ def _probe_provider(container: str, url: str) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
-def _vote(results: list[tuple[str, JsonDoc]]) -> _Probe:
+def _vote(results: list[tuple[str, JsonDoc]]) -> Probe:
     """Plurality over distinct IPs; ties broken by provider priority order."""
     order = {name: i for i, (name, _, _) in enumerate(_PROVIDERS)}
     by_ip: dict[str, list[tuple[str, JsonDoc]]] = {}
@@ -217,10 +217,10 @@ def _vote(results: list[tuple[str, JsonDoc]]) -> _Probe:
                     merged.setdefault("country", COUNTRY_NAMES[code])
                 continue
             merged.setdefault(key, value)
-    return _Probe(info=merged, sources=sources)
+    return Probe(info=merged, sources=sources)
 
 
-def _probe(container: str | None = None) -> _Probe | None:
+def probe(container: str | None = None) -> Probe | None:
     """One public-IP probe from inside a container. None when every provider failed.
 
     Providers run in parallel, so a single rate-limited service is absorbed
@@ -230,7 +230,7 @@ def _probe(container: str | None = None) -> _Probe | None:
     results: list[tuple[str, JsonDoc]] = []
     with ThreadPoolExecutor(max_workers=len(_PROVIDERS)) as pool:
         futures = {
-            pool.submit(_probe_provider, container, url): (name, extract)
+            pool.submit(probe_provider, container, url): (name, extract)
             for name, url, extract in _PROVIDERS
         }
         for future in as_completed(futures):
@@ -268,7 +268,7 @@ def fetch_ip_info(
 
     last_info: JsonDoc | None = None
     for attempt in range(retries):
-        result = _probe(container=container)
+        result = probe(container=container)
         if result is None:
             if 0 < attempt < retries - 1:
                 click.echo(f"Waiting for public IP... ({attempt + 1}/{retries})")

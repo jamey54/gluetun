@@ -12,16 +12,16 @@ from epoxy.commands import _common
 def stub_probe(
     results: list[dict[str, object] | None],
     sources: tuple[str, ...] = ("ipinfo",),
-) -> tuple[Callable[..., ipinfo._Probe | None], list[str]]:
-    """Stub epoxy.ipinfo._probe with queued observations; records poll count."""
+) -> tuple[Callable[..., ipinfo.Probe | None], list[str]]:
+    """Stub epoxy.ipinfo.probe with queued observations; records poll count."""
     calls: list[str] = []
 
-    def fake_probe(container: str | None = None) -> ipinfo._Probe | None:
+    def fake_probe(container: str | None = None) -> ipinfo.Probe | None:
         calls.append(container or "")
         result = results.pop(0) if results else None
         if result is None:
             return None
-        return ipinfo._Probe(info=result, sources=sources)
+        return ipinfo.Probe(info=result, sources=sources)
 
     return fake_probe, calls
 
@@ -109,7 +109,7 @@ def test_real_ip_unreachable_is_none(monkeypatch):
 
 def test_fetch_returns_first_success_without_expectation(monkeypatch):
     probe, calls = stub_probe([{"ip": "1.2.3.4"}])
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     outcome = ipinfo.fetch_ip_info(retries=3, delay=0)
     assert outcome.result is not None
     assert outcome.result.info == {"ip": "1.2.3.4"}
@@ -120,7 +120,7 @@ def test_fetch_returns_first_success_without_expectation(monkeypatch):
 def test_fetch_stops_at_first_non_excluded_even_if_country_differs(monkeypatch):
     """The old behavior waited for the expected country; now any non-bare IP wins."""
     probe, calls = stub_probe([{"ip": "9.9.9.9", "country": "NL"}])
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     outcome = ipinfo.fetch_ip_info(retries=5, delay=0, expected_country="Germany")
     assert outcome.result is not None
     assert outcome.result.info["country"] == "NL"
@@ -130,14 +130,14 @@ def test_fetch_stops_at_first_non_excluded_even_if_country_differs(monkeypatch):
 
 def test_fetch_matched_true_when_country_matches(monkeypatch):
     probe, _ = stub_probe([{"ip": "8.8.8.8", "country": "DE"}])
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     outcome = ipinfo.fetch_ip_info(retries=3, delay=0, expected_country="Germany")
     assert outcome.result is not None and outcome.result.matched is True
 
 
 def test_fetch_preserves_resilient_sources(monkeypatch):
     probe, _ = stub_probe([{"ip": "5.6.7.8"}], sources=("cloudflare", "ifconfigco"))
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     outcome = ipinfo.fetch_ip_info(retries=1, delay=0)
     assert outcome.result is not None
     assert outcome.result.sources == ("cloudflare", "ifconfigco")
@@ -146,7 +146,7 @@ def test_fetch_preserves_resilient_sources(monkeypatch):
 def test_fetch_leak_notices_printed_each_attempt(monkeypatch, capsys):
     monkeypatch.setattr(ipinfo, "real_ip", lambda: "203.0.113.7")
     probe, _ = stub_probe([{"ip": "203.0.113.7"}, {"ip": "1.2.3.4"}])
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     outcome = ipinfo.fetch_ip_info(retries=3, delay=0)
     assert outcome.result is not None
     assert capsys.readouterr().out.count("Leak: traffic not going through VPN") == 1
@@ -155,7 +155,7 @@ def test_fetch_leak_notices_printed_each_attempt(monkeypatch, capsys):
 def test_fetch_persistent_leak_returns_none_with_last_info(monkeypatch):
     monkeypatch.setattr(ipinfo, "real_ip", lambda: "203.0.113.7")
     probe, calls = stub_probe([{"ip": "203.0.113.7"} for _ in range(4)])
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     outcome = ipinfo.fetch_ip_info(retries=4, delay=0)
     assert outcome.result is None
     assert outcome.last_info == {"ip": "203.0.113.7"}
@@ -164,7 +164,7 @@ def test_fetch_persistent_leak_returns_none_with_last_info(monkeypatch):
 
 def test_fetch_extra_exclude_detects_stale_route(monkeypatch, capsys):
     probe, _ = stub_probe([{"ip": "9.9.9.9", "country": "JP"}, {"ip": "6.6.6.6", "country": "KR"}])
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     outcome = ipinfo.fetch_ip_info(retries=5, delay=0, exclude_ips={"9.9.9.9"})
     assert outcome.result is not None
     assert outcome.result.info["ip"] == "6.6.6.6"
@@ -173,7 +173,7 @@ def test_fetch_extra_exclude_detects_stale_route(monkeypatch, capsys):
 
 def test_fetch_gives_up_after_retries(monkeypatch):
     probe, calls = stub_probe([])
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     sleeps: list[float] = []
     monkeypatch.setattr(time, "sleep", sleeps.append)
     outcome = ipinfo.fetch_ip_info(retries=4, delay=2)
@@ -184,21 +184,21 @@ def test_fetch_gives_up_after_retries(monkeypatch):
 
 def test_fetch_first_failure_silent(monkeypatch, capsys):
     probe, _ = stub_probe([None, {"ip": "1.2.3.4"}])
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     assert ipinfo.fetch_ip_info(retries=5, delay=0).result is not None
     assert capsys.readouterr().out == ""
 
 
 def test_fetch_second_failure_prints_waiting_notice(monkeypatch, capsys):
     probe, _ = stub_probe([None, None, {"ip": "1.2.3.4"}])
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     ipinfo.fetch_ip_info(retries=5, delay=0)
     assert capsys.readouterr().out == "Waiting for public IP... (2/5)\n"
 
 
 def test_fetch_final_failure_silent(monkeypatch, capsys):
     probe, _ = stub_probe([])
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     assert ipinfo.fetch_ip_info(retries=4, delay=0).result is None
     assert capsys.readouterr().out == (
         "Waiting for public IP... (2/4)\nWaiting for public IP... (3/4)\n"
@@ -210,7 +210,7 @@ def test_fetch_rejects_body_without_ip(monkeypatch):
     probe, calls = stub_probe(
         [{"status": 429, "error": {"title": "Rate limit hit"}}, {"ip": "2.2.2.2"}]
     )
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     outcome = ipinfo.fetch_ip_info(retries=5, delay=0)
     assert outcome.result is not None
     assert outcome.result.info["ip"] == "2.2.2.2"
@@ -230,8 +230,8 @@ def test_same_country_used_for_verification():
 def test_print_ip_status_fail_closed_when_bare_unknown_from_backup_sources(monkeypatch, capsys):
     """Backup echo sources work, but with no country match and an unknown host
     bare IP the verdict is fail-closed: never a silent green (C2)."""
-    probe = ipinfo._Probe({"ip": "5.6.7.8"}, sources=("cloudflare",))
-    monkeypatch.setattr(ipinfo, "_probe", lambda container=None: probe)
+    probe = ipinfo.Probe({"ip": "5.6.7.8"}, sources=("cloudflare",))
+    monkeypatch.setattr(ipinfo, "probe", lambda container=None: probe)
     assert ipinfo.print_ip_status() is False
     out = capsys.readouterr().out
     assert "Public IP confirmed via cloudflare" in out
@@ -240,16 +240,16 @@ def test_print_ip_status_fail_closed_when_bare_unknown_from_backup_sources(monke
 
 
 def test_print_ip_status_no_note_when_ipinfo_served(monkeypatch, capsys):
-    probe = ipinfo._Probe({"ip": "1.2.3.4", "country": "US"}, sources=("ipinfo",))
-    monkeypatch.setattr(ipinfo, "_probe", lambda container=None: probe)
+    probe = ipinfo.Probe({"ip": "1.2.3.4", "country": "US"}, sources=("ipinfo",))
+    monkeypatch.setattr(ipinfo, "probe", lambda container=None: probe)
     assert ipinfo.print_ip_status() is False  # bare IP unknown -> fail-closed
     assert "Public IP confirmed via" not in capsys.readouterr().out
 
 
 def test_print_ip_status_still_detects_leak_from_backup_sources(monkeypatch):
     monkeypatch.setattr(ipinfo, "real_ip", lambda: "203.0.113.7")
-    probe = ipinfo._Probe({"ip": "203.0.113.7"}, sources=("cloudflare",))
-    monkeypatch.setattr(ipinfo, "_probe", lambda container=None: probe)
+    probe = ipinfo.Probe({"ip": "203.0.113.7"}, sources=("cloudflare",))
+    monkeypatch.setattr(ipinfo, "probe", lambda container=None: probe)
     assert ipinfo.print_ip_status() is False
 
 
@@ -261,7 +261,7 @@ def test_print_ip_status_still_detects_leak_from_backup_sources(monkeypatch):
 def test_current_exit_ip_returns_accepted_observation(monkeypatch):
     probe, _ = stub_probe([{"ip": "9.9.9.9", "country": "DE"}])
     monkeypatch.setenv("EPOXY_REAL_IP", "1.1.1.1")
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     assert ipinfo.current_exit_ip() == "9.9.9.9"
 
 
@@ -270,13 +270,13 @@ def test_current_exit_ip_falls_back_to_last_observation(monkeypatch):
     single-shot still reports what was last seen rather than None."""
     probe, _ = stub_probe([{"ip": "1.1.1.1", "country": "Egypt"}])
     monkeypatch.setenv("EPOXY_REAL_IP", "1.1.1.1")
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     assert ipinfo.current_exit_ip() == "1.1.1.1"
 
 
 def test_current_exit_ip_none_when_probe_failed(monkeypatch):
     probe, _ = stub_probe([None])
-    monkeypatch.setattr(ipinfo, "_probe", probe)
+    monkeypatch.setattr(ipinfo, "probe", probe)
     assert ipinfo.current_exit_ip() is None
 
 

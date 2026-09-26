@@ -29,7 +29,7 @@ PROJECT_LABEL = '{{.Label "com.docker.compose.project"}}'
 NETWORK_FORMAT = "{{.Names}}\t{{.HostConfig.NetworkMode}}"
 
 
-def _state(name: str) -> str:
+def instance_state(name: str) -> str:
     """Docker status mapped to the stable states: running|starting|stopped|absent."""
     status = container_status(name)
     if status is None:
@@ -56,7 +56,7 @@ def _compose_projects() -> list[str]:
     return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
 
 
-def _known_names() -> set[str]:
+def known_names() -> set[str]:
     """Instance names: the registry plus containers under an epoxy-* project."""
     names = set(list_registry())
     for project in _compose_projects():
@@ -129,8 +129,8 @@ def instance_records() -> list[JsonDoc]:
     determinism.
     """
     records: list[JsonDoc] = []
-    for name in sorted(_known_names()):
-        state = _state(name)
+    for name in sorted(known_names()):
+        state = instance_state(name)
         port = _control_port(name)
         sel = _runtime_selection(name, port) if state in ("running", "starting") else None
         records.append(

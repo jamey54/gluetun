@@ -31,7 +31,7 @@ def _status_doc() -> JsonDoc:
     with ``leak: false`` and exit 0 (C8).
     """
     inst = current_instance()
-    state = discovery._state(inst.name)
+    state = discovery.instance_state(inst.name)
     sel: Selection | None = None
     enabled = False
     last_error: str | None = None
@@ -50,7 +50,7 @@ def _status_doc() -> JsonDoc:
     leak = False
     verified = False
     if state == "running":
-        result = ipinfo._probe()
+        result = ipinfo.probe()
         if result is None:
             if last_error is None:
                 last_error = "could not determine the exit IP (all echo services failed)"

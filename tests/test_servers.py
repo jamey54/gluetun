@@ -9,6 +9,7 @@ import pytest
 from epoxy import config, servers
 from epoxy.config import DEFAULT_PROTOCOL
 from epoxy.servers import (
+    _header_columns,
     _parse_servers_output,
     _read_cache,
     _write_cache,
@@ -152,6 +153,17 @@ def test_parse_servers_output_no_header_fallback():
     ]
     parsed = _parse_servers_output(lines)
     assert parsed == [{"country": "France", "city": "Paris", "hostname": "", "vpn": "wireguard"}]
+
+
+def test_header_columns_reads_a_present_header():
+    lines = SAMPLE_MD.splitlines()
+    assert _header_columns(lines) == {"country": 1, "city": 2, "hostname": 3, "vpn": 4}
+
+
+def test_header_columns_falls_back_without_one():
+    """A container that prints no header must not lose every server."""
+    assert _header_columns(["| France | Paris | x | y |"]) == {"country": 1, "city": 2}
+    assert _header_columns([]) == {"country": 1, "city": 2}
 
 
 def test_parse_servers_output_skips_separator_and_empty():

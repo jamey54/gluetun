@@ -52,24 +52,33 @@ def parse_server_selection(selection: str) -> tuple[str | None, str | None, str,
 ServerRow = dict[str, str]
 
 
-def _parse_servers_output(lines: list[str]) -> list[ServerRow]:
-    """Parse the container 'format-servers' markdown output into row dicts."""
-    idx: dict[str, int] = {}
+#: Column positions assumed when the header row is missing or unrecognised.
+_FALLBACK_COLUMNS = {"country": 1, "city": 2}
+
+
+def _header_columns(lines: list[str]) -> dict[str, int]:
+    """Locate the markdown header's columns, falling back to a fixed layout.
+
+    'format-servers' is expected to print a header naming its columns, but the
+    parse must survive a version that does not: without one, fall back to the
+    historical positional layout rather than dropping every server.
+    """
     for line in lines:
-        cells = [c.strip() for c in line.split("|")]
-        lowered = [c.lower() for c in cells]
+        lowered = [cell.strip().lower() for cell in line.split("|")]
         if "country" in lowered and "city" in lowered:
-            idx = {
+            return {
                 name: lowered.index(name)
                 for name in ("country", "city", "hostname", "vpn")
                 if name in lowered
             }
-            break
+    return dict(_FALLBACK_COLUMNS)
 
-    country_idx = idx.get("country")
-    city_idx = idx.get("city")
-    if country_idx is None or city_idx is None:
-        country_idx, city_idx = 1, 2
+
+def _parse_servers_output(lines: list[str]) -> list[ServerRow]:
+    """Parse the container 'format-servers' markdown output into row dicts."""
+    idx = _header_columns(lines)
+    country_idx = idx.get("country", _FALLBACK_COLUMNS["country"])
+    city_idx = idx.get("city", _FALLBACK_COLUMNS["city"])
 
     servers: list[ServerRow] = []
     for line in lines:

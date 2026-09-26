@@ -51,7 +51,7 @@ def test_rm_removes_container_and_deletes_state(monkeypatch):
     _seed_state()
     compose_calls: list[tuple[str, ...]] = []
     _stub_docker_ok(monkeypatch, compose_calls)
-    monkeypatch.setattr(discovery, "_known_names", lambda: {"epoxy"})
+    monkeypatch.setattr(discovery, "known_names", lambda: {"epoxy"})
     monkeypatch.setattr(discovery, "consumers_of", lambda name: [])
 
     result = invoke(["rm", "--instance", "epoxy"])
@@ -67,7 +67,7 @@ def test_rm_refuses_consumers_without_force(monkeypatch):
     _seed_state()
     compose_calls: list[tuple[str, ...]] = []
     _stub_docker_ok(monkeypatch, compose_calls)
-    monkeypatch.setattr(discovery, "_known_names", lambda: {"epoxy"})
+    monkeypatch.setattr(discovery, "known_names", lambda: {"epoxy"})
     monkeypatch.setattr(discovery, "consumers_of", lambda name: ["web-app"])
 
     result = CliRunner().invoke(cli.main, ["rm", "--instance", "epoxy"])
@@ -84,7 +84,7 @@ def test_rm_force_removes_with_consumers(monkeypatch):
     _seed_state()
     compose_calls: list[tuple[str, ...]] = []
     _stub_docker_ok(monkeypatch, compose_calls)
-    monkeypatch.setattr(discovery, "_known_names", lambda: {"epoxy"})
+    monkeypatch.setattr(discovery, "known_names", lambda: {"epoxy"})
     monkeypatch.setattr(discovery, "consumers_of", lambda name: ["web-app"])
 
     result = invoke(["rm", "--instance", "epoxy", "--force"])
@@ -98,7 +98,7 @@ def test_rm_unknown_instance_is_friendly(monkeypatch):
 
     compose_calls: list[tuple[str, ...]] = []
     _stub_docker_ok(monkeypatch, compose_calls)
-    monkeypatch.setattr(discovery, "_known_names", lambda: {"other"})
+    monkeypatch.setattr(discovery, "known_names", lambda: {"other"})
 
     result = CliRunner().invoke(cli.main, ["rm", "--instance", "epoxy"])
     assert result.exit_code == 1
@@ -121,7 +121,7 @@ def test_rm_without_compose_file_falls_back_to_docker_rm(monkeypatch):
 
     monkeypatch.setattr("epoxy.docker.compose", no_compose)
     monkeypatch.setattr("epoxy.docker.remove_container", lambda name: removed.append(name))
-    monkeypatch.setattr(discovery, "_known_names", lambda: {"epoxy"})
+    monkeypatch.setattr(discovery, "known_names", lambda: {"epoxy"})
     monkeypatch.setattr(discovery, "consumers_of", lambda name: [])
 
     result = invoke(["rm", "--instance", "epoxy"])

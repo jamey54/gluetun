@@ -22,14 +22,14 @@ def invoke(args, **kwargs):
 @pytest.fixture()
 def two_instances(monkeypatch):
     """Two known instances (a, b) resolvable without docker."""
-    monkeypatch.setattr(discovery, "_known_names", lambda: {"b", "a"})
+    monkeypatch.setattr(discovery, "known_names", lambda: {"b", "a"})
     monkeypatch.setattr("epoxy.docker.container_control_port", lambda name=None: None)
     return ("a", "b")
 
 
 @pytest.fixture()
 def no_instances(monkeypatch):
-    monkeypatch.setattr(discovery, "_known_names", lambda: set())
+    monkeypatch.setattr(discovery, "known_names", lambda: set())
     return ()
 
 

@@ -5,6 +5,7 @@ import pytest
 from epoxy import providers
 from epoxy.config import DEFAULT_PROTOCOL
 from epoxy.providers import (
+    PROVIDERS,
     active_protocols,
     choose_protocol,
     get_active_providers,
@@ -150,3 +151,18 @@ def test_resolve_provider_normalizes_and_defaults(monkeypatch):
 def test_resolve_provider_unknown_is_friendly_exit():
     with pytest.raises(SystemExit, match="Unknown provider 'nordvpn'"):
         resolve_provider("nordvpn")
+
+
+def test_protocol_config_env_map_is_read_only():
+    """frozen=True is only honest if the mapping is read-only too.
+
+    PROVIDERS is module state consulted by every command, so a caller that could
+    rewrite a credential mapping would change provider behaviour globally.
+    """
+    config = PROVIDERS["surfshark"]["wireguard"]
+    with pytest.raises(TypeError):
+        config.env_map["WIREGUARD_PRIVATE_KEY"] = "HACKED"  # type: ignore[index]
+    assert config.env_map["WIREGUARD_PRIVATE_KEY"] == "SURFSHARK_WIREGUARD_PRIVATE_KEY"
+    assert PROVIDERS["surfshark"]["wireguard"].env_map["WIREGUARD_PRIVATE_KEY"] == (
+        "SURFSHARK_WIREGUARD_PRIVATE_KEY"
+    )
