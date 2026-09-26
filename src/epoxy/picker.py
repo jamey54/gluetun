@@ -44,6 +44,11 @@ PickerRow = tuple[str, str, str, str, str]
 
 
 class _ServerPicker:
+    #: Whether the Tab / Left / Right column-filter mode applies. A picker whose
+    #: rows have no real columns (the instance picker) turns it off, since
+    #: scoping to an empty column would silently match nothing.
+    supports_columns: bool = True
+
     def __init__(self, rows: list[PickerRow], prompt: str) -> None:
         self.rows = rows
         self.values = [f"[{p}/{proto}] {c}{SERVER_SEP}{ci}" for p, proto, c, ci, _ in rows]
@@ -135,6 +140,8 @@ class _ServerPicker:
 
     def _advance_col(self, delta: int) -> None:
         """Cycle the active filter column; entering/leaving column mode."""
+        if not self.supports_columns:
+            return
         if self.active_col is None:
             target = 0 if delta > 0 else len(COLUMNS) - 1
         else:
@@ -149,7 +156,7 @@ class _ServerPicker:
 
     def _cycle_value(self, delta: int) -> None:
         """Cycle the active column's exact filter among its distinct values."""
-        if self.active_col is None:
+        if not self.supports_columns or self.active_col is None:
             return
         values = list(self.col_labels[self.active_col])
         choices: list[str | None] = [None, *values]
@@ -247,11 +254,13 @@ class _ServerPicker:
 
     # -- run ---------------------------------------------------------------
 
-    def run(
-        self,
-        input: Input | None = None,
-        output: Output | None = None,
-    ) -> str | None:
+    def key_bindings(self) -> KeyBindings:
+        """Build the picker's key bindings.
+
+        Split out of :meth:`run` so the binding set is inspectable without a
+        terminal. The column-filter keys (Tab, Shift-Tab, Left, Right) are bound
+        only when :attr:`supports_columns` is set.
+        """
         kb = KeyBindings()
 
         @kb.add("up")
@@ -284,21 +293,23 @@ class _ServerPicker:
         def _backspace(event: KeyPressEvent) -> None:
             self._set_query(self.query[:-1])
 
-        @kb.add("tab")
-        def _col_next(event: KeyPressEvent) -> None:
-            self._advance_col(1)
+        if self.supports_columns:
 
-        @kb.add("s-tab")
-        def _col_prev(event: KeyPressEvent) -> None:
-            self._advance_col(-1)
+            @kb.add("tab")
+            def _col_next(event: KeyPressEvent) -> None:
+                self._advance_col(1)
 
-        @kb.add("left")
-        def _value_prev(event: KeyPressEvent) -> None:
-            self._cycle_value(-1)
+            @kb.add("s-tab")
+            def _col_prev(event: KeyPressEvent) -> None:
+                self._advance_col(-1)
 
-        @kb.add("right")
-        def _value_next(event: KeyPressEvent) -> None:
-            self._cycle_value(1)
+            @kb.add("left")
+            def _value_prev(event: KeyPressEvent) -> None:
+                self._cycle_value(-1)
+
+            @kb.add("right")
+            def _value_next(event: KeyPressEvent) -> None:
+                self._cycle_value(1)
 
         @kb.add("escape")
         def _escape_key(event: KeyPressEvent) -> None:
@@ -319,6 +330,15 @@ class _ServerPicker:
             if event.data.isprintable():
                 self._set_query(self.query + fold(event.data))
 
+        return kb
+
+    # -- run ---------------------------------------------------------------
+
+    def run(
+        self,
+        input: Input | None = None,
+        output: Output | None = None,
+    ) -> str | None:
         app: Application[str] = Application(
             layout=Layout(
                 HSplit(
@@ -335,7 +355,7 @@ class _ServerPicker:
                     ]
                 )
             ),
-            key_bindings=kb,
+            key_bindings=self.key_bindings(),
             style=_STYLE,
             full_screen=False,
             input=input,
@@ -362,8 +382,11 @@ class _InstancePicker(_ServerPicker):
     """Compact picker over instances, sharing the server picker's engine.
 
     Rows render as ``name (state)`` and selection returns the bare instance
-    name. The column-scoped filtering machinery is inherited but unused here.
+    name. Column-scoped filtering is disabled: only the name is a real column,
+    so Tab/arrow scoping would narrow to an empty field and hide every row.
     """
+
+    supports_columns = False
 
     def __init__(self, instances: list[tuple[str, str]], prompt: str) -> None:
         rows: list[PickerRow] = []

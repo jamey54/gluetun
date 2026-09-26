@@ -203,7 +203,7 @@ epoxy 0.3 runs several independent VPN containers side by side, each its own *in
 - an optional `--env-file` replacing `.env` for that instance;
 - a registry record `~/.cache/epoxy/instances/<instance>.json` (control port + env file).
 
-Every command requires an instance. Resolution order: `--instance NAME` → `EPOXY_INSTANCE` env var → interactive choice → error. On an interactive terminal with no `--instance` and no env var, commands that target an instance (`status`, `down`, `connect`, `logs`, `bench`, `dns`, `update`, `up`) ask you to pick one: the sole known instance is used automatically, otherwise a picker lists them by name and state. Non-interactive runs (pipes, scripts) keep the usage error — automation must always name its instance explicitly. `epoxy ls` always lists everything and never prompts.
+Every command requires an instance. Resolution order: `--instance NAME` → `EPOXY_INSTANCE` env var → interactive choice → error. On an interactive terminal with no `--instance` and no env var, commands that target an instance (`status`, `down`, `connect`, `logs`, `bench`, `dns`, `update`, `up`) ask you to pick one: the sole known instance is used automatically, otherwise a picker lists them by name and state — filter it by typing, and the column-filter keys (`Tab`, `←`/`→`) are inert there, since only the name is a real column. Non-interactive runs (pipes, scripts) keep the usage error — automation must always name its instance explicitly. `epoxy ls` always lists everything and never prompts.
 
 Container names are **exact matches only**: epoxy never touches a container other than the one named after the instance, so a shared container owned by another tool is never matched.
 

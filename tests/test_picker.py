@@ -314,3 +314,50 @@ def test_instance_picker_no_state_renders_name_only():
 
 def test_select_instance_empty_returns_none():
     assert select_instance([]) is None
+
+
+# prompt_toolkit normalizes the aliases below to control codes: tab == c-i,
+# enter == c-m, backspace == c-h. These are the names it actually stores.
+COLUMN_KEYS = {"c-i", "s-tab", "left", "right"}
+NAV_KEYS = {"up", "down", "home", "end", "c-m", "escape", "c-h"}
+
+
+def bound_keys(picker) -> set[str]:
+    """Key names the picker actually registers (no terminal needed)."""
+    return {
+        getattr(key, "value", key)
+        for binding in picker.key_bindings().bindings
+        for key in binding.keys
+    }
+
+
+def test_instance_picker_column_keys_are_inert():
+    """Tab/arrows must not scope to the instance picker's empty columns.
+
+    Only the name is a real column, so a second Tab narrows to the blank
+    protocol field and silently matches nothing (0 hits, no footer hint).
+    """
+    p = make_instance_picker()
+    p._set_query("plan")
+    assert p.matches == [1, 2]
+    p._advance_col(1)  # Tab
+    p._advance_col(1)  # Tab again -- the sequence that used to wipe the list
+    p._cycle_value(1)  # Right
+    assert p.active_col is None
+    assert p.col_value is None
+    assert p.query == "plan"
+    assert p.matches == [1, 2]
+
+
+def test_instance_picker_does_not_bind_column_keys():
+    """The Tab/arrow bindings must not even be registered for instances."""
+    keys = bound_keys(make_instance_picker())
+    assert not COLUMN_KEYS & keys
+    assert keys >= NAV_KEYS  # navigation and typing still work
+
+
+def test_server_picker_still_binds_column_keys():
+    """Guard the other direction: the server picker keeps its column mode."""
+    keys = bound_keys(make_picker())
+    assert keys >= COLUMN_KEYS
+    assert keys >= NAV_KEYS
