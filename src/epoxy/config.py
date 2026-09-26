@@ -51,13 +51,15 @@ def cache_ttl() -> int:
 
 # --- Container image (single source; compose/pull/server-fetch all use it) --
 
-# Pinned stable release: :latest tracks the edge of development and can break
-# unattended runs. Bump deliberately after checking the release notes.
-DEFAULT_IMAGE = "qmcgaw/gluetun:v3.41.3"
+# Tracks upstream by default, so image fixes arrive without an epoxy release.
+# The cost is that a Gluetun release can move the settings API epoxy drives
+# (GET/PUT /v1/vpn/settings) or the `format-servers` output servers.py parses;
+# set EPOXY_IMAGE to a known-good tag to pin while investigating such a break.
+DEFAULT_IMAGE = "qmcgaw/gluetun:latest"
 
 
 def image_ref() -> str:
-    """Container image ref: the EPOXY_IMAGE override or the pinned default."""
+    """Container image ref: the EPOXY_IMAGE override or the default."""
     return os.getenv(IMAGE_ENV_VAR, "") or DEFAULT_IMAGE
 
 
