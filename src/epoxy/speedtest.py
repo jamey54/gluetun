@@ -64,11 +64,12 @@ def measure(
         str(timeout),
         "wget",
         "-q",
-        # -O - streams the payload into our pipe instead of /dev/null, so the
+        # -O- streams the payload into our pipe instead of /dev/null, so the
         # bytes can be counted as they arrive; the exec still reports wget's
-        # exit code, because wget is the command the shell-less exec runs.
-        "-O",
-        "-",
+        # exit code, because wget is the command the shell-less exec runs. The
+        # single-token spelling matches ipinfo.probe_provider, so the download
+        # uses the wget invocation this image is already known to accept.
+        "-O-",
         SPEEDTEST_URL.format(n=nbytes),
         on_chunk=_count,
         check=False,

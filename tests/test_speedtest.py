@@ -49,7 +49,7 @@ def test_measure_computes_throughput(monkeypatch):
 
 
 def test_measure_streams_the_payload_to_our_pipe(monkeypatch):
-    """-O - is what makes progress real: the bytes reach us instead of /dev/null."""
+    """-O- is what makes progress real: the bytes reach us instead of /dev/null."""
     seen: dict[str, object] = {}
     monkeypatch.setattr("time.monotonic", lambda: 100.0)
     monkeypatch.setattr(speedtest, "run_streamed", fake_stream(seen=seen))
@@ -57,7 +57,8 @@ def test_measure_streams_the_payload_to_our_pipe(monkeypatch):
     args = seen["args"]
     assert isinstance(args, tuple)
     assert args[:3] == ("docker", "exec", "testbox")
-    assert "-O" in args and args[args.index("-O") + 1] == "-"
+    # The same single-token spelling ipinfo.probe_provider already relies on.
+    assert "-O-" in args
     assert "/dev/null" not in args
     assert args[-1] == "https://speed.cloudflare.com/__down?bytes=25000000"
     assert callable(seen["on_chunk"])  # chunks are counted, not discarded blind
