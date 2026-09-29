@@ -22,7 +22,7 @@ def creds(monkeypatch):
     monkeypatch.setenv("PROTONVPN_WIREGUARD_ADDRESSES", "10.2.0.2/32")
     monkeypatch.setenv("HTTP_CONTROL_SERVER_API_KEY", "test-key")
     monkeypatch.setattr("epoxy.ipinfo.print_ip_status", lambda **kwargs: True)
-    monkeypatch.setattr("epoxy.speedtest.measure", lambda size=25: None)
+    monkeypatch.setattr("epoxy.speedtest.measure", lambda size=25, **kwargs: None)
     monkeypatch.setattr("epoxy.ipinfo.current_exit_ip", lambda: None)
 
 

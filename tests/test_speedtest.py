@@ -1,13 +1,30 @@
 """Tests for speed measurement helpers and CLI country comparison."""
 
-from subprocess import CompletedProcess
-
 import pytest
 
 from epoxy import speedtest
 from epoxy.config import DEFAULT_SIZE_MB
 from epoxy.ipinfo import _same_country
 from epoxy.speedtest import Result, format_result, mbps
+
+
+def fake_stream(chunks=(), returncode=0, seen=None):
+    """A run_streamed stand-in that replays chunk sizes and records its call.
+
+    Keyword arguments land in `seen` so a test can assert on the argv the
+    download was started with, or on the timeout it was bounded by.
+    """
+    seen = {} if seen is None else seen
+
+    def _run(*args, on_chunk, **kwargs):
+        seen["args"] = args
+        seen["on_chunk"] = on_chunk
+        seen.update(kwargs)
+        for size in chunks:
+            on_chunk(size)
+        return returncode
+
+    return _run
 
 
 def test_mbps():
@@ -23,11 +40,7 @@ def test_default_size():
 def test_measure_computes_throughput(monkeypatch):
     times = iter([100.0, 110.0])  # 10 s elapsed
     monkeypatch.setattr("time.monotonic", lambda: next(times))
-
-    def fake_run(*args, **kwargs):
-        return CompletedProcess(args, 0)
-
-    monkeypatch.setattr(speedtest, "run", fake_run)
+    monkeypatch.setattr(speedtest, "run_streamed", fake_stream())
     result = speedtest.measure(size_mb=25)
     assert result is not None
     assert abs(result.mbits - 20.0) < 1e-9
@@ -35,11 +48,42 @@ def test_measure_computes_throughput(monkeypatch):
     assert result.mbytes == 25.0
 
 
-def test_measure_failure_returns_none(monkeypatch):
-    def fake_run(*args, **kwargs):
-        return CompletedProcess(args, 1)
+def test_measure_streams_the_payload_to_our_pipe(monkeypatch):
+    """-O - is what makes progress real: the bytes reach us instead of /dev/null."""
+    seen: dict[str, object] = {}
+    monkeypatch.setattr("time.monotonic", lambda: 100.0)
+    monkeypatch.setattr(speedtest, "run_streamed", fake_stream(seen=seen))
+    speedtest.measure(size_mb=25, container="testbox")
+    args = seen["args"]
+    assert isinstance(args, tuple)
+    assert args[:3] == ("docker", "exec", "testbox")
+    assert "-O" in args and args[args.index("-O") + 1] == "-"
+    assert "/dev/null" not in args
+    assert args[-1] == "https://speed.cloudflare.com/__down?bytes=25000000"
+    assert callable(seen["on_chunk"])  # chunks are counted, not discarded blind
 
-    monkeypatch.setattr(speedtest, "run", fake_run)
+
+def test_measure_reports_progress_as_bytes_arrive(monkeypatch):
+    """The callback sees running totals, so a bar can advance on partial reads."""
+    seen_progress: list[tuple[int, int]] = []
+    monkeypatch.setattr("time.monotonic", lambda: 100.0)
+    monkeypatch.setattr(speedtest, "run_streamed", fake_stream(chunks=[7, 3, 40]))
+    speedtest.measure(
+        size_mb=25, on_progress=lambda done, total: seen_progress.append((done, total))
+    )
+    assert seen_progress == [(7, 25_000_000), (10, 25_000_000), (50, 25_000_000)]
+
+
+def test_measure_without_a_callback_stays_silent(monkeypatch):
+    """bench passes no callback, so the download must not try to draw anything."""
+    monkeypatch.setattr("time.monotonic", lambda: 100.0)
+    monkeypatch.setattr(speedtest, "run_streamed", fake_stream(chunks=[100, 200]))
+    assert speedtest.measure(size_mb=25) is not None
+
+
+def test_measure_failure_returns_none(monkeypatch):
+    monkeypatch.setattr("time.monotonic", lambda: 100.0)
+    monkeypatch.setattr(speedtest, "run_streamed", fake_stream(returncode=1))
     assert speedtest.measure() is None
 
 
@@ -61,37 +105,23 @@ def test_format_result_renders_the_record():
 
 def test_measure_bounds_the_docker_exec(monkeypatch):
     """A stalled docker exec must time out rather than hang the speed test."""
-    times = iter([100.0, 101.0])
-    monkeypatch.setattr("time.monotonic", lambda: next(times))
     seen: dict[str, object] = {}
-
-    def fake_run(*args, **kwargs):
-        seen.update(kwargs)
-        return CompletedProcess(args, 0)
-
-    monkeypatch.setattr(speedtest, "run", fake_run)
+    monkeypatch.setattr("time.monotonic", lambda: 100.0)
+    monkeypatch.setattr(speedtest, "run_streamed", fake_stream(seen=seen))
     speedtest.measure(size_mb=25, timeout=120)
     assert seen["timeout"] == 130  # inner wget bound + exec overhead buffer
 
 
 def test_measure_timeout_is_failure(monkeypatch):
     monkeypatch.setattr("time.monotonic", lambda: 100.0)
-
-    def fake_run(*args, **kwargs):
-        return CompletedProcess(args, 124, stdout="", stderr="timed out")
-
-    monkeypatch.setattr(speedtest, "run", fake_run)
+    monkeypatch.setattr(speedtest, "run_streamed", fake_stream(returncode=124))
     assert speedtest.measure() is None
 
 
 def test_measure_instant_exec_never_divide_by_zero(monkeypatch):
     times = iter([100.0, 100.0])  # zero elapsed time
     monkeypatch.setattr("time.monotonic", lambda: next(times))
-
-    def fake_run(*args, **kwargs):
-        return CompletedProcess(args, 0)
-
-    monkeypatch.setattr(speedtest, "run", fake_run)
+    monkeypatch.setattr(speedtest, "run_streamed", fake_stream())
     result = speedtest.measure(size_mb=25)
     assert result is not None
     assert result.seconds > 0  # clamped, not a divide-by-zero crash

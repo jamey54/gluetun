@@ -1,11 +1,15 @@
 """Download speed test through the VPN container."""
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from epoxy.config import DEFAULT_SIZE_MB, DOWNLOAD_TIMEOUT_S, SPEEDTEST_URL
-from epoxy.docker import run
+from epoxy.docker import run_streamed
 from epoxy.instance import current_instance
+
+# Called with (downloaded_bytes, total_bytes) as the payload streams in.
+ProgressFn = Callable[[int, int], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,27 +35,48 @@ def measure(
     size_mb: int = DEFAULT_SIZE_MB,
     timeout: int = DOWNLOAD_TIMEOUT_S,
     container: str | None = None,
+    *,
+    on_progress: ProgressFn | None = None,
 ) -> Result | None:
-    """Download size_mb through a container. Returns a Result, or None on failure."""
+    """Download size_mb through a container. Returns a Result, or None on failure.
+
+    The payload is streamed to a pipe and discarded, so the only way to watch a
+    download is on_progress: it is called with (downloaded, total) as bytes
+    arrive, which is what a progress bar needs to show real progress. Pass
+    nothing (bench does) and the download stays silent.
+    """
     container = container or current_instance().container
     nbytes = size_mb * 1_000_000
+    downloaded = 0
     start = time.monotonic()
-    result = run(
+
+    def _count(size: int) -> None:
+        nonlocal downloaded
+        downloaded += size
+        if on_progress is not None:
+            on_progress(downloaded, nbytes)
+
+    returncode = run_streamed(
         "docker",
         "exec",
         container,
         "timeout",
         str(timeout),
         "wget",
-        "-qO",
-        "/dev/null",
+        "-q",
+        # -O - streams the payload into our pipe instead of /dev/null, so the
+        # bytes can be counted as they arrive; the exec still reports wget's
+        # exit code, because wget is the command the shell-less exec runs.
+        "-O",
+        "-",
         SPEEDTEST_URL.format(n=nbytes),
+        on_chunk=_count,
         check=False,
         # Bound the docker exec itself, not just the in-container wget.
         timeout=timeout + 10,
     )
     seconds = time.monotonic() - start
-    if result.returncode != 0:
+    if returncode != 0:
         return None
     if seconds <= 0:
         seconds = 1e-9  # never divide by zero; an instant exit is still a valid download
