@@ -1,6 +1,8 @@
 """Tests for docker helpers: container env reading and compose invocation."""
 
 import subprocess
+import sys
+import time
 from typing import Any
 
 import pytest
@@ -242,3 +244,88 @@ def test_container_control_port_reads_the_container_port(monkeypatch):
     published = f'{{"{config.CONTAINER_CTL_PORT}/tcp": [{{"HostPort": "8123"}}]}}'
     monkeypatch.setattr(docker, "inspect_container", lambda fmt, name=None: published)
     assert docker.container_control_port("epoxy") == 8123
+
+
+# ---------------------------------------------------------------------------
+# run_streamed
+# ---------------------------------------------------------------------------
+#
+# These drive a local interpreter rather than docker: the point is the pipe
+# read loop, and a stubbed Popen could not prove that a stalled child is
+# actually killed instead of waited on.
+
+
+def _py(code: str) -> tuple[str, str, str]:
+    return (sys.executable, "-c", code)
+
+
+# A child that emits one byte and then hangs: enough to hand the loop a chunk,
+# then long enough that anything left running is a leak, not a race.
+CHATTER = (
+    "import sys, time; sys.stdout.buffer.write(b'x'); sys.stdout.buffer.flush(); time.sleep(30)"
+)
+SLEEP = "import time; time.sleep(30)"
+
+
+def _discard(size: int) -> None:
+    """A callback for the cases where only the exit code matters."""
+
+
+def test_run_streamed_hands_over_every_chunk():
+    chunks: list[int] = []
+    rc = docker.run_streamed(
+        *_py("import sys; sys.stdout.buffer.write(b'x' * 200_000)"), on_chunk=chunks.append
+    )
+    assert rc == 0
+    assert sum(chunks) == 200_000
+    assert len(chunks) > 1  # a payload larger than the read size arrives in pieces
+
+
+def test_run_streamed_returns_the_exit_code():
+    assert docker.run_streamed(*_py("raise SystemExit(3)"), on_chunk=_discard, check=False) == 3
+
+
+def test_run_streamed_leaves_stderr_inherited(capfd):
+    """stderr is not piped, so a child's own errors still reach the terminal."""
+    docker.run_streamed(*_py("import sys; sys.stderr.write('boom')"), on_chunk=_discard)
+    assert "boom" in capfd.readouterr().err
+
+
+def test_run_streamed_kills_a_stalled_command():
+    """A pipe read blocks with no deadline of its own, so the watchdog must."""
+    started = time.monotonic()
+    rc = docker.run_streamed(*_py(SLEEP), on_chunk=_discard, check=False, timeout=0.5)
+    assert rc == 124
+    assert time.monotonic() - started < 15  # killed, not waited out
+
+
+def test_run_streamed_timeout_with_check_is_a_reported_failure():
+    with pytest.raises(SystemExit) as ei:
+        docker.run_streamed(*_py(SLEEP), on_chunk=_discard, timeout=0.5)
+    assert "timed out" in str(ei.value)
+
+
+def test_run_streamed_check_raises_on_a_failed_command():
+    with pytest.raises(SystemExit) as ei:
+        docker.run_streamed(*_py("raise SystemExit(3)"), on_chunk=_discard)
+    assert "Command failed (3)" in str(ei.value)
+
+
+def test_run_streamed_missing_binary_is_127(capsys):
+    assert docker.run_streamed("epoxy-no-such-binary", on_chunk=_discard, check=False) == 127
+    with pytest.raises(SystemExit) as ei:
+        docker.run_streamed("epoxy-no-such-binary", on_chunk=_discard)
+    assert ei.value.code == 127
+    assert "Cannot run" in capsys.readouterr().err
+
+
+def test_run_streamed_propagates_a_failing_callback():
+    """A display that blows up must surface, and must not leave the child running."""
+
+    def boom(size: int) -> None:
+        raise RuntimeError("draw failed")
+
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="draw failed"):
+        docker.run_streamed(*_py(CHATTER), on_chunk=boom)
+    assert time.monotonic() - started < 15  # the child was killed, not waited out

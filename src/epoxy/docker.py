@@ -5,13 +5,21 @@ and exits 1, and commands/_common._record_failure reads that form back to report
 ``<name>: <message>`` inside an ``--all`` loop.
 """
 
+import io
 import json
 import os
 import subprocess
 import sys
+import threading
+from collections.abc import Callable
+from typing import cast
 
 from epoxy.config import CONTAINER_CTL_PORT, CONTAINER_OP_TIMEOUT_S
 from epoxy.instance import current_instance, image_ref
+
+# Read granularity for run_streamed: big enough to keep the read loop cheap,
+# small enough that a slow download still advances a progress bar smoothly.
+STREAM_CHUNK_BYTES = 64 * 1024
 
 
 def run(
@@ -45,6 +53,69 @@ def run(
         msg = (result.stderr or result.stdout or "").strip()
         raise SystemExit(f"Error: {msg}" if msg else f"Command failed ({result.returncode})")
     return result
+
+
+def run_streamed(
+    *args: str,
+    on_chunk: Callable[[int], None],
+    check: bool = True,
+    env: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> int:
+    """Run a command, handing each stdout chunk to on_chunk as it arrives.
+
+    Returns the exit code; the payload itself is never retained, so a caller
+    watching a long download pays no memory for it. stderr is left inherited
+    (as ``run(capture=False)`` does) so the child's own errors still reach the
+    terminal, and because the child never writes to a stderr pipe there is no
+    risk of it blocking on a full buffer while we drain stdout.
+
+    The failure contract matches run(): a timeout kills the child and reports
+    124, an unlaunchable command 127, and a non-zero exit raises SystemExit when
+    ``check`` is set. The kill is done by a watchdog rather than by the read
+    loop, because a pipe read blocks without a deadline of its own.
+    """
+    try:
+        proc: subprocess.Popen[bytes] = subprocess.Popen(args, stdout=subprocess.PIPE, env=env)
+    except OSError as exc:
+        msg = f"Cannot run {args[0] if args else 'command'}: {exc}"
+        if check:
+            print(msg, file=sys.stderr)
+            raise SystemExit(127) from None
+        return 127
+
+    timed_out = False
+
+    def _on_deadline() -> None:
+        nonlocal timed_out
+        timed_out = True
+        proc.kill()
+
+    watchdog = threading.Timer(timeout, _on_deadline) if timeout else None
+    if watchdog is not None:
+        watchdog.start()
+    try:
+        # Popen with stdout=PIPE always hands back a buffered binary stream; the
+        # attribute's own annotation is only IO[Any], hence the cast.
+        stdout = cast(io.BufferedReader, proc.stdout)
+        # read1, not read: a full read(n) blocks until it has all n bytes, so a
+        # slow link would show nothing until the whole buffer had filled.
+        while chunk := stdout.read1(STREAM_CHUNK_BYTES):
+            on_chunk(len(chunk))
+    except BaseException:  # on_chunk raised, or the user hit Ctrl-C: don't leak the child
+        proc.kill()
+        proc.wait()
+        raise
+    finally:
+        if watchdog is not None:
+            watchdog.cancel()
+    # Reap here too, so a child killed by the watchdog is never left unreaped.
+    returncode = proc.wait()
+    if check and (timed_out or returncode != 0):
+        if timed_out:
+            raise SystemExit(f"Error: Command timed out after {timeout:g}s") from None
+        raise SystemExit(f"Error: Command failed ({returncode})")
+    return 124 if timed_out else returncode
 
 
 def inspect_container(format_string: str, name: str | None = None) -> str | None:
