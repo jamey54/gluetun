@@ -7,7 +7,7 @@ from typing import Any, NoReturn, TypeVar
 
 import click
 
-from epoxy import apply, control, discovery, docker, ipinfo, picker, speedtest
+from epoxy import apply, control, discovery, docker, ipinfo, picker, progress, speedtest
 from epoxy.apply import Selection
 from epoxy.config import (
     CTL_PORT_ENV_VAR,
@@ -253,7 +253,10 @@ def finish_connection(
     verified = ipinfo.print_ip_status(expected_country=expected_country, exclude_ips=exclude_ips)
     if verified and run_speedtest:
         click.echo("Running speed test...")
-        result = speedtest.measure(size)
+        # The bar draws itself on a terminal and is a no-op otherwise, so the
+        # messages below are the whole output for scripts and --json consumers.
+        with progress.download_bar(size, size * 1_000_000) as report:
+            result = speedtest.measure(size, on_progress=report)
         if result is not None:
             click.echo(speedtest.format_result(result))
         else:
