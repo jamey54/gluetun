@@ -161,7 +161,7 @@ Swaps additionally exclude the previous exit IP from acceptance, so a failed swa
 
 ## Speed test
 
-`up`, `connect` and `status` run a download speed test after a verified connection (green or yellow verdict). It downloads 25 MB from Cloudflare inside the container — all traffic goes through the VPN tunnel. Skip it per invocation with `--no-speedtest`, or change the size with `epoxy status -s 100`. On a leak or unreadable IP, the speed test is skipped with a message.
+`up`, `connect` and `status` run a download speed test after a verified connection (green or yellow verdict). It downloads 25 MB from Cloudflare inside the container — all traffic goes through the VPN tunnel. On a terminal the transfer shows a live bar — percentage, bytes transferred, current speed, ETA — and the bar is erased when the download ends, so the `↓ 128.1 Mbit/s (25 MB in 1.6s)` result is the only lasting output. Redirect stdout and the bar is suppressed entirely, so scripts and CI logs see the same plain lines as before. Skip it per invocation with `--no-speedtest`, or change the size with `epoxy status -s 100`. On a leak or unreadable IP, the speed test is skipped with a message.
 
 ## Benchmark
 
