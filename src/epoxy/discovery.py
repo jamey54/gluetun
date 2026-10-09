@@ -1,4 +1,4 @@
-"""Instance discovery for `epoxy ls`: registry plus `epoxy-*` compose containers.
+"""Instance discovery for `epoxy ls`: registry plus backed `epoxy-*` projects.
 
 Discovery only ever matches exact container names — it never reaches for "any
 Gluetun container" (that is what would let epoxy touch a foreign Gluetun).
@@ -27,6 +27,7 @@ from epoxy.statusdoc import control_server_doc, selection_doc
 PROJECT_PREFIX = "epoxy-"
 PROJECT_LABEL = '{{.Label "com.docker.compose.project"}}'
 NETWORK_FORMAT = "{{.Names}}\t{{.HostConfig.NetworkMode}}"
+PS_FORMAT = "{{.Names}}\t" + PROJECT_LABEL
 
 
 def instance_state(name: str) -> str:
@@ -41,27 +42,47 @@ def instance_state(name: str) -> str:
     return "stopped"
 
 
-def _compose_projects() -> list[str]:
-    """Compose project names of all containers (empty when docker is unavailable)."""
+def _ps_containers() -> tuple[list[str], list[str]]:
+    """Container names and compose project labels from `docker ps -a`.
+
+    Returns two aligned lists (a container without the label yields an empty
+    project entry); both are empty when docker is unavailable.
+    """
     result = run(
         "docker",
         "ps",
         "-a",
         "--format",
-        PROJECT_LABEL,
+        PS_FORMAT,
         capture=True,
         check=False,
         timeout=CONTAINER_OP_TIMEOUT_S,
     )
-    return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+    names: list[str] = []
+    projects: list[str] = []
+    for line in (result.stdout or "").splitlines():
+        name, _, project = line.partition("\t")
+        names.append(name.strip())
+        projects.append(project.strip())
+    return names, projects
 
 
 def known_names() -> set[str]:
-    """Instance names: the registry plus containers under an epoxy-* project."""
-    names = set(list_registry())
-    for project in _compose_projects():
-        if project.startswith(PROJECT_PREFIX) and project[len(PROJECT_PREFIX) :]:
-            names.add(project[len(PROJECT_PREFIX) :])
+    """Instance names: the registry, plus `epoxy-*` projects backed by evidence.
+
+    A project label alone is not evidence: a foreign stack reusing the
+    ``epoxy-`` prefix (or any leftover container with a different name) must
+    not surface as a phantom instance. A label counts only when the registry
+    knows the name or a container with exactly that name exists — which keeps
+    registry-less (imported) containers addressable.
+    """
+    registered = set(list_registry())
+    names = set(registered)
+    containers, projects = _ps_containers()
+    for project in projects:
+        stripped = project[len(PROJECT_PREFIX) :] if project.startswith(PROJECT_PREFIX) else ""
+        if stripped and (stripped in registered or stripped in containers):
+            names.add(stripped)
     return names
 
 

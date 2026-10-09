@@ -73,7 +73,7 @@ You only need to set credentials for providers you actually use.
 | `epoxy connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
 | `epoxy servers [--provider --protocol] [--json]` | List servers for credentialed providers — no instance, no container needed (table or single-line JSON) |
 | `epoxy status [--instance NAME] [--all] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
-| `epoxy ls [--instance NAME] [--json]` | List instances (registry + `epoxy-*` compose containers): state, selection, control port, consumers, start time |
+| `epoxy ls [--instance NAME] [--json]` | List instances (registry + backed `epoxy-*` projects): state, selection, control port, consumers, start time |
 | `epoxy down [--instance NAME] [--all]` | Stop the VPN container (registry record kept; shows as `absent` in `epoxy ls`) |
 | `epoxy rm [--instance NAME] [--all] [-f/--force]` | Remove the container/network and delete the registry record, compose file, and lockfile; refuses when consumers share the instance's network unless `--force` |
 | `epoxy logs [--instance NAME] [--all] [-f] [-n N]` | Show container logs |
@@ -232,7 +232,7 @@ Every instance reads its env from `./.env` by default. For a dedicated instance,
 
 ### Listing instances
 
-`epoxy ls [--json]` enumerates instances from the registry and from containers whose compose project starts with `epoxy-`, reporting per-instance state, selection, control-server port, *consumers* — containers sharing the instance's network namespace (`NetworkMode == container:<instance>`; Docker records the reference as the container's name or its ID, both are matched) — and when each instance was started. Rows are ordered by start time, oldest instance first; instances without a start time (absent, or never started) sort last. `STARTED` is rendered in local time; under `--json` it is the raw RFC3339 timestamp (`"started_at"`), or `null` when unknown.
+`epoxy ls [--json]` enumerates instances from the registry and from `epoxy-` compose projects backed by the registry or a same-named container (a foreign stack reusing the prefix is ignored), reporting per-instance state, selection, control-server port, *consumers* — containers sharing the instance's network namespace (`NetworkMode == container:<instance>`; Docker records the reference as the container's name or its ID, both are matched) — and when each instance was started. Rows are ordered by start time, oldest instance first; instances without a start time (absent, or never started) sort last. `STARTED` is rendered in local time; under `--json` it is the raw RFC3339 timestamp (`"started_at"`), or `null` when unknown.
 
 ```text
 $ epoxy ls

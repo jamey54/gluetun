@@ -32,7 +32,7 @@ def _stub_docker(runner, monkeypatch):
                 "unrelated\tfile:///app/compose.yml\n"
             )
         if "compose.project" in fmt:
-            return _proc("epoxy-epoxy\nepoxy-plan-a\nother-app\n")
+            return _proc("epoxy\tepoxy-epoxy\nplan-a\tepoxy-plan-a\nother\tother-app\n")
         raise AssertionError(f"unexpected args: {args}")
 
     monkeypatch.setattr(discovery, "run", fake_run)
@@ -105,7 +105,7 @@ def test_consumers_of_missing_docker_reads_as_empty(monkeypatch):
         discovery, "run", lambda *a, **kw: CompletedProcess(a, 127, stderr="no docker")
     )
     assert discovery.consumers_of("epoxy") == []
-    assert discovery._compose_projects() == []
+    assert discovery._ps_containers() == ([], [])
 
 
 def test_docker_ps_calls_are_bounded(monkeypatch):
@@ -128,6 +128,49 @@ def test_known_names_from_registry_and_projects(monkeypatch):
     (config.INSTANCES_DIR / "from-registry.json").parent.mkdir(parents=True, exist_ok=True)
     (config.INSTANCES_DIR / "from-registry.json").write_text("{}")
     assert discovery.known_names() == {"epoxy", "plan-a", "from-registry"}
+
+
+def test_known_names_ignores_foreign_project_container(monkeypatch):
+    """A foreign stack reusing the epoxy- prefix is not a phantom instance.
+
+    Reproduces the `opencode` ghost: container `epoxy-opencode` in project
+    `epoxy-opencode`, with no registry record and no container named `opencode`.
+    """
+    monkeypatch.setattr(
+        discovery,
+        "run",
+        lambda *args, **kwargs: _proc("epoxy-opencode\tepoxy-opencode\n"),
+    )
+    assert discovery.known_names() == set()
+
+
+def test_known_names_keeps_registry_instance_without_container(monkeypatch):
+    """A registered instance stays listed even with no container (downed)."""
+    (config.INSTANCES_DIR / "gone.json").parent.mkdir(parents=True, exist_ok=True)
+    (config.INSTANCES_DIR / "gone.json").write_text("{}")
+    monkeypatch.setattr(discovery, "run", lambda *args, **kwargs: _proc(""))
+    assert discovery.known_names() == {"gone"}
+
+
+def test_known_names_keeps_imported_same_named_container(monkeypatch):
+    """A registry-less container stays addressable through its exact name."""
+    monkeypatch.setattr(discovery, "run", lambda *args, **kwargs: _proc("web\tepoxy-web\n"))
+    assert discovery.known_names() == {"web"}
+
+
+def test_known_names_ignores_bare_prefix_project(monkeypatch):
+    monkeypatch.setattr(discovery, "run", lambda *args, **kwargs: _proc("stray\tepoxy-\n"))
+    assert discovery.known_names() == set()
+
+
+def test_instance_records_ignores_foreign_project_container(monkeypatch):
+    """The phantom never reaches `ls`: no record, no docker follow-ups."""
+    monkeypatch.setattr(
+        discovery,
+        "run",
+        lambda *args, **kwargs: _proc("epoxy-opencode\tepoxy-opencode\n"),
+    )
+    assert discovery.instance_records() == []
 
 
 def test_instance_records_schema(monkeypatch):
