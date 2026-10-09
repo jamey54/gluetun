@@ -71,6 +71,7 @@ You only need to set credentials for providers you actually use.
 | `epoxy --version` | Print the exact version (e.g. `epoxy 0.5.0`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
 | `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `epoxy connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
+| `epoxy servers [--provider --protocol] [--json]` | List servers for credentialed providers — no instance, no container needed (table or single-line JSON) |
 | `epoxy status [--instance NAME] [--all] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
 | `epoxy ls [--instance NAME] [--json]` | List instances (registry + `epoxy-*` compose containers): state, selection, control port, consumers, start time |
 | `epoxy down [--instance NAME] [--all]` | Stop the VPN container (registry record kept; shows as `absent` in `epoxy ls`) |
@@ -81,7 +82,7 @@ You only need to set credentials for providers you actually use.
 | `epoxy update [--instance NAME] [--all]` | Trigger a server list update |
 | `epoxy install [--shell SHELL] [--rc-file FILE] [--print] [--force]` | Wire shell completion into your rc file (bash/zsh/fish) |
 
-`--instance` is the first option of every command. Scripts must always pass it. See [Instances](#instances).
+`--instance` is the first option of every instance-scoped command (`install` and `servers` take none; `ls` treats it as a filter). Scripts must always pass it. See [Instances](#instances).
 
 ### up vs connect
 
@@ -130,7 +131,7 @@ epoxy up --provider protonvpn --protocol openvpn
 
 ## Server selection
 
-`epoxy connect --list` lists all servers in an aligned table (provider, protocol, country, city, server) for every provider/protocol pair with valid credentials in `.env`.
+`epoxy servers` lists all servers in an aligned table (provider, protocol, country, city, server) for every provider/protocol pair with valid credentials in `.env`. It takes no `--instance` and needs no running container, so it works before anything is created; `--provider`/`--protocol` narrow it and `--json` emits single-line `{"servers": [...]}` (see [`epoxy servers --json`](#epoxy-servers---json)). `epoxy connect --list` prints the same table but resolves its image through an instance, so it requires one.
 
 `epoxy connect` with no arguments opens an interactive picker showing the same columns, with live filtering and keyboard navigation:
 
@@ -308,7 +309,7 @@ Resolution order for every command: `--instance NAME` → interactive choice (TT
 | `1`  | scripted error / VPN failed / leak (verdict in JSON under `--json`) |
 | `2`  | usage error |
 
-Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` when the connection cannot be verified; `epoxy status --json` returns `1` when `leak` is `true` or the control server is unreachable while the container is running/restarting; it returns `0` for any other emitted JSON (probe health failures are reported in `last_error`, never as a leak). `epoxy up` applies the same rule as `status`: a container that is *running* but whose control server cannot be reached returns `1`, whether or not a location was requested — it waits up to ~15s first, so a container that is merely mid-restart is not failed, but one that never answers is a friendly `Cannot read runtime settings` error rather than a success epoxy could not act on. `epoxy bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run.
+Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` when the connection cannot be verified; `epoxy status --json` returns `1` when `leak` is `true` or the control server is unreachable while the container is running/restarting; it returns `0` for any other emitted JSON (probe health failures are reported in `last_error`, never as a leak). `epoxy up` applies the same rule as `status`: a container that is *running* but whose control server cannot be reached returns `1`, whether or not a location was requested — it waits up to ~15s first, so a container that is merely mid-restart is not failed, but one that never answers is a friendly `Cannot read runtime settings` error rather than a success epoxy could not act on. `epoxy bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run. `epoxy servers` returns `1` (friendly message, no JSON) when no servers are found or the filters match nothing.
 
 ### The calls dockerstrator makes
 
@@ -319,6 +320,7 @@ Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` 
 | Capability probe (is epoxy 0.3+ implemented?) | `epoxy ls --json` (or `epoxy --version` for the exact version) |
 | Create a dedicated instance (creds from `.env`) | `epoxy up --instance <plan>-epoxy --provider P [--protocol T] [--country C] [--city Ci]` |
 | Verify a dedicated instance after create | `epoxy status --instance <plan>-epoxy --json` |
+| List servers before anything exists | `epoxy servers --json [--provider P] [--protocol T]` |
 | Tear down when the plan container is removed | `epoxy down --instance <plan>-epoxy` |
 
 dockerstrator rule: if `epoxy ls --json` exits non-zero or reports an unknown flag, treat epoxy as pre-0.3 and hide the *dedicated* container option (shared-only falls back to plain `epoxy up`). Since 0.3.0 every call names its instance explicitly (`--instance`) — there is no default instance anymore. dockerstrator keeps its own container inventory from `docker ps`; `epoxy ls` is used only for instance/control-port/selection state.
@@ -371,3 +373,22 @@ dockerstrator rule: if `epoxy ls --json` exits non-zero or reports an unknown fl
 ```
 
 - `instances` — one entry per known instance; `state` uses the same values as `status --json`. `selection` and `control_server` are `null` when unknown. `consumers` lists containers sharing the instance's network (`NetworkMode == container:<container_name>`; containers attached by name or by the instance's container ID are matched). `started_at` is the instance's last start time (Docker `State.StartedAt`, RFC3339), or `null` when the instance is absent or has never started; records are ordered by `started_at`, oldest first, unknown last.
+
+### `epoxy servers --json`
+
+```json
+{
+  "servers": [
+    {
+      "provider": "surfshark",
+      "protocol": "wireguard",
+      "country": "Japan",
+      "city": "Tokyo",
+      "hostname": "jp-tok-001"
+    }
+  ]
+}
+```
+
+- `servers` — one entry per server in table order (provider, country, city, hostname); only provider/protocol pairs with credentials in `.env` are listed, so this is the pre-container counterpart of `epoxy connect --list`/the picker. `city`/`hostname` are `""` when the listing has none.
+- Empty results are exit `1` with a friendly message and no JSON: `No servers found. Is Docker running?` (nothing fetched) or `No matching servers for the given filters.` (`--provider`/`--protocol` narrowed everything out, or the provider name is unknown).
