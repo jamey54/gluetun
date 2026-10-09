@@ -9,7 +9,6 @@ from epoxy.apply import Selection
 from epoxy.commands import _common
 from epoxy.commands._common import (
     _baked_selection,
-    _resolve_for_command,
     _resolve_targets,
     add_instance_options,
     all_option,
@@ -215,7 +214,7 @@ def status(
 
         for_each_instance(targets, show_one, all_instances, header=True, separate=True)
         return
-    with instance_context(_resolve_for_command(instance)):
+    with instance_context(targets[0]):
         if json_output:
             doc = _status_doc()
             click.echo(json.dumps(doc))

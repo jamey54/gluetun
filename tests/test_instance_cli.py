@@ -369,6 +369,27 @@ def test_down_picks_instance_when_multiple(monkeypatch):
     assert projects == ["epoxy-plan-a"]
 
 
+def test_status_picks_instance_once_when_multiple(monkeypatch):
+    """Single `status` must prompt exactly once (reuse _resolve_targets)."""
+    _multi_instance(monkeypatch)
+    picks: list[list[tuple[str, str]]] = []
+
+    def fake_pick(instances: list[tuple[str, str]], **kw: object) -> str:
+        picks.append(instances)
+        return "plan-a"
+
+    monkeypatch.setattr(picker, "select_instance", fake_pick)
+    seen: list[str] = []
+    monkeypatch.setattr(
+        "epoxy.commands.status._print_human_status",
+        lambda size, no_speedtest: seen.append(current_instance().name),
+    )
+    result = run_bare_cli(["status", "--no-speedtest"])
+    assert result.exit_code == 0
+    assert len(picks) == 1
+    assert seen == ["plan-a"]
+
+
 def test_epoxy_instance_env_is_ignored(compose_calls, cold, monkeypatch):
     """The removed EPOXY_INSTANCE knob must stay dead: setting it changes nothing."""
     monkeypatch.setenv("EPOXY_INSTANCE", "bogus")
