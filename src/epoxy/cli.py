@@ -12,6 +12,7 @@ from epoxy.commands import (
     logs,
     ls,
     rm,
+    servers,
     status,
     up,
     update,
@@ -36,6 +37,7 @@ main.add_command(logs.logs)
 main.add_command(status.status)
 main.add_command(bench.bench)
 main.add_command(ls.ls)
+main.add_command(servers.servers_cmd)
 main.add_command(dns.dns)
 main.add_command(update.update)
 main.add_command(install.install)

@@ -12,7 +12,7 @@ from epoxy.instance import current_instance
 from tests.harness import run_cli
 
 ALL_COMMANDS = ["status", "down", "rm", "logs", "dns", "update"]
-SINGLE_ONLY = ["up", "connect", "bench", "ls"]
+SINGLE_ONLY = ["up", "connect", "bench", "ls", "servers"]
 
 
 @pytest.fixture()
