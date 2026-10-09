@@ -253,7 +253,7 @@ def test_get_servers_uses_cache(monkeypatch):
 
 def test_get_servers_does_not_cache_all_empty(monkeypatch):
     monkeypatch.setattr(servers, "_read_cache", lambda: None)
-    monkeypatch.setattr(servers, "_fetch_all_servers", lambda providers: {})
+    monkeypatch.setattr(servers, "_fetch_all_servers", lambda providers, image=None: {})
     monkeypatch.setattr(
         servers,
         "get_active_providers",
@@ -269,7 +269,7 @@ def test_get_servers_fetches_all_providers_in_one_boot(cache_path, monkeypatch):
     monkeypatch.setattr(servers, "_read_cache", lambda: None)
     seen: list[list[str]] = []
 
-    def fake_fetch_all(providers):
+    def fake_fetch_all(providers, image=None):
         seen.append(providers)
         return {
             p: [{"country": p.upper(), "city": "X", "hostname": "", "vpn": "wireguard"}]
@@ -277,7 +277,7 @@ def test_get_servers_fetches_all_providers_in_one_boot(cache_path, monkeypatch):
         }
 
     monkeypatch.setattr(servers, "_fetch_all_servers", fake_fetch_all)
-    monkeypatch.setattr(servers, "_fetch_servers", lambda provider: [])
+    monkeypatch.setattr(servers, "_fetch_servers", lambda provider, image=None: [])
     monkeypatch.setattr(
         servers,
         "get_active_providers",
@@ -296,7 +296,7 @@ def test_get_servers_fetches_all_providers_beyond_credentials(cache_path, monkey
     monkeypatch.setattr(servers, "_read_cache", lambda: None)
     seen: list[list[str]] = []
 
-    def fake_fetch_all(providers):
+    def fake_fetch_all(providers, image=None):
         seen.append(providers)
         return {
             p: [{"country": p.upper(), "city": "X", "hostname": "", "vpn": "wireguard"}]
@@ -304,7 +304,7 @@ def test_get_servers_fetches_all_providers_beyond_credentials(cache_path, monkey
         }
 
     monkeypatch.setattr(servers, "_fetch_all_servers", fake_fetch_all)
-    monkeypatch.setattr(servers, "_fetch_servers", lambda provider: [])
+    monkeypatch.setattr(servers, "_fetch_servers", lambda provider, image=None: [])
     monkeypatch.setattr(servers, "get_active_providers", lambda: {("surfshark", "wireguard")})
     servers.get_servers()
     assert seen == [["protonvpn", "surfshark"]]
@@ -313,10 +313,10 @@ def test_get_servers_fetches_all_providers_beyond_credentials(cache_path, monkey
 
 def test_get_servers_falls_back_to_per_provider_fetch(cache_path, monkeypatch):
     monkeypatch.setattr(servers, "_read_cache", lambda: None)
-    monkeypatch.setattr(servers, "_fetch_all_servers", lambda providers: None)
+    monkeypatch.setattr(servers, "_fetch_all_servers", lambda providers, image=None: None)
     seen: list[str] = []
 
-    def fake_fetch(provider):
+    def fake_fetch(provider, image=None):
         seen.append(provider)
         return [{"country": provider.upper(), "city": "X", "hostname": "", "vpn": "wireguard"}]
 

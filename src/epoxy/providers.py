@@ -67,21 +67,38 @@ def get_protocols(provider: str) -> list[str]:
     return list(PROVIDERS[provider])
 
 
-def active_protocols(provider: str) -> list[str]:
-    """Provider protocols whose required env vars are all set."""
+def active_protocols_in(provider: str, env: Mapping[str, str]) -> list[str]:
+    """Provider protocols whose required env vars are all set in ``env``.
+
+    Instance-free variant of :func:`active_protocols` for paths with no
+    ``--instance`` (e.g. ``epoxy servers``): the caller passes its own env
+    snapshot instead of reaching the active instance.
+    """
     config = PROVIDERS[provider]
     return [
         protocol
         for protocol, protocol_config in config.items()
-        if all(env_lookup(var) for var in protocol_config.required_env)
+        if all(env.get(var) for var in protocol_config.required_env)
     ]
+
+
+def active_protocols(provider: str) -> list[str]:
+    """Provider protocols whose required env vars are all set."""
+    return active_protocols_in(provider, current_instance().env)
+
+
+def get_active_providers_in(env: Mapping[str, str]) -> set[tuple[str, str]]:
+    """``{(provider, protocol)}`` pairs credentialed in ``env`` (no instance)."""
+    return {
+        (provider, protocol)
+        for provider in PROVIDERS
+        for protocol in active_protocols_in(provider, env)
+    }
 
 
 def get_active_providers() -> set[tuple[str, str]]:
     """Return {(provider, protocol)} pairs with all required env vars set."""
-    return {
-        (provider, protocol) for provider in PROVIDERS for protocol in active_protocols(provider)
-    }
+    return get_active_providers_in(current_instance().env)
 
 
 def choose_protocol(provider: str, requested: str | None = None, current: str | None = None) -> str:

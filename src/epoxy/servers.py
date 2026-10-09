@@ -3,6 +3,7 @@
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 from rich.console import Console
 from rich.table import Table
@@ -103,12 +104,12 @@ def _parse_servers_output(lines: list[str]) -> list[ServerRow]:
     return servers
 
 
-def _fetch_servers(provider: str) -> list[ServerRow]:
+def _fetch_servers(provider: str, image: str | None = None) -> list[ServerRow]:
     result = run(
         "docker",
         "run",
         "--rm",
-        image_ref(),
+        image if image is not None else image_ref(),
         "format-servers",
         f"-{provider}",
         capture=True,
@@ -120,13 +121,17 @@ def _fetch_servers(provider: str) -> list[ServerRow]:
     return _parse_servers_output(result.stdout.splitlines())
 
 
-def _fetch_all_servers(providers: list[str]) -> dict[str, list[ServerRow]] | None:
+def _fetch_all_servers(
+    providers: list[str], image: str | None = None
+) -> dict[str, list[ServerRow]] | None:
     """Fetch every provider's servers with a single container boot.
 
     format-servers accepts exactly one provider per invocation, but its data is
     embedded in the image, so the shell loops a per-provider call inside one
     `docker run` — the expensive container startup is paid once instead of once
-    per provider. Returns None when the boot failed or nothing parsed.
+    per provider. Returns None when the boot failed or nothing parsed. ``image``
+    overrides the active instance's ref for instance-free callers; None keeps
+    the previous behavior.
     """
     if not providers:
         return {}
@@ -140,7 +145,7 @@ def _fetch_all_servers(providers: list[str]) -> dict[str, list[ServerRow]] | Non
         "--rm",
         "--entrypoint",
         "/bin/sh",
-        image_ref(),
+        image if image is not None else image_ref(),
         "-c",
         loop,
         capture=True,
@@ -187,7 +192,7 @@ def _write_cache(servers: dict[str, list[ServerRow]]) -> None:
     CACHE_FILE.write_text(json.dumps({"v": CACHE_VERSION, "ts": time.time(), "servers": servers}))
 
 
-def get_servers() -> dict[str, list[ServerRow]]:
+def get_servers(image: str | None = None) -> dict[str, list[ServerRow]]:
     """Fetch servers for every known provider; dict[provider, rows].
 
     All providers are fetched regardless of credentials so the shared cache is
@@ -195,29 +200,38 @@ def get_servers() -> dict[str, list[ServerRow]]:
     another instance's providers). Prefers one container boot for all providers
     and falls back to a parallel per-provider fetch when that fails (e.g. on
     older images). Callers narrow to credentialed pairs via ``listable_servers``.
+    ``image`` overrides the active instance's ref for instance-free callers.
     """
     cached = _read_cache()
     if cached is not None:
         return cached
     providers = sorted(PROVIDERS)
-    by_provider = _fetch_all_servers(providers)
+    by_provider = _fetch_all_servers(providers, image)
     if by_provider is None:
         by_provider = {}
+        fetch_one = partial(_fetch_servers, image=image)
         with ThreadPoolExecutor(max_workers=max(len(providers), 1)) as pool:
-            for provider, rows in zip(providers, pool.map(_fetch_servers, providers), strict=True):
+            for provider, rows in zip(providers, pool.map(fetch_one, providers), strict=True):
                 by_provider[provider] = rows
     if any(by_provider.values()):
         _write_cache(by_provider)
     return by_provider
 
 
-def listable_servers(by_provider: dict[str, list[ServerRow]]) -> dict[str, list[ServerRow]]:
-    """Keep only rows whose (provider, protocol) pair has credentials; drop empty providers."""
-    active = get_active_providers()
+def listable_servers(
+    by_provider: dict[str, list[ServerRow]],
+    active: set[tuple[str, str]] | None = None,
+) -> dict[str, list[ServerRow]]:
+    """Keep only rows whose (provider, protocol) pair has credentials; drop empty providers.
+
+    ``active`` overrides the active instance's credential pairs for
+    instance-free callers; None keeps the previous behavior.
+    """
+    pairs = active if active is not None else get_active_providers()
     return {
         provider: filtered
         for provider, rows in by_provider.items()
-        if (filtered := [s for s in rows if (provider, s.get("vpn", DEFAULT_PROTOCOL)) in active])
+        if (filtered := [s for s in rows if (provider, s.get("vpn", DEFAULT_PROTOCOL)) in pairs])
     }
 
 
