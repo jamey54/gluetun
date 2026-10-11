@@ -69,7 +69,7 @@ You only need to set credentials for providers you actually use.
 | Command | Description |
 |---------|-------------|
 | `epoxy --version` | Print the exact version (e.g. `epoxy 0.5.0`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
-| `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest] [--publish SPEC] [--no-publish]` | Start (or verify) the VPN; apply any requested location via hot-swap |
+| `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest] [--publish SPEC] [--append-publish SPEC] [--no-publish]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `epoxy connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
 | `epoxy servers [--provider --protocol] [--json]` | List servers for credentialed providers — no instance, no container needed (table or single-line JSON) |
 | `epoxy status [--instance NAME] [--all] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
@@ -236,9 +236,10 @@ epoxy up --instance myapp-vpn --provider surfshark --publish 3000:3000 --no-spee
 ```
 
 - Syntax is docker short syntax `[IP:]HOST:CONTAINER`, repeatable; a bare `PORT` means `127.0.0.1:PORT:PORT` — LAN exposure is always explicit, matching the control-port precedent.
-- The set is instance config, stored in the registry record: specifying `--publish` replaces it, `--no-publish` clears it, omitting both preserves it (`--publish` with `--no-publish` together is a usage error). It survives `--recreate`, reboot, and down/up cycles.
+- The set is instance config, stored in the registry record: specifying `--publish` replaces it, `--append-publish` unions into it without touching existing mappings, `--no-publish` clears it, omitting all three preserves it. Only one mode per invocation (`--append-publish` with `--publish`/`--no-publish` together is a usage error). It survives `--recreate`, reboot, and down/up cycles.
 - Ports only take effect at (re)create: on a running container a changed set recreates it with a loud echo (runtime selection reverts to baked config, as with any recreate); an unchanged set is a plain verify.
-- Validation: malformed specs, duplicate host ports, and control-port collisions are usage errors (exit `2`); a host port claimed by another instance or held live fails before compose runs (exit `1`), never leaving a half-started container. Fresh control-port allocation skips registry-claimed and requested-forward ports.
+- Concurrent appends are safe: the merge, validation, render, compose, and persist run under the instance lock, so two simultaneous `up --append-publish` calls union instead of clobbering each other. The lock is fail-fast — when another operation (e.g. a bench) holds it, the command exits `1` with `Instance '<name>' is busy (another operation holds it); retry later.` instead of stalling. Invocations without publish flags never take the lock. Appending a host port that already maps elsewhere is a usage error naming the stored mapping: `Host port 3000 is already forwarded to 127.0.0.1:80; use --publish to change or replace it.`
+- Validation: malformed specs, duplicate host ports, and control-port collisions are usage errors (exit `2`); a host port claimed by another instance or held live fails before compose runs (exit `1`), never leaving a half-started container. Fresh control-port allocation skips registry-claimed and requested-forward ports. Claimed ports name their holder: `Host port 3000 is already forwarded by instance 'shared-vpn'.` (or `Host port 3000 is the control port of instance 'shared-vpn'.`); live-held ports name the process when Linux can see it: `Host port 3000 is already in use (held by process 1234 (docker-proxy)).`, else the bare `Host port 3000 is already in use.`
 
 ### Per-instance env files
 
@@ -323,7 +324,7 @@ Resolution order for every command: `--instance NAME` → interactive choice (TT
 | `1`  | scripted error / VPN failed / leak (verdict in JSON under `--json`) |
 | `2`  | usage error |
 
-Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` when the connection cannot be verified; `epoxy status --json` returns `1` when `leak` is `true` or the control server is unreachable while the container is running/restarting; it returns `0` for any other emitted JSON (probe health failures are reported in `last_error`, never as a leak). `epoxy up` applies the same rule as `status`: a container that is *running* but whose control server cannot be reached returns `1`, whether or not a location was requested — it waits up to ~15s first, so a container that is merely mid-restart is not failed, but one that never answers is a friendly `Cannot read runtime settings` error rather than a success epoxy could not act on. `epoxy bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run. `epoxy servers` returns `1` (friendly message, no JSON) when no servers are found or the filters match nothing. `epoxy up --publish` returns `2` for malformed specs, conflicting specs, or control-port collisions, and `1` — before compose runs — when a host port is claimed by another instance or held live.
+Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` when the connection cannot be verified; `epoxy status --json` returns `1` when `leak` is `true` or the control server is unreachable while the container is running/restarting; it returns `0` for any other emitted JSON (probe health failures are reported in `last_error`, never as a leak). `epoxy up` applies the same rule as `status`: a container that is *running* but whose control server cannot be reached returns `1`, whether or not a location was requested — it waits up to ~15s first, so a container that is merely mid-restart is not failed, but one that never answers is a friendly `Cannot read runtime settings` error rather than a success epoxy could not act on. `epoxy bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run. `epoxy servers` returns `1` (friendly message, no JSON) when no servers are found or the filters match nothing. `epoxy up --publish` returns `2` for malformed specs, conflicting specs, or control-port collisions, and `1` — before compose runs — when a host port is claimed by another instance or held live. `up` invocations that would change forwarded ports fail fast with `1` (`Instance '<name>' is busy (another operation holds it); retry later.`) instead of waiting when another operation holds the instance lock; invocations without publish flags never contend.
 
 ### The calls dockerstrator makes
 
@@ -334,7 +335,7 @@ Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` 
 | Capability probe (is epoxy 0.3+ implemented?) | `epoxy ls --json` (or `epoxy --version` for the exact version) |
 | Create a dedicated instance (creds from `.env`) | `epoxy up --instance <plan>-epoxy --provider P [--protocol T] [--country C] [--city Ci]` |
 | Verify a dedicated instance after create | `epoxy status --instance <plan>-epoxy --json` |
-| Expose a joiner's service locally (requires epoxy 0.8.7+) | `epoxy up --instance <plan>-epoxy --publish 127.0.0.1:3000:3000` |
+| Expose a joiner's service locally (requires epoxy 0.8.7+; `--append-publish` for atomic shared-instance merges requires 0.8.8+) | `epoxy up --instance <plan>-epoxy --publish 127.0.0.1:3000:3000` (or `--append-publish` to union without replacing) |
 | List servers before anything exists | `epoxy servers --json [--provider P] [--protocol T]` |
 | Tear down when the plan container is removed | `epoxy down --instance <plan>-epoxy` |
 
