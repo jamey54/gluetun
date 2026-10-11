@@ -197,7 +197,26 @@ def test_instance_records_schema(monkeypatch):
         "control_server": {"port": 8123, "enabled": True},
         "consumers": ["plan-app"],
         "started_at": _STUB_STARTED,
+        "forwarded_ports": [],
     }
+
+
+def test_instance_records_report_forwarded_ports(monkeypatch):
+    """`ls --json` surfaces the stored forward set per instance."""
+    _stub_docker(None, monkeypatch)
+    (config.INSTANCES_DIR / "plan-a.json").parent.mkdir(parents=True, exist_ok=True)
+    (config.INSTANCES_DIR / "plan-a.json").write_text(
+        json.dumps(
+            {
+                "instance": "plan-a",
+                "control_port": 8123,
+                "env_file": None,
+                "forwarded_ports": ["127.0.0.1:3000:3000"],
+            }
+        )
+    )
+    record = next(r for r in discovery.instance_records() if r["instance"] == "plan-a")
+    assert record["forwarded_ports"] == ["127.0.0.1:3000:3000"]
 
 
 def test_selection_doc_schema():
@@ -308,6 +327,7 @@ def _record() -> dict[str, object]:
         "control_server": {"port": 8123, "enabled": True},
         "consumers": ["plan-app"],
         "started_at": _STUB_STARTED,
+        "forwarded_ports": [],
     }
 
 

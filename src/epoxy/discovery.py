@@ -154,6 +154,13 @@ def instance_records() -> list[JsonDoc]:
         state = instance_state(name)
         port = _control_port(name)
         sel = _runtime_selection(name, port) if state in ("running", "starting") else None
+        registry = read_registry(name)
+        raw_forwards = registry.get("forwarded_ports") if registry else None
+        forwarded = (
+            [spec for spec in raw_forwards if isinstance(spec, str)]
+            if isinstance(raw_forwards, list)
+            else []
+        )
         records.append(
             {
                 "instance": name,
@@ -163,6 +170,7 @@ def instance_records() -> list[JsonDoc]:
                 "control_server": control_server_doc(port, sel is not None),
                 "consumers": consumers_of(name),
                 "started_at": container_started_at(name) if state != "absent" else None,
+                "forwarded_ports": forwarded,
             }
         )
     return sorted(

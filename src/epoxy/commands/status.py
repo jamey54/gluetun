@@ -80,6 +80,7 @@ def _status_doc() -> JsonDoc:
         "leak": leak,
         "verified": verified,
         "last_error": last_error,
+        "forwarded_ports": list(inst.forwarded_ports),
     }
 
 
@@ -140,6 +141,9 @@ def _print_human_status(size: int, no_speedtest: bool) -> None:
             _kv("Port fwd", str(port))
     except control.ControlError:
         pass
+    forwards = current_instance().forwarded_ports
+    if forwards:
+        _kv("Forwarded", ", ".join(forwards))
 
     current, reachable = _common._runtime_selection_or_error()
     if current and current.provider:

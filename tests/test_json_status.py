@@ -92,6 +92,7 @@ def test_status_json_schema_running(monkeypatch):
         "leak",
         "verified",
         "last_error",
+        "forwarded_ports",
     }
     assert doc["instance"] == "epoxy"
     assert doc["container_name"] == "epoxy"
@@ -104,6 +105,26 @@ def test_status_json_schema_running(monkeypatch):
     assert doc["leak"] is False
     assert doc["verified"] is True
     assert doc["last_error"] is None
+    assert doc["forwarded_ports"] == []
+
+
+def test_status_json_reports_forwarded_ports(monkeypatch):
+    from epoxy import config
+
+    config.INSTANCES_DIR.mkdir(parents=True, exist_ok=True)
+    (config.INSTANCES_DIR / "epoxy.json").write_text(
+        json.dumps(
+            {
+                "instance": "epoxy",
+                "control_port": 8000,
+                "env_file": None,
+                "forwarded_ports": ["127.0.0.1:3000:3000"],
+            }
+        )
+    )
+    result = invoke_status(monkeypatch)
+    assert result.exit_code == 0
+    assert json.loads(result.output)["forwarded_ports"] == ["127.0.0.1:3000:3000"]
 
 
 def test_status_json_exit_1_on_leak(monkeypatch):

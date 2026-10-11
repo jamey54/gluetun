@@ -27,6 +27,7 @@ STATUS_FIELDS = (
     "leak",
     "verified",
     "last_error",
+    "forwarded_ports",
 )
 
 #: Fields of one ``ls --json`` record, in emission order (P3-13).
@@ -38,6 +39,7 @@ RECORD_FIELDS = (
     "control_server",
     "consumers",
     "started_at",
+    "forwarded_ports",
 )
 
 Verdict = Literal["ok", "leak", "unknown"]

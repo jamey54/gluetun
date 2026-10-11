@@ -1,5 +1,6 @@
 """Tests for the consolidated CLI surface: up/connect hot-swaps, status drift."""
 
+import json
 from subprocess import CompletedProcess
 from typing import Any
 
@@ -564,6 +565,27 @@ def test_status_shows_vpn_and_dns(monkeypatch):
     assert "Port fwd    5914" in result.output
     assert "Provider    surfshark" in result.output
     assert "Protocol    wireguard" in result.output
+
+
+def test_status_shows_forwarded_ports(monkeypatch):
+    from epoxy import config
+
+    config.INSTANCES_DIR.mkdir(parents=True, exist_ok=True)
+    (config.INSTANCES_DIR / "epoxy.json").write_text(
+        json.dumps(
+            {
+                "instance": "epoxy",
+                "control_port": 8000,
+                "env_file": None,
+                "forwarded_ports": ["127.0.0.1:3000:3000"],
+            }
+        )
+    )
+    monkeypatch.setattr(docker, "container_status", lambda: "running")
+    monkeypatch.setattr(_common, "_runtime_selection_or_error", lambda: (RUNNING, True))
+    result = run_cli(["status", "--no-speedtest"])
+    assert result.exit_code == 0
+    assert "Forwarded   127.0.0.1:3000:3000" in result.output
 
 
 def test_status_flags_running_country_mismatch(monkeypatch, verified):
