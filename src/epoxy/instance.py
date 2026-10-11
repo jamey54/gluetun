@@ -24,6 +24,7 @@ code a string.
 """
 
 import contextlib
+import errno
 import json
 import os
 import re
@@ -352,6 +353,39 @@ def _port_in_use(port: int) -> bool:
             return True
 
 
+def host_port_held(ip: str, port: int) -> bool:
+    """True only when (ip, port) is already bound (EADDRINUSE).
+
+    Anything else (e.g. an address this host does not have) is not a
+    conflict: compose remains the final arbiter.
+    """
+    family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind((ip, port))
+            return False
+        except OSError as exc:
+            return exc.errno == errno.EADDRINUSE
+
+
+def record_host_ports(record: JsonDoc | None) -> set[int]:
+    """Host ports a registry record claims (control + forwarded, defensive)."""
+    if not record:
+        return set()
+    claimed: set[int] = set()
+    port = record.get("control_port")
+    if isinstance(port, int):
+        claimed.add(port)
+    forwards = record.get("forwarded_ports")
+    if isinstance(forwards, list):
+        for spec in forwards:
+            if isinstance(spec, str):
+                host = spec_host_port(spec)
+                if host is not None:
+                    claimed.add(host)
+    return claimed
+
+
 def _claimed_host_ports() -> set[int]:
     """Host ports claimed by registry records (control ports + forwarded).
 
@@ -360,19 +394,7 @@ def _claimed_host_ports() -> set[int]:
     """
     claimed: set[int] = set()
     for name in list_registry():
-        record = read_registry(name)
-        if not record:
-            continue
-        port = record.get("control_port")
-        if isinstance(port, int):
-            claimed.add(port)
-        forwards = record.get("forwarded_ports")
-        if isinstance(forwards, list):
-            for spec in forwards:
-                if isinstance(spec, str):
-                    host = spec_host_port(spec)
-                    if host is not None:
-                        claimed.add(host)
+        claimed |= record_host_ports(read_registry(name))
     return claimed
 
 

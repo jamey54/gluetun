@@ -52,7 +52,7 @@ def read_registry(name: str) -> dict[str, object]:
 
 
 def test_up_non_default_instance_writes_compose_and_registry(compose_calls, cold, monkeypatch):
-    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda: 8123)
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
     result = run_cli(["up", "--instance", "plan-a", "--provider", "surfshark"])
     assert result.exit_code == 0
 
@@ -76,7 +76,7 @@ def test_up_non_default_instance_reuses_registered_port(compose_calls, cold, mon
     )
     monkeypatch.setattr(
         "epoxy.commands.up.allocate_free_port",
-        lambda: pytest.fail("must not allocate"),
+        lambda exclude=frozenset(): pytest.fail("must not allocate"),
     )
     result = run_cli(["up", "--instance", "plan-a", "--provider", "surfshark"])
     assert result.exit_code == 0
@@ -98,7 +98,7 @@ def test_up_renders_compose_inside_instance_context(compose_calls, cold, monkeyp
         "epoxy.instance.default_instance",
         lambda: pytest.fail("must not fall back to default_instance"),
     )
-    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda: 8123)
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
     result = run_cli(["up", "--instance", "plan-a", "--provider", "surfshark"])
     assert result.exit_code == 0
     body = (config.INSTANCES_DIR / "plan-a" / "compose.yml").read_text()
@@ -109,7 +109,7 @@ def test_up_renders_compose_inside_instance_context(compose_calls, cold, monkeyp
 def test_up_ctl_port_wins_over_allocation(compose_calls, cold, monkeypatch):
     monkeypatch.setattr(
         "epoxy.commands.up.allocate_free_port",
-        lambda: pytest.fail("must not allocate"),
+        lambda exclude=frozenset(): pytest.fail("must not allocate"),
     )
     result = run_cli(
         ["up", "--instance", "plan-b", "--ctl-port", "8300", "--provider", "surfshark"]
@@ -149,7 +149,7 @@ def test_up_epoxy_ctl_port_non_numeric_is_a_usage_error(value, compose_calls, co
 def test_up_empty_epoxy_ctl_port_means_unset(compose_calls, cold, monkeypatch):
     """An empty value is absent, not invalid: it falls through to allocation."""
     monkeypatch.setenv("EPOXY_CTL_PORT", "")
-    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda: 8123)
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
     result = run_cli(["up", "--provider", "surfshark"])
     assert result.exit_code == 0
     assert read_registry("epoxy")["control_port"] == 8123
@@ -415,3 +415,183 @@ def test_pyproject_version_matches_version_module():
     tomllib = pytest.importorskip("tomllib")
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
     assert pyproject["project"]["version"] == __version__
+
+
+# ---------------------------------------------------------------------------
+# up --publish / --no-publish
+# ---------------------------------------------------------------------------
+
+
+def _seed_registry(name, control_port=8123, forwarded=()):
+    config.INSTANCES_DIR.mkdir(parents=True, exist_ok=True)
+    (config.INSTANCES_DIR / f"{name}.json").write_text(
+        json.dumps(
+            {
+                "instance": name,
+                "control_port": control_port,
+                "env_file": None,
+                "forwarded_ports": list(forwarded),
+            }
+        )
+    )
+
+
+def _running(monkeypatch, sel=None):
+    monkeypatch.setattr(docker, "container_running", lambda name=None: True)
+    monkeypatch.setattr(
+        _common,
+        "effective_selection",
+        lambda: sel or Selection("surfshark", "wireguard", "Germany"),
+    )
+    monkeypatch.setattr("epoxy.commands.up.host_port_held", lambda ip, port: False)
+
+
+def test_up_publish_stores_and_renders_forwards(compose_calls, cold, monkeypatch):
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
+    result = run_cli(["up", "--instance", "plan-a", "--provider", "surfshark", "--publish", "3000"])
+    assert result.exit_code == 0
+    assert "Forwarded ports: 127.0.0.1:3000:3000." in result.output
+    body = (config.INSTANCES_DIR / "plan-a" / "compose.yml").read_text()
+    assert '"127.0.0.1:3000:3000/tcp"' in body
+    assert "127.0.0.1:8123:8000/tcp" in body
+    assert read_registry("plan-a")["forwarded_ports"] == ["127.0.0.1:3000:3000"]
+
+
+def test_up_publish_replaces_and_sorts(compose_calls, cold, monkeypatch):
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
+    result = run_cli(
+        [
+            "up",
+            "--instance",
+            "plan-a",
+            "--provider",
+            "surfshark",
+            "--publish",
+            "0.0.0.0:9001:80",
+            "--publish",
+            "3000",
+            "--publish",
+            "3000",
+        ]
+    )
+    assert result.exit_code == 0
+    assert read_registry("plan-a")["forwarded_ports"] == [
+        "0.0.0.0:9001:80",
+        "127.0.0.1:3000:3000",
+    ]
+
+
+def test_up_publish_malformed_is_usage_error(compose_calls, cold):
+    result = run_cli(["up", "--instance", "plan-a", "--publish", "abc"])
+    assert result.exit_code == 2
+    assert "Invalid --publish spec 'abc'" in result.output
+    assert compose_calls == []
+
+
+def test_up_publish_and_no_publish_conflict(compose_calls, cold):
+    result = run_cli(["up", "--instance", "plan-a", "--publish", "3000", "--no-publish"])
+    assert result.exit_code == 2
+    assert "--publish and --no-publish" in result.output
+    assert compose_calls == []
+
+
+def test_up_publish_conflicting_host_ports_is_usage_error(compose_calls, cold):
+    result = run_cli(["up", "--instance", "plan-a", "--publish", "3000", "--publish", "3000:4000"])
+    assert result.exit_code == 2
+    assert "Conflicting --publish specs for host port 3000" in result.output
+    assert compose_calls == []
+
+
+def test_up_publish_control_port_collision_is_usage_error(compose_calls, cold, monkeypatch):
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
+    result = run_cli(
+        ["up", "--instance", "plan-a", "--provider", "surfshark", "--publish", "8123:80"]
+    )
+    assert result.exit_code == 2
+    assert "collides with the instance's control port" in result.output
+    assert compose_calls == []
+
+
+def test_up_publish_claimed_by_other_instance_fails_before_compose(
+    compose_calls, cold, monkeypatch
+):
+    _seed_registry("other", control_port=9000, forwarded=("127.0.0.1:3000:3000",))
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
+    result = run_cli(["up", "--instance", "plan-a", "--provider", "surfshark", "--publish", "3000"])
+    assert result.exit_code == 1
+    assert "already claimed by instance 'other'" in result.output
+    assert compose_calls == []  # never half-started
+
+
+def test_up_publish_live_port_taken_fails_before_compose(compose_calls, cold, monkeypatch):
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
+    monkeypatch.setattr("epoxy.commands.up.host_port_held", lambda ip, port: True)
+    result = run_cli(["up", "--instance", "plan-a", "--provider", "surfshark", "--publish", "3000"])
+    assert result.exit_code == 1
+    assert "Host port 3000 is already in use." in result.output
+    assert compose_calls == []
+
+
+def test_up_publish_unchanged_on_running_is_plain_verify(compose_calls, monkeypatch):
+    _seed_registry("plan-a", forwarded=("127.0.0.1:3000:3000",))
+    _running(monkeypatch)
+    result = run_cli(["up", "--instance", "plan-a", "--publish", "3000"])
+    assert result.exit_code == 0
+    assert compose_calls == []  # no recreate
+    assert "recreating" not in result.output
+
+
+def test_up_publish_changed_on_running_recreates_loudly(compose_calls, monkeypatch):
+    _seed_registry("plan-a")
+    _running(monkeypatch)
+    result = run_cli(["up", "--instance", "plan-a", "--publish", "3000"])
+    assert result.exit_code == 0
+    assert "Published ports changed — recreating container" in result.output
+    assert compose_calls and compose_calls[0][:3] == ("up", "-d", "--force-recreate")
+    assert read_registry("plan-a")["forwarded_ports"] == ["127.0.0.1:3000:3000"]
+
+
+def test_up_publish_changed_exempts_own_live_ports(compose_calls, monkeypatch):
+    """Ports the old container already holds are freed by recreate, not conflicts."""
+    _seed_registry("plan-a")
+    _running(monkeypatch)
+    monkeypatch.setattr(docker, "published_host_ports", lambda name=None: {3000})
+    monkeypatch.setattr("epoxy.commands.up.host_port_held", lambda ip, port: True)
+    result = run_cli(["up", "--instance", "plan-a", "--publish", "3000"])
+    assert result.exit_code == 0
+    assert compose_calls and compose_calls[0][:3] == ("up", "-d", "--force-recreate")
+
+
+def test_up_no_publish_clears_on_recreate(compose_calls, monkeypatch):
+    _seed_registry("plan-a", forwarded=("127.0.0.1:3000:3000",))
+    _running(monkeypatch)
+    result = run_cli(["up", "--instance", "plan-a", "--no-publish"])
+    assert result.exit_code == 0
+    assert "recreating" in result.output
+    assert read_registry("plan-a")["forwarded_ports"] == []
+    body = (config.INSTANCES_DIR / "plan-a" / "compose.yml").read_text()
+    assert "3000:3000" not in body
+
+
+def test_up_omit_publish_preserves_stored_set(compose_calls, monkeypatch):
+    _seed_registry("plan-a", forwarded=("127.0.0.1:3000:3000",))
+    _running(monkeypatch)
+    result = run_cli(["up", "--instance", "plan-a"])
+    assert result.exit_code == 0
+    assert compose_calls == []
+    assert read_registry("plan-a")["forwarded_ports"] == ["127.0.0.1:3000:3000"]
+
+
+def test_up_publish_fresh_excludes_forwards_from_allocation(compose_calls, cold, monkeypatch):
+    seen: set[int] = set()
+
+    def fake_allocate(exclude=frozenset()):
+        seen.update(exclude)
+        return 8123
+
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", fake_allocate)
+    result = run_cli(
+        ["up", "--instance", "plan-a", "--provider", "surfshark", "--publish", "9000:3000"]
+    )
+    assert result.exit_code == 0
+    assert seen == {9000}

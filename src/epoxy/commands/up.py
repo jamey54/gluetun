@@ -19,15 +19,75 @@ from epoxy.commands._common import (
 )
 from epoxy.config import COMPOSE_TIMEOUT_S, CTL_PORT_ENV_VAR, PULL_TIMEOUT_S
 from epoxy.instance import (
+    Instance,
     allocate_free_port,
     ensure_compose_file,
+    host_port_held,
     image_ref,
     instance_context,
+    list_registry,
     read_registry,
+    record_host_ports,
     sync_registry,
     write_registry,
 )
 from epoxy.providers import get_provider_env, resolve_provider
+from epoxy.publish import canonical_spec, parse_publish_spec, spec_host_port
+
+
+def _resolve_forwarded(
+    inst: Instance, publish_specs: tuple[str, ...], no_publish: bool
+) -> tuple[str, ...]:
+    """Effective forwarded set: flags replace, --no-publish clears, omit preserves.
+
+    Malformed specs and conflicting host ports are usage errors (exit 2).
+    """
+    if publish_specs and no_publish:
+        raise click.UsageError("--publish and --no-publish are mutually exclusive.")
+    if no_publish:
+        return ()
+    if not publish_specs:
+        return tuple(inst.forwarded_ports)
+    by_host: dict[int, str] = {}
+    for spec in publish_specs:
+        bind_ip, host_port, container_port = parse_publish_spec(spec)
+        canonical = canonical_spec(bind_ip, host_port, container_port)
+        if host_port in by_host and by_host[host_port] != canonical:
+            raise click.UsageError(f"Conflicting --publish specs for host port {host_port}.")
+        by_host[host_port] = canonical
+    return tuple(sorted(by_host.values()))
+
+
+def _check_forward_collisions(inst: Instance, effective: tuple[str, ...]) -> None:
+    """Refuse an unusable forward set before compose touches anything.
+
+    Control-port clashes are usage errors (exit 2); ports claimed by another
+    instance or held live are operational failures (exit 1) naming the port.
+    The instance's own live ports are exempt: recreating frees them.
+    """
+    if not effective:
+        return
+    hosts = [host for spec in effective if (host := spec_host_port(spec)) is not None]
+    if inst.control_port in hosts:
+        raise click.UsageError(
+            f"--publish host port {inst.control_port} collides with the instance's control port."
+        )
+    for name in sorted(list_registry()):
+        if name == inst.name:
+            continue
+        clash = sorted(set(hosts) & record_host_ports(read_registry(name)))
+        if clash:
+            ports = ", ".join(str(port) for port in clash)
+            raise click.ClickException(
+                f"Host port(s) {ports} already claimed by instance '{name}'."
+            )
+    live = docker.published_host_ports(name=inst.name)
+    for spec in effective:
+        bind_ip, host_port, _ = parse_publish_spec(spec)  # validated above
+        if host_port in live:
+            continue
+        if host_port_held(bind_ip, host_port):
+            raise click.ClickException(f"Host port {host_port} is already in use.")
 
 
 @click.command()
@@ -44,6 +104,14 @@ from epoxy.providers import get_provider_env, resolve_provider
 @click.option("--pull", is_flag=True, help="Pull the pinned container image first")
 @click.option("--recreate", is_flag=True, help="Recreate the container from compose/.env config")
 @click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
+@click.option(
+    "--publish",
+    "publish_specs",
+    multiple=True,
+    help="Forward a host port into the instance ([IP:]HOST:CONTAINER, "
+    "repeatable; replaces the stored set on recreate)",
+)
+@click.option("--no-publish", is_flag=True, help="Clear all forwarded ports (applied on recreate)")
 def up(
     instance: str | None,
     ctl_port: int | None,
@@ -55,6 +123,8 @@ def up(
     pull: bool,
     recreate: bool,
     no_speedtest: bool,
+    publish_specs: tuple[str, ...],
+    no_publish: bool,
 ) -> None:
     """Start the VPN; apply any requested location via hot-swap.
 
@@ -62,6 +132,12 @@ def up(
     Selections are runtime-only: --pull/--recreate revert to compose/.env config.
     """
     inst = _resolve_for_command(instance, ctl_port, env_file)
+    # Forwarded ports are instance config: explicit flags replace the stored
+    # set, --no-publish clears it, omitting both preserves it.
+    effective_forwards = _resolve_forwarded(inst, publish_specs, no_publish)
+    previous_forwards = set(inst.forwarded_ports)
+    if set(effective_forwards) != previous_forwards:
+        inst = replace(inst, forwarded_ports=effective_forwards)
     # A fresh, registry-less instance gets a free host port allocated and
     # persisted, so its registry survives restarts without ever colliding with
     # another instance. A registry-less but running instance instead adopts its
@@ -76,7 +152,16 @@ def up(
             if published is not None and published != inst.control_port:
                 inst = replace(inst, control_port=published)
         else:
-            inst = replace(inst, control_port=allocate_free_port())
+            inst = replace(
+                inst,
+                control_port=allocate_free_port(
+                    exclude=frozenset(
+                        host
+                        for spec in effective_forwards
+                        if (host := spec_host_port(spec)) is not None
+                    )
+                ),
+            )
     with instance_context(inst):
         # Rendering resolves image_ref() through the active instance's env, so
         # the compose file must be written inside the context: outside of it
@@ -91,6 +176,15 @@ def up(
         if pull:
             docker.run("docker", "pull", image_ref(), timeout=PULL_TIMEOUT_S)
             recreate = True
+        if set(effective_forwards) != previous_forwards and was_running and not recreate:
+            # Ports only take effect at (re)create, like --pull: converge with
+            # a loud echo rather than a two-step dance. Runtime selection
+            # reverts to baked config, hence the warning.
+            recreate = True
+            click.echo(
+                "Published ports changed — recreating container "
+                "(runtime selection reverts to baked config)."
+            )
         if recreate:
             created = True
 
@@ -119,6 +213,7 @@ def up(
             name, proto = resolve_provider(name, protocol, current.protocol if current else None)
             overrides = get_provider_env(name, proto)
             _log_env(overrides)
+            _check_forward_collisions(inst, effective_forwards)
             docker.compose(
                 "up",
                 "-d",
@@ -128,6 +223,8 @@ def up(
             )
             write_registry(inst)
             click.echo(f"VPN {'recreated' if recreate else 'started'} ({name}/{proto}).")
+            if effective_forwards:
+                click.echo(f"Forwarded ports: {', '.join(effective_forwards)}.")
             # Runtime state now equals env config: the fresh container runs the
             # baked pair (provider, protocol, and any baked country/city), so
             # requests resolve against that instead of an unfilled Selection.

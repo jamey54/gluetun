@@ -14,10 +14,12 @@ from epoxy.instance import (
     allocate_free_port,
     compose_file_for,
     ensure_compose_file,
+    host_port_held,
     image_ref,
     list_registry,
     parse_instance_name,
     read_registry,
+    record_host_ports,
     render_compose,
     required_name,
     resolve_instance,
@@ -208,3 +210,25 @@ def test_allocate_free_port_skips_registry_claims_and_excludes(monkeypatch):
     assert allocate_free_port(exclude=frozenset({8000})) == 8001
     # Stopped instances keep their ports: 8002/8003 are registry-claimed.
     assert allocate_free_port(exclude=frozenset({8000, 8001})) == 8004
+
+
+def test_record_host_ports_reads_control_and_forwards():
+    record: dict[str, object] = {
+        "instance": "a",
+        "control_port": 8123,
+        "env_file": None,
+        "forwarded_ports": ["127.0.0.1:3000:3000", "junk"],
+    }
+    assert record_host_ports(record) == {8123, 3000}
+    assert record_host_ports(None) == set()
+    assert record_host_ports({"instance": "a"}) == set()
+
+
+def test_host_port_held_reports_live_bind():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        assert host_port_held("127.0.0.1", port) is True
+    finally:
+        sock.close()
