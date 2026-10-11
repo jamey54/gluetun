@@ -69,7 +69,7 @@ You only need to set credentials for providers you actually use.
 | Command | Description |
 |---------|-------------|
 | `epoxy --version` | Print the exact version (e.g. `epoxy 0.5.0`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
-| `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest]` | Start (or verify) the VPN; apply any requested location via hot-swap |
+| `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest] [--publish SPEC] [--no-publish]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `epoxy connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
 | `epoxy servers [--provider --protocol] [--json]` | List servers for credentialed providers — no instance, no container needed (table or single-line JSON) |
 | `epoxy status [--instance NAME] [--all] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
@@ -202,7 +202,7 @@ epoxy 0.3 runs several independent VPN containers side by side, each its own *in
 - a control server published on `127.0.0.1:<port>`;
 - a lockfile `~/.cache/epoxy/locks/<instance>.lock` (swaps/benches serialize per instance only; different instances run concurrently);
 - an optional `--env-file` replacing `.env` for that instance;
-- a registry record `~/.cache/epoxy/instances/<instance>.json` (control port + env file).
+- a registry record `~/.cache/epoxy/instances/<instance>.json` (control port, env file, forwarded ports).
 
 Every command requires an instance. Resolution order: `--instance NAME` → interactive choice → error. On an interactive terminal with no `--instance`, commands that target an instance (`status`, `down`, `connect`, `logs`, `bench`, `dns`, `update`, `up`) ask you to pick one: the sole known instance is used automatically, otherwise a picker lists them by name and state — filter it by typing, and the column-filter keys (`Tab`, `←`/`→`) are inert there, since only the name is a real column. Non-interactive runs (pipes, scripts) keep the usage error — automation must always name its instance explicitly. `epoxy ls` always lists everything and never prompts.
 
@@ -225,6 +225,20 @@ Each instance publishes the control server on `127.0.0.1:<port>`. **Every** comm
 Each instance's generated compose file declares exactly one service, always named `epoxy`, while `container_name` is set to the instance name. The two are different things: `docker compose` verbs take the *service* name, while `docker` container operations take the container name. So a container named `plan-a` is reached as service `epoxy` under project `epoxy-plan-a`. epoxy passes the service name to compose and the container name to docker; the instance name is only ever used for the latter.
 
 All control-server traffic (hot-swap `GET/PUT /v1/vpn/settings`, DNS, updater, status) targets the instance's own published port — never a hardcoded `8000`.
+
+### Forwarded ports
+
+App containers join an instance via `network_mode: container:<instance>`, and Docker ignores port mappings on such joiners — so a web UI inside the app is unreachable from the host even though its egress exits via the tunnel. Forwarded ports close that gap: extra host ports published on the VPN container itself, reaching into the shared network namespace.
+
+```bash
+epoxy up --instance myapp-vpn --provider surfshark --publish 3000:3000 --no-speedtest
+# app joins via network_mode: container:myapp-vpn → UI on http://localhost:3000
+```
+
+- Syntax is docker short syntax `[IP:]HOST:CONTAINER`, repeatable; a bare `PORT` means `127.0.0.1:PORT:PORT` — LAN exposure is always explicit, matching the control-port precedent.
+- The set is instance config, stored in the registry record: specifying `--publish` replaces it, `--no-publish` clears it, omitting both preserves it (`--publish` with `--no-publish` together is a usage error). It survives `--recreate`, reboot, and down/up cycles.
+- Ports only take effect at (re)create: on a running container a changed set recreates it with a loud echo (runtime selection reverts to baked config, as with any recreate); an unchanged set is a plain verify.
+- Validation: malformed specs, duplicate host ports, and control-port collisions are usage errors (exit `2`); a host port claimed by another instance or held live fails before compose runs (exit `1`), never leaving a half-started container. Fresh control-port allocation skips registry-claimed and requested-forward ports.
 
 ### Per-instance env files
 
@@ -309,7 +323,7 @@ Resolution order for every command: `--instance NAME` → interactive choice (TT
 | `1`  | scripted error / VPN failed / leak (verdict in JSON under `--json`) |
 | `2`  | usage error |
 
-Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` when the connection cannot be verified; `epoxy status --json` returns `1` when `leak` is `true` or the control server is unreachable while the container is running/restarting; it returns `0` for any other emitted JSON (probe health failures are reported in `last_error`, never as a leak). `epoxy up` applies the same rule as `status`: a container that is *running* but whose control server cannot be reached returns `1`, whether or not a location was requested — it waits up to ~15s first, so a container that is merely mid-restart is not failed, but one that never answers is a friendly `Cannot read runtime settings` error rather than a success epoxy could not act on. `epoxy bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run. `epoxy servers` returns `1` (friendly message, no JSON) when no servers are found or the filters match nothing.
+Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` when the connection cannot be verified; `epoxy status --json` returns `1` when `leak` is `true` or the control server is unreachable while the container is running/restarting; it returns `0` for any other emitted JSON (probe health failures are reported in `last_error`, never as a leak). `epoxy up` applies the same rule as `status`: a container that is *running* but whose control server cannot be reached returns `1`, whether or not a location was requested — it waits up to ~15s first, so a container that is merely mid-restart is not failed, but one that never answers is a friendly `Cannot read runtime settings` error rather than a success epoxy could not act on. `epoxy bench` returns `1` (friendly message, no traceback) when the control server becomes unreachable mid-run. `epoxy servers` returns `1` (friendly message, no JSON) when no servers are found or the filters match nothing. `epoxy up --publish` returns `2` for malformed specs, conflicting specs, or control-port collisions, and `1` — before compose runs — when a host port is claimed by another instance or held live.
 
 ### The calls dockerstrator makes
 
@@ -320,6 +334,7 @@ Other non-zero codes are unspecified. `epoxy up` and `epoxy connect` return `1` 
 | Capability probe (is epoxy 0.3+ implemented?) | `epoxy ls --json` (or `epoxy --version` for the exact version) |
 | Create a dedicated instance (creds from `.env`) | `epoxy up --instance <plan>-epoxy --provider P [--protocol T] [--country C] [--city Ci]` |
 | Verify a dedicated instance after create | `epoxy status --instance <plan>-epoxy --json` |
+| Expose a joiner's service locally (requires epoxy 0.8.7+) | `epoxy up --instance <plan>-epoxy --publish 127.0.0.1:3000:3000` |
 | List servers before anything exists | `epoxy servers --json [--provider P] [--protocol T]` |
 | Tear down when the plan container is removed | `epoxy down --instance <plan>-epoxy` |
 
@@ -341,7 +356,8 @@ dockerstrator rule: if `epoxy ls --json` exits non-zero or reports an unknown fl
   "exit_ip": { "ip": "1.2.3.4", "country": "Japan" },
   "leak": false,
   "verified": true,
-  "last_error": null
+  "last_error": null,
+  "forwarded_ports": ["127.0.0.1:3000:3000"]
 }
 ```
 
@@ -353,6 +369,7 @@ dockerstrator rule: if `epoxy ls --json` exits non-zero or reports an unknown fl
 - `leak` — `true` when the instance is `running` and the observed exit IP equals the host's bare public IP; `false` otherwise. A probe that reads no exit IP at all is probe health, not a leak: it is reported in `last_error` with `leak: false`.
 - `verified` — `true` when the exit verifiably differs from the host's bare IP (or matches the requested country while the bare IP is unknown); `false` otherwise, including when the tunnel is merely stopped or the probe failed.
 - `last_error` — human-readable failure detail (e.g. control server unreachable), else `null`.
+- `forwarded_ports` — the stored forward set in canonical `IP:HOST:CONTAINER` form (`[]` when none).
 
 ### `epoxy ls --json`
 
@@ -366,13 +383,14 @@ dockerstrator rule: if `epoxy ls --json` exits non-zero or reports an unknown fl
       "selection": { "provider": "surfshark", "protocol": "wireguard", "country": "Japan", "city": "Tokyo" },
       "control_server": { "port": 8000, "enabled": true },
       "consumers": ["firefox-app", "squiz-dev"],
-      "started_at": "2026-09-19T09:00:00.123456789Z"
+      "started_at": "2026-09-19T09:00:00.123456789Z",
+      "forwarded_ports": ["127.0.0.1:3000:3000"]
     }
   ]
 }
 ```
 
-- `instances` — one entry per known instance; `state` uses the same values as `status --json`. `selection` and `control_server` are `null` when unknown. `consumers` lists containers sharing the instance's network (`NetworkMode == container:<container_name>`; containers attached by name or by the instance's container ID are matched). `started_at` is the instance's last start time (Docker `State.StartedAt`, RFC3339), or `null` when the instance is absent or has never started; records are ordered by `started_at`, oldest first, unknown last.
+- `instances` — one entry per known instance; `state` uses the same values as `status --json`. `selection` and `control_server` are `null` when unknown. `consumers` lists containers sharing the instance's network (`NetworkMode == container:<container_name>`; containers attached by name or by the instance's container ID are matched). `started_at` is the instance's last start time (Docker `State.StartedAt`, RFC3339), or `null` when the instance is absent or has never started; records are ordered by `started_at`, oldest first, unknown last. `forwarded_ports` is the same stored set as in `status --json` (`[]` when none).
 
 ### `epoxy servers --json`
 
