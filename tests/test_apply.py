@@ -81,6 +81,21 @@ def test_swap_lock_released_after_context():
         os.close(fd)
 
 
+def test_try_swap_lock_acquires_when_free():
+    with apply.try_swap_lock() as acquired:
+        assert acquired is True
+    fd = os.open(config.LOCKS_DIR / "epoxy.lock", os.O_CREAT | os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # released: must not raise
+    finally:
+        os.close(fd)
+
+
+def test_try_swap_lock_reports_busy_instead_of_blocking():
+    with apply.swap_lock(), apply.try_swap_lock() as acquired:
+        assert acquired is False
+
+
 # ---------------------------------------------------------------------------
 # apply_location / restore_settings
 # ---------------------------------------------------------------------------

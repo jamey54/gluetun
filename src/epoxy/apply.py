@@ -8,6 +8,7 @@ picked). Selections live at runtime only: recreating the container reverts to
 the compose/.env configuration.
 """
 
+import errno
 import fcntl
 import os
 from collections.abc import Iterator
@@ -74,6 +75,32 @@ def swap_lock() -> Iterator[None]:
         yield
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+@contextmanager
+def try_swap_lock() -> Iterator[bool]:
+    """Non-blocking :func:`swap_lock`: yields True when acquired, False when busy.
+
+    For paths that must not stall behind a long holder (e.g. a bench): callers
+    turn False into a friendly retry-later error instead of blocking.
+    """
+    lock_file = config.LOCKS_DIR / (current_instance().name + ".lock")
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, LOCK_FILE_PERMS)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                yield False
+                return
+            raise
+        try:
+            yield True
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
         os.close(fd)
 
 
