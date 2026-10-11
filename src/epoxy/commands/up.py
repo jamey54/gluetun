@@ -6,7 +6,7 @@ from dataclasses import replace
 import click
 
 from epoxy import control, docker, ipinfo
-from epoxy.apply import Selection
+from epoxy.apply import Selection, try_swap_lock
 from epoxy.commands import _common
 from epoxy.commands._common import (
     PROTOCOL,
@@ -27,43 +27,132 @@ from epoxy.instance import (
     instance_context,
     list_registry,
     read_registry,
-    record_host_ports,
     sync_registry,
     write_registry,
 )
+from epoxy.listeners import describe_holder
 from epoxy.providers import get_provider_env, resolve_provider
 from epoxy.publish import canonical_spec, parse_publish_spec, spec_host_port
 
 
-def _resolve_forwarded(
-    inst: Instance, publish_specs: tuple[str, ...], no_publish: bool
-) -> tuple[str, ...]:
-    """Effective forwarded set: flags replace, --no-publish clears, omit preserves.
-
-    Malformed specs and conflicting host ports are usage errors (exit 2).
-    """
-    if publish_specs and no_publish:
-        raise click.UsageError("--publish and --no-publish are mutually exclusive.")
-    if no_publish:
-        return ()
-    if not publish_specs:
-        return tuple(inst.forwarded_ports)
+def _parse_specs(specs: tuple[str, ...], flag: str = "--publish") -> dict[int, str]:
+    """Canonical specs by host port; conflicting duplicates are usage errors."""
     by_host: dict[int, str] = {}
-    for spec in publish_specs:
+    for spec in specs:
         bind_ip, host_port, container_port = parse_publish_spec(spec)
         canonical = canonical_spec(bind_ip, host_port, container_port)
         if host_port in by_host and by_host[host_port] != canonical:
-            raise click.UsageError(f"Conflicting --publish specs for host port {host_port}.")
+            raise click.UsageError(f"Conflicting {flag} specs for host port {host_port}.")
         by_host[host_port] = canonical
-    return tuple(sorted(by_host.values()))
+    return by_host
+
+
+def _stored_forwarded(name: str) -> tuple[str, ...]:
+    """Stored forward set; empty for missing records or legacy/garbled ones."""
+    record = read_registry(name)
+    raw = record.get("forwarded_ports") if record else None
+    if isinstance(raw, list) and all(isinstance(spec, str) for spec in raw):
+        return tuple(raw)
+    return ()
+
+
+def _resolve_forwarded(
+    inst: Instance,
+    publish_specs: tuple[str, ...],
+    append_specs: tuple[str, ...],
+    no_publish: bool,
+) -> tuple[str, ...]:
+    """Effective forwarded set.
+
+    ``--publish`` replaces, ``--append-publish`` unions, ``--no-publish``
+    clears, omitting all three preserves. Only one mode per invocation;
+    malformed specs and conflicting host ports are usage errors (exit 2).
+    """
+    modes = bool(publish_specs) + bool(append_specs) + bool(no_publish)
+    if modes > 1:
+        if publish_specs and no_publish:
+            raise click.UsageError("--publish and --no-publish are mutually exclusive.")
+        raise click.UsageError(
+            "--append-publish cannot be combined with --publish or --no-publish."
+        )
+    if no_publish:
+        return ()
+    if append_specs:
+        merged = _parse_specs(append_specs, "--append-publish")
+        for spec in inst.forwarded_ports:
+            host = spec_host_port(spec)
+            if host is None:
+                continue
+            if host in merged and merged[host] != spec:
+                raise click.UsageError(
+                    f"Host port {host} is already forwarded to {spec}; "
+                    "use --publish to change or replace it."
+                )
+            merged.setdefault(host, spec)
+        return tuple(sorted(merged.values()))
+    if not publish_specs:
+        return tuple(inst.forwarded_ports)
+    return tuple(sorted(_parse_specs(publish_specs).values()))
+
+
+def _locked_create(
+    inst: Instance,
+    overrides: dict[str, str],
+    recreate: bool,
+    announce_publish_recreate: bool,
+    publish_specs: tuple[str, ...],
+    append_specs: tuple[str, ...],
+    no_publish: bool,
+    name: str,
+    proto: str,
+) -> tuple[Instance, tuple[str, ...]]:
+    """Merge, validate, render, compose, and persist under the instance lock.
+
+    Re-reading the registry inside the lock is what makes concurrent appends
+    union instead of clobber. Fails fast with a retry-later error when another
+    operation holds the lock (a bench can hold it for minutes); the slow tail
+    (control-server wait, speedtest) stays outside the lock.
+    """
+    with try_swap_lock() as acquired:
+        if not acquired:
+            raise click.ClickException(
+                f"Instance '{inst.name}' is busy (another operation holds it); retry later."
+            )
+        if announce_publish_recreate:
+            click.echo(
+                "Published ports changed — recreating container "
+                "(runtime selection reverts to baked config)."
+            )
+        merged = _resolve_forwarded(
+            replace(inst, forwarded_ports=_stored_forwarded(inst.name)),
+            publish_specs,
+            append_specs,
+            no_publish,
+        )
+        merged_inst = replace(inst, forwarded_ports=merged)
+        _check_forward_collisions(merged_inst, merged)
+        ensure_compose_file(merged_inst)
+        docker.compose(
+            "up",
+            "-d",
+            *(("--force-recreate",) if recreate else ()),
+            env_overrides=overrides,
+            timeout=COMPOSE_TIMEOUT_S,
+        )
+        write_registry(merged_inst)
+        click.echo(f"VPN {'recreated' if recreate else 'started'} ({name}/{proto}).")
+        if merged:
+            click.echo(f"Forwarded ports: {', '.join(merged)}.")
+        return merged_inst, merged
 
 
 def _check_forward_collisions(inst: Instance, effective: tuple[str, ...]) -> None:
     """Refuse an unusable forward set before compose touches anything.
 
     Control-port clashes are usage errors (exit 2); ports claimed by another
-    instance or held live are operational failures (exit 1) naming the port.
-    The instance's own live ports are exempt: recreating frees them.
+    instance or held live are operational failures (exit 1) naming the port
+    and, when known, its holder. The instance's own live ports are exempt:
+    recreating frees them.
     """
     if not effective:
         return
@@ -75,19 +164,41 @@ def _check_forward_collisions(inst: Instance, effective: tuple[str, ...]) -> Non
     for name in sorted(list_registry()):
         if name == inst.name:
             continue
-        clash = sorted(set(hosts) & record_host_ports(read_registry(name)))
-        if clash:
-            ports = ", ".join(str(port) for port in clash)
-            raise click.ClickException(
-                f"Host port(s) {ports} already claimed by instance '{name}'."
-            )
+        record = read_registry(name)
+        if not record:
+            continue
+        held = _record_claims(name, record, hosts)
+        if held:
+            raise click.ClickException("; ".join(held))
     live = docker.published_host_ports(name=inst.name)
     for spec in effective:
         bind_ip, host_port, _ = parse_publish_spec(spec)  # validated above
         if host_port in live:
             continue
         if host_port_held(bind_ip, host_port):
-            raise click.ClickException(f"Host port {host_port} is already in use.")
+            detail = describe_holder(host_port, bind_ip)
+            suffix = f" (held by {detail})" if detail else ""
+            raise click.ClickException(f"Host port {host_port} is already in use{suffix}.")
+
+
+def _record_claims(name: str, record: dict[str, object], hosts: list[int]) -> list[str]:
+    """Per-port conflict descriptions against one registry record."""
+    claims: list[str] = []
+    port = record.get("control_port")
+    forwards = record.get("forwarded_ports")
+    forward_hosts: set[int] = set()
+    if isinstance(forwards, list):
+        forward_hosts = {
+            host
+            for spec in forwards
+            if isinstance(spec, str) and (host := spec_host_port(spec)) is not None
+        }
+    for host in sorted(set(hosts)):
+        if isinstance(port, int) and host == port:
+            claims.append(f"Host port {host} is the control port of instance '{name}'.")
+        elif host in forward_hosts:
+            claims.append(f"Host port {host} is already forwarded by instance '{name}'.")
+    return claims
 
 
 @click.command()
@@ -111,6 +222,13 @@ def _check_forward_collisions(inst: Instance, effective: tuple[str, ...]) -> Non
     help="Forward a host port into the instance ([IP:]HOST:CONTAINER, "
     "repeatable; replaces the stored set on recreate)",
 )
+@click.option(
+    "--append-publish",
+    "append_specs",
+    multiple=True,
+    help="Forward a host port without replacing the stored set "
+    "([IP:]HOST:CONTAINER, repeatable; unioned atomically under the instance lock)",
+)
 @click.option("--no-publish", is_flag=True, help="Clear all forwarded ports (applied on recreate)")
 def up(
     instance: str | None,
@@ -124,6 +242,7 @@ def up(
     recreate: bool,
     no_speedtest: bool,
     publish_specs: tuple[str, ...],
+    append_specs: tuple[str, ...],
     no_publish: bool,
 ) -> None:
     """Start the VPN; apply any requested location via hot-swap.
@@ -132,9 +251,11 @@ def up(
     Selections are runtime-only: --pull/--recreate revert to compose/.env config.
     """
     inst = _resolve_for_command(instance, ctl_port, env_file)
-    # Forwarded ports are instance config: explicit flags replace the stored
-    # set, --no-publish clears it, omitting both preserves it.
-    effective_forwards = _resolve_forwarded(inst, publish_specs, no_publish)
+    # Forwarded ports are instance config: --publish replaces the stored set,
+    # --append-publish unions into it, --no-publish clears it, omitting all
+    # three preserves it.
+    publish_flags = bool(publish_specs or append_specs or no_publish)
+    effective_forwards = _resolve_forwarded(inst, publish_specs, append_specs, no_publish)
     previous_forwards = set(inst.forwarded_ports)
     if set(effective_forwards) != previous_forwards:
         inst = replace(inst, forwarded_ports=effective_forwards)
@@ -176,15 +297,19 @@ def up(
         if pull:
             docker.run("docker", "pull", image_ref(), timeout=PULL_TIMEOUT_S)
             recreate = True
-        if set(effective_forwards) != previous_forwards and was_running and not recreate:
+        announce_publish_recreate = False
+        if (
+            publish_flags
+            and set(effective_forwards) != previous_forwards
+            and was_running
+            and not recreate
+        ):
             # Ports only take effect at (re)create, like --pull: converge with
             # a loud echo rather than a two-step dance. Runtime selection
-            # reverts to baked config, hence the warning.
+            # reverts to baked config, hence the warning. The echo itself
+            # fires inside the locked section below, after acquiring the lock.
             recreate = True
-            click.echo(
-                "Published ports changed — recreating container "
-                "(runtime selection reverts to baked config)."
-            )
+            announce_publish_recreate = True
         if recreate:
             created = True
 
@@ -213,18 +338,31 @@ def up(
             name, proto = resolve_provider(name, protocol, current.protocol if current else None)
             overrides = get_provider_env(name, proto)
             _log_env(overrides)
-            _check_forward_collisions(inst, effective_forwards)
-            docker.compose(
-                "up",
-                "-d",
-                *(("--force-recreate",) if recreate else ()),
-                env_overrides=overrides,
-                timeout=COMPOSE_TIMEOUT_S,
-            )
-            write_registry(inst)
-            click.echo(f"VPN {'recreated' if recreate else 'started'} ({name}/{proto}).")
-            if effective_forwards:
-                click.echo(f"Forwarded ports: {', '.join(effective_forwards)}.")
+            if publish_flags:
+                inst, effective_forwards = _locked_create(
+                    inst,
+                    overrides,
+                    recreate,
+                    announce_publish_recreate,
+                    publish_specs,
+                    append_specs,
+                    no_publish,
+                    name,
+                    proto,
+                )
+            else:
+                _check_forward_collisions(inst, effective_forwards)
+                docker.compose(
+                    "up",
+                    "-d",
+                    *(("--force-recreate",) if recreate else ()),
+                    env_overrides=overrides,
+                    timeout=COMPOSE_TIMEOUT_S,
+                )
+                write_registry(inst)
+                click.echo(f"VPN {'recreated' if recreate else 'started'} ({name}/{proto}).")
+                if effective_forwards:
+                    click.echo(f"Forwarded ports: {', '.join(effective_forwards)}.")
             # Runtime state now equals env config: the fresh container runs the
             # baked pair (provider, protocol, and any baked country/city), so
             # requests resolve against that instead of an unfilled Selection.

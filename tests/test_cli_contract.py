@@ -53,6 +53,7 @@ EXPECTED_FLAGS = {
     "servers": {"--json", "--protocol", "--provider"},
     "status": {"--all", "--instance", "--json", "--no-speedtest", "-s", "--size"},
     "up": {
+        "--append-publish",
         "--city",
         "--country",
         "--ctl-port",
@@ -85,6 +86,7 @@ PINNED_SPELLINGS = {
     ("install", "--rc-file"),
     ("up", "--ctl-port"),
     ("up", "--env-file"),
+    ("up", "--append-publish"),
     ("up", "--no-publish"),
     ("up", "--publish"),
     ("bench", "--max-candidates"),

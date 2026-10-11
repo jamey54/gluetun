@@ -519,8 +519,126 @@ def test_up_publish_claimed_by_other_instance_fails_before_compose(
     monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
     result = run_cli(["up", "--instance", "plan-a", "--provider", "surfshark", "--publish", "3000"])
     assert result.exit_code == 1
-    assert "already claimed by instance 'other'" in result.output
+    assert "Host port 3000 is already forwarded by instance 'other'." in result.output
     assert compose_calls == []  # never half-started
+
+
+def test_up_publish_control_port_of_other_names_provenance(compose_calls, cold, monkeypatch):
+    _seed_registry("other", control_port=3000)
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
+    result = run_cli(["up", "--instance", "plan-a", "--provider", "surfshark", "--publish", "3000"])
+    assert result.exit_code == 1
+    assert "Host port 3000 is the control port of instance 'other'." in result.output
+    assert compose_calls == []
+
+
+def test_up_publish_live_holder_is_named(compose_calls, cold, monkeypatch):
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
+    monkeypatch.setattr("epoxy.commands.up.host_port_held", lambda ip, port: True)
+    monkeypatch.setattr(
+        "epoxy.commands.up.describe_holder", lambda port, ip: "process 4242 (docker-proxy)"
+    )
+    result = run_cli(["up", "--instance", "plan-a", "--provider", "surfshark", "--publish", "3000"])
+    assert result.exit_code == 1
+    assert "Host port 3000 is already in use (held by process 4242 (docker-proxy))." in (
+        result.output
+    )
+    assert compose_calls == []
+
+
+def test_up_append_publish_unions_with_stored(compose_calls, monkeypatch):
+    _seed_registry("plan-a", forwarded=("127.0.0.1:3000:3000",))
+    _running(monkeypatch)
+    result = run_cli(["up", "--instance", "plan-a", "--append-publish", "4000"])
+    assert result.exit_code == 0
+    assert "Published ports changed — recreating container" in result.output
+    assert read_registry("plan-a")["forwarded_ports"] == [
+        "127.0.0.1:3000:3000",
+        "127.0.0.1:4000:4000",
+    ]
+    body = (config.INSTANCES_DIR / "plan-a" / "compose.yml").read_text()
+    assert '"127.0.0.1:4000:4000/tcp"' in body
+
+
+def test_up_append_publish_rereads_under_lock(compose_calls, cold, monkeypatch):
+    """A concurrent append landing after resolve is still unioned, not lost."""
+    from contextlib import contextmanager
+
+    from epoxy import apply as apply_module
+
+    _seed_registry("plan-a", forwarded=("127.0.0.1:3000:3000",))
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
+    monkeypatch.setattr("epoxy.commands.up.host_port_held", lambda ip, port: False)
+
+    @contextmanager
+    def poisoning_lock():
+        record = json.loads((config.INSTANCES_DIR / "plan-a.json").read_text())
+        record["forwarded_ports"].append("127.0.0.1:5000:5000")
+        (config.INSTANCES_DIR / "plan-a.json").write_text(json.dumps(record))
+        with apply_module.try_swap_lock() as acquired:
+            yield acquired
+
+    monkeypatch.setattr("epoxy.commands.up.try_swap_lock", poisoning_lock)
+    result = run_cli(
+        ["up", "--instance", "plan-a", "--provider", "surfshark", "--append-publish", "4000"]
+    )
+    assert result.exit_code == 0
+    assert read_registry("plan-a")["forwarded_ports"] == [
+        "127.0.0.1:3000:3000",
+        "127.0.0.1:4000:4000",
+        "127.0.0.1:5000:5000",
+    ]
+
+
+def test_up_append_publish_noop_is_plain_verify(compose_calls, monkeypatch):
+    _seed_registry("plan-a", forwarded=("127.0.0.1:3000:3000",))
+    _running(monkeypatch)
+    result = run_cli(["up", "--instance", "plan-a", "--append-publish", "3000"])
+    assert result.exit_code == 0
+    assert compose_calls == []
+    assert "recreating" not in result.output
+
+
+def test_up_append_publish_conflict_names_stored_mapping(compose_calls, monkeypatch):
+    _seed_registry("plan-a", forwarded=("127.0.0.1:3000:80",))
+    _running(monkeypatch)
+    result = run_cli(["up", "--instance", "plan-a", "--append-publish", "3000:3000"])
+    assert result.exit_code == 2
+    assert (
+        "Host port 3000 is already forwarded to 127.0.0.1:3000:80; "
+        "use --publish to change or replace it." in result.output
+    )
+    assert compose_calls == []
+
+
+def test_up_append_publish_rejects_combined_modes(compose_calls, cold):
+    result = run_cli(
+        ["up", "--instance", "plan-a", "--append-publish", "3000", "--publish", "4000"]
+    )
+    assert result.exit_code == 2
+    assert "--append-publish cannot be combined with --publish or --no-publish." in (result.output)
+    assert compose_calls == []
+
+
+def test_up_publish_busy_fails_fast_without_compose(compose_calls, cold, monkeypatch):
+    import fcntl
+    import os
+
+    monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
+    lock_file = config.LOCKS_DIR / "plan-a.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_file, os.O_CREAT | os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        result = run_cli(
+            ["up", "--instance", "plan-a", "--provider", "surfshark", "--publish", "3000"]
+        )
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    assert result.exit_code == 1
+    assert "Instance 'plan-a' is busy (another operation holds it); retry later." in (result.output)
+    assert compose_calls == []
 
 
 def test_up_publish_live_port_taken_fails_before_compose(compose_calls, cold, monkeypatch):
