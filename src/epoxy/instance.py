@@ -48,6 +48,7 @@ from epoxy.config import (
     JsonDoc,
     read_env_file,
 )
+from epoxy.publish import spec_host_port
 
 INSTANCE_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 # Inclusive range of host ports auto-allocation may hand out.
@@ -90,6 +91,7 @@ class Instance:
     env_file: Path | None
     env: dict[str, str]
     compose_file: str
+    forwarded_ports: tuple[str, ...] = ()
 
     @property
     def container(self) -> str:
@@ -134,6 +136,7 @@ def _registry_record(instance: Instance) -> JsonDoc:
         "instance": instance.name,
         "control_port": instance.control_port,
         "env_file": str(instance.env_file) if instance.env_file else None,
+        "forwarded_ports": list(instance.forwarded_ports),
     }
 
 
@@ -237,12 +240,13 @@ def compose_services(compose_body: str) -> set[str]:
     }
 
 
-def render_compose(name: str, port: int) -> str:
-    """Per-instance compose file: bundled epoxy.yml with image, name, port swapped.
+def render_compose(name: str, port: int, forwarded: tuple[str, ...] = ()) -> str:
+    """Per-instance compose file: bundled epoxy.yml with image, name, ports swapped.
 
     The project is pinned by docker.compose via ``-p``, so the file only pins
-    the image ref, the container name (== instance) and the host control port.
-    The service name stays ``COMPOSE_SERVICE`` for every instance.
+    the image ref, the container name (== instance), the host control port, and
+    any forwarded ports. The service name stays ``COMPOSE_SERVICE`` for every
+    instance.
     """
     body = resource_files("epoxy").joinpath("epoxy.yml").read_text()
     if compose_services(body) != {COMPOSE_SERVICE}:
@@ -252,11 +256,9 @@ def render_compose(name: str, port: int) -> str:
         )
     body = body.replace("image: EPOXY_IMAGE_REF", f"image: {image_ref()}")
     body = body.replace(f"container_name: {COMPOSE_SERVICE}", f"container_name: {name}")
-    body = re.sub(
-        rf"127\.0\.0\.1:\d+:{CONTAINER_CTL_PORT}/tcp",
-        f"127.0.0.1:{port}:{CONTAINER_CTL_PORT}/tcp",
-        body,
-    )
+    port_lines = [f'      - "127.0.0.1:{port}:{CONTAINER_CTL_PORT}/tcp"']
+    port_lines.extend(f'      - "{spec}/tcp"' for spec in forwarded)
+    body = body.replace('      - "127.0.0.1:8000:8000/tcp"', "\n".join(port_lines))
     return body
 
 
@@ -264,7 +266,7 @@ def ensure_compose_file(instance: Instance) -> None:
     """Write the generated per-instance compose file."""
     path = Path(instance.compose_file)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_compose(instance.name, instance.control_port))
+    path.write_text(render_compose(instance.name, instance.control_port, instance.forwarded_ports))
 
 
 # ---------------------------------------------------------------------------
@@ -297,12 +299,19 @@ def resolve_instance(
     if control_port is None:
         control_port = BASE_CONTROL_PORT
 
+    forwarded: tuple[str, ...] = ()
+    if registry:
+        raw_forwards = registry.get("forwarded_ports")
+        if isinstance(raw_forwards, list) and all(isinstance(s, str) for s in raw_forwards):
+            forwarded = tuple(raw_forwards)
+
     return Instance(
         name=name,
         control_port=control_port,
         env_file=env_file_path,
         env=build_env(env_file_path),
         compose_file=compose_file,
+        forwarded_ports=forwarded,
     )
 
 
@@ -343,10 +352,39 @@ def _port_in_use(port: int) -> bool:
             return True
 
 
-def allocate_free_port() -> int:
-    """First free host port in the allocation range, or a scripted error."""
+def _claimed_host_ports() -> set[int]:
+    """Host ports claimed by registry records (control ports + forwarded).
+
+    A stopped instance gets its ports back on restart, so allocation must not
+    hand them to a newcomer even though nothing is live-bound right now.
+    """
+    claimed: set[int] = set()
+    for name in list_registry():
+        record = read_registry(name)
+        if not record:
+            continue
+        port = record.get("control_port")
+        if isinstance(port, int):
+            claimed.add(port)
+        forwards = record.get("forwarded_ports")
+        if isinstance(forwards, list):
+            for spec in forwards:
+                if isinstance(spec, str):
+                    host = spec_host_port(spec)
+                    if host is not None:
+                        claimed.add(host)
+    return claimed
+
+
+def allocate_free_port(exclude: frozenset[int] = frozenset()) -> int:
+    """First free host port in the allocation range, or a scripted error.
+
+    Skips live-bound ports, registry-claimed ports, and the explicit
+    ``exclude`` set (e.g. requested forwards not stored anywhere yet).
+    """
+    claimed = _claimed_host_ports() | set(exclude)
     for port in PORT_RANGE:
-        if not _port_in_use(port):
+        if port not in claimed and not _port_in_use(port):
             return port
     raise SystemExit(
         f"No free control port in [{PORT_RANGE.start}, {PORT_RANGE.stop - 1}]; "

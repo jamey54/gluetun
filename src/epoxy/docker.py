@@ -200,6 +200,31 @@ def container_control_port(name: str | None = None) -> int | None:
         return None
 
 
+def published_host_ports(name: str | None = None) -> set[int]:
+    """Every host port the container publishes (any container port), or empty.
+
+    Used to exempt the instance's own live ports from pre-create collision
+    probes: recreating frees them, so they are not conflicts.
+    """
+    out = inspect_container("{{json .NetworkSettings.Ports}}", name=name)
+    if not out:
+        return set()
+    try:
+        ports = json.loads(out)
+    except json.JSONDecodeError:
+        return set()
+    if not isinstance(ports, dict):
+        return set()
+    published: set[int] = set()
+    for bindings in ports.values():
+        for binding in bindings or []:
+            try:
+                published.add(int(binding.get("HostPort")))
+            except (TypeError, ValueError, AttributeError):
+                continue
+    return published
+
+
 def compose(
     *args: str,
     env_overrides: dict[str, str] | None = None,

@@ -246,6 +246,24 @@ def test_container_control_port_reads_the_container_port(monkeypatch):
     assert docker.container_control_port("epoxy") == 8123
 
 
+def test_published_host_ports_collects_every_mapping(monkeypatch):
+    published = (
+        '{"8000/tcp": [{"HostPort": "8123"}],'
+        '"3000/tcp": [{"HostPort": "3000"}],'
+        '"8111/tcp": [{"HostPort": "0"}, {"HostPort": "8112"}],'
+        '"unmapped/tcp": null, "empty/tcp": []}'
+    )
+    monkeypatch.setattr(docker, "inspect_container", lambda fmt, name=None: published)
+    assert docker.published_host_ports("epoxy") == {8123, 3000, 0, 8112}
+
+
+def test_published_host_ports_absent_or_garbled_is_empty(monkeypatch):
+    monkeypatch.setattr(docker, "inspect_container", lambda fmt, name=None: None)
+    assert docker.published_host_ports("epoxy") == set()
+    monkeypatch.setattr(docker, "inspect_container", lambda fmt, name=None: "nope{")
+    assert docker.published_host_ports("epoxy") == set()
+
+
 # ---------------------------------------------------------------------------
 # run_streamed
 # ---------------------------------------------------------------------------

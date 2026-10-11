@@ -60,7 +60,12 @@ def test_up_non_default_instance_writes_compose_and_registry(compose_calls, cold
     body = generated.read_text()
     assert "container_name: plan-a" in body
     assert "127.0.0.1:8123:8000/tcp" in body
-    assert read_registry("plan-a") == {"instance": "plan-a", "control_port": 8123, "env_file": None}
+    assert read_registry("plan-a") == {
+        "instance": "plan-a",
+        "control_port": 8123,
+        "env_file": None,
+        "forwarded_ports": [],
+    }
     assert compose_calls == [("up", "-d")]
 
 

@@ -2,6 +2,7 @@
 
 import json
 import socket
+from dataclasses import replace
 
 import click
 import pytest
@@ -83,6 +84,7 @@ def test_registry_round_trip():
         "instance": "plan-a",
         "control_port": 8123,
         "env_file": None,
+        "forwarded_ports": [],
     }
     assert list_registry() == ["plan-a"]
 
@@ -165,4 +167,44 @@ def test_render_compose_publishes_the_host_port_only():
 def test_registry_json_matches_documented_schema():
     write_registry(resolve_instance("plan-a", control_port=8123, env_file="/tmp/e"))
     data = json.loads((config.INSTANCES_DIR / "plan-a.json").read_text())
-    assert set(data) == {"instance", "control_port", "env_file"}
+    assert set(data) == {"instance", "control_port", "env_file", "forwarded_ports"}
+
+
+def test_render_compose_appends_forwarded_ports():
+    body = render_compose("plan-a", 8123, ("127.0.0.1:3000:3000", "0.0.0.0:8080:80"))
+    assert "127.0.0.1:8123:8000/tcp" in body
+    assert '"127.0.0.1:3000:3000/tcp"' in body
+    assert '"0.0.0.0:8080:80/tcp"' in body
+
+
+def test_registry_round_trip_keeps_forwarded_ports():
+    inst = resolve_instance("plan-a", control_port=8123)
+    write_registry(replace(inst, forwarded_ports=("127.0.0.1:3000:3000",)))
+    assert resolve_instance("plan-a").forwarded_ports == ("127.0.0.1:3000:3000",)
+
+
+def test_resolve_instance_without_forwarded_key_defaults_empty():
+    (config.INSTANCES_DIR / "plan-a.json").parent.mkdir(parents=True, exist_ok=True)
+    (config.INSTANCES_DIR / "plan-a.json").write_text(
+        json.dumps({"instance": "plan-a", "control_port": 8123, "env_file": None})
+    )
+    assert resolve_instance("plan-a").forwarded_ports == ()
+
+
+def test_allocate_free_port_skips_registry_claims_and_excludes(monkeypatch):
+    (config.INSTANCES_DIR / "claimed.json").parent.mkdir(parents=True, exist_ok=True)
+    (config.INSTANCES_DIR / "claimed.json").write_text(
+        json.dumps(
+            {
+                "instance": "claimed",
+                "control_port": 8002,
+                "env_file": None,
+                "forwarded_ports": ["127.0.0.1:8003:3000"],
+            }
+        )
+    )
+    monkeypatch.setattr("epoxy.instance._port_in_use", lambda p: False)
+    assert allocate_free_port() == 8000
+    assert allocate_free_port(exclude=frozenset({8000})) == 8001
+    # Stopped instances keep their ports: 8002/8003 are registry-claimed.
+    assert allocate_free_port(exclude=frozenset({8000, 8001})) == 8004
