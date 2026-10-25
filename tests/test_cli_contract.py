@@ -50,6 +50,7 @@ EXPECTED_FLAGS = {
     "logs": {"--all", "--follow", "-f", "--instance", "-n", "--tail"},
     "ls": {"--instance", "--json"},
     "rm": {"--all", "--force", "-f", "--instance"},
+    "rotate": {"--all", "--clear", "--country", "--instance", "--save", "--speedtest"},
     "servers": {"--json", "--protocol", "--provider"},
     "status": {"--all", "--instance", "--json", "--no-speedtest", "-s", "--size"},
     "up": {
@@ -117,13 +118,25 @@ def test_pinned_spellings_exist(name, flag):
 
 def test_instance_is_the_first_option_of_every_command():
     """--instance is documented as first; click lists options in reverse order."""
-    for name in ("status", "down", "rm", "logs", "dns", "update", "up", "connect", "bench", "ls"):
+    for name in (
+        "status",
+        "down",
+        "rm",
+        "logs",
+        "dns",
+        "update",
+        "up",
+        "connect",
+        "bench",
+        "rotate",
+        "ls",
+    ):
         assert cli.main.commands[name].params[0].name == "instance", name
 
 
 def test_commands_that_fan_out_accept_all_and_others_do_not():
     """`up`/`connect`/`bench` deliberately take no --all (README, "Acting on all")."""
-    for name in ("status", "down", "rm", "logs", "dns", "update"):
+    for name in ("status", "down", "rm", "logs", "dns", "update", "rotate"):
         assert "--all" in flags_of(name), name
     for name in ("up", "connect", "bench", "ls", "install", "servers"):
         assert "--all" not in flags_of(name), name

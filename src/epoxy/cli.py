@@ -12,6 +12,7 @@ from epoxy.commands import (
     logs,
     ls,
     rm,
+    rotate,
     servers,
     status,
     up,
@@ -31,6 +32,7 @@ def main(debug: bool) -> None:
 
 main.add_command(up.up)
 main.add_command(connect.connect)
+main.add_command(rotate.rotate)
 main.add_command(down.down)
 main.add_command(rm.rm)
 main.add_command(logs.logs)

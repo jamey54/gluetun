@@ -11,7 +11,7 @@ from epoxy.commands import _common
 from epoxy.instance import current_instance
 from tests.harness import run_cli
 
-ALL_COMMANDS = ["status", "down", "rm", "logs", "dns", "update"]
+ALL_COMMANDS = ["status", "down", "rm", "logs", "dns", "update", "rotate"]
 SINGLE_ONLY = ["up", "connect", "bench", "ls", "servers"]
 
 
@@ -46,6 +46,7 @@ def test_instance_and_all_conflict():
         ["logs"],
         ["dns"],
         ["update"],
+        ["rotate"],
     ]
     for args in cases:
         result = run_cli([*args, "--instance", "a", "--all"])

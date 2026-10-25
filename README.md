@@ -71,6 +71,7 @@ You only need to set credentials for providers you actually use.
 | `epoxy --version` | Print the exact version (e.g. `epoxy 0.5.0`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
 | `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest] [--publish SPEC] [--append-publish SPEC] [--no-publish]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `epoxy connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
+| `epoxy rotate [--instance NAME] [--all] [--country NAME] [--save] [--clear] [--speedtest]` | Change the exit IP via a random location, keeping the provider/protocol; `--save` keeps the pick as instance config |
 | `epoxy servers [--provider --protocol] [--json]` | List servers for credentialed providers — no instance, no container needed (table or single-line JSON) |
 | `epoxy status [--instance NAME] [--all] [-s SIZE] [--no-speedtest] [--json]` | Container state, effective selection, public IP, speed test |
 | `epoxy ls [--instance NAME] [--json]` | List instances (registry + backed `epoxy-*` projects): state, selection, control port, consumers, start time |
@@ -86,7 +87,7 @@ You only need to set credentials for providers you actually use.
 
 ### up vs connect
 
-- **`up`** ensures the container exists and runs. On a stopped container it creates it via compose (requires `--provider`; credentials come from `.env`). Once running, explicit flags are applied as a runtime hot-swap — including cross-provider/protocol switches. With no flags on an already-running container it only verifies the tunnel. A running container whose control server never answers is an error (exit 1), not a silent success.
+- **`up`** ensures the container exists and runs. On a stopped container it creates it via compose (requires `--provider`, or a saved selection from `epoxy rotate --save`; credentials come from `.env`). Once running, explicit flags are applied as a runtime hot-swap — including cross-provider/protocol switches. With no flags on an already-running container it only verifies the tunnel. A running container whose control server never answers is an error (exit 1), not a silent success.
 - **`connect`** requires a running container and *only* hot-swaps. With no arguments it opens the interactive picker; `--list` prints the servers table instead.
 - **`up --pull`** pulls the pinned image and recreates the container. **`up --recreate`** recreates from compose/`.env` config without pulling — the escape hatch if a swap ever leaves the tunnel stuck.
 
@@ -140,11 +141,30 @@ epoxy up --provider protonvpn --protocol openvpn
 
 The selected row's provider *and* protocol are hot-swapped immediately.
 
+## Rotating exit IPs
+
+`epoxy rotate` changes an instance's exit IP quickly: it keeps the running provider/protocol pair and hot-swaps to a random country/city from the cached server list. The current location is excluded and, with `--all`, each instance prefers a distinct one; every swap is verified like any other (the exit IP must change) and retries up to three locations before failing with the last reason.
+
+```bash
+epoxy rotate                      # random location, runtime only
+epoxy rotate --country Japan      # random location in one country
+epoxy rotate --all                # every running instance, distinct picks
+epoxy rotate --save               # also persist the pick as instance config
+epoxy rotate --clear              # forget a saved pick, no rotation
+epoxy rotate --speedtest          # measure throughput after a successful swap
+```
+
+- Rotation never changes provider or protocol — use `epoxy connect` for that.
+- The speed test is skipped by default; `rotate` is the fast "new IP now" path. Pass `--speedtest` to measure each new tunnel.
+- `--all` fans out like `status --all`: instances must be running, failures are per instance (`<name>: <error>`), and the run exits `1` when any failed.
+- `--save` stores the winning location in the instance's registry record — *not* `.env`, which stays secrets-only. It applies on the next create/recreate (`up --pull`, `up --recreate`) and overrides a location baked via the env file; an explicit `--country`/`--city` on `up`/`connect` still wins for that invocation. A saved selection also lets `epoxy up` start a stopped instance without `--provider`.
+- `--save` needs an existing registry record (a container epoxy created). `--clear` drops the saved location and is mutually exclusive with `--save`, `--country`, and `--speedtest`.
+
 ## Runtime selections and drift
 
-Selections made through the control server live at **runtime only** — `.env` stays secrets-only. Consequences:
+Selections made through the control server live at **runtime only** — `.env` stays secrets-only. `epoxy rotate --save` is the explicit way to make one survive recreation. Consequences:
 
-- A hot-swapped location survives container restarts (`restart: always`) but is lost when the container is recreated (`epoxy up --pull`, `epoxy up --recreate`) or removed (`epoxy down`); recreation reverts to whatever the compose file interpolates from `.env`.
+- A hot-swapped location survives container restarts (`restart: always`) but is lost when the container is recreated (`epoxy up --pull`, `epoxy up --recreate`) or removed (`epoxy down`); recreation reverts to whatever the compose file interpolates from `.env` — unless a [saved selection](#rotating-exit-ips) is present, which is baked instead.
 - `epoxy status` shows the effective (runtime) selection; when it differs from the selection baked into the container's env at create time, `epoxy status --json` reports `"drift": true`.
 - A fresh `epoxy up --country/--city` starts the container first and applies the location via hot-swap, waiting up to ~15s for the just-started control server; a server that never comes up is a friendly `Could not switch to ...` error (exit 1), never a traceback.
 
@@ -192,7 +212,7 @@ Notes:
 
 - Candidates default to every credentialed provider/protocol; use `--provider`, `--protocol`, or `--country` to narrow, or `-n/--max-candidates` to cap the ones entering the latency stage.
 - Parallel mode (`-c > 1`) is limited by the credentials your provider permits: if a provider caps simultaneous sessions, some candidates will simply be reported as failures (`no public IP`) while the rest keep benching — it won't abort the run. Temporary containers inherit the resolved instance env (including `--env-file`), snapshotted before the run, so no exported variables are needed.
-- Bench state is applied at runtime only — recreating the container (see [Runtime selections and drift](#runtime-selections-and-drift)) reverts to the env-file selection.
+- Bench state is applied at runtime only — recreating the container (see [Runtime selections and drift](#runtime-selections-and-drift)) reverts to baked config (the env-file selection, or a saved selection).
 
 ## Instances
 
@@ -204,7 +224,7 @@ epoxy 0.3 runs several independent VPN containers side by side, each its own *in
 - an optional `--env-file` replacing `.env` for that instance;
 - a registry record `~/.cache/epoxy/instances/<instance>.json` (control port, env file, forwarded ports).
 
-Every command requires an instance. Resolution order: `--instance NAME` → interactive choice → error. On an interactive terminal with no `--instance`, commands that target an instance (`status`, `down`, `connect`, `logs`, `bench`, `dns`, `update`, `up`) ask you to pick one: the sole known instance is used automatically, otherwise a picker lists them by name and state — filter it by typing, and the column-filter keys (`Tab`, `←`/`→`) are inert there, since only the name is a real column. Non-interactive runs (pipes, scripts) keep the usage error — automation must always name its instance explicitly. `epoxy ls` always lists everything and never prompts.
+Every command requires an instance. Resolution order: `--instance NAME` → interactive choice → error. On an interactive terminal with no `--instance`, commands that target an instance (`status`, `down`, `connect`, `rotate`, `logs`, `bench`, `dns`, `update`, `up`) ask you to pick one: the sole known instance is used automatically, otherwise a picker lists them by name and state — filter it by typing, and the column-filter keys (`Tab`, `←`/`→`) are inert there, since only the name is a real column. Non-interactive runs (pipes, scripts) keep the usage error — automation must always name its instance explicitly. `epoxy ls` always lists everything and never prompts.
 
 Container names are **exact matches only**: epoxy never touches a container other than the one named after the instance, so a shared container owned by another tool is never matched.
 
@@ -257,7 +277,7 @@ epoxy    running  8000     surfshark/wireguard → Germany         firefox-app  
 
 ### Acting on all instances
 
-`status`, `down`, `rm`, `logs`, `dns`, and `update` accept `--all` to act on every known instance (alphabetical) instead of one:
+`status`, `down`, `rm`, `logs`, `dns`, `update`, and `rotate` accept `--all` to act on every known instance (alphabetical) instead of one:
 
 ```text
 $ epoxy status --all --no-speedtest
@@ -276,6 +296,7 @@ Rules:
 - `status --all --json` emits an `{"instances": [...]}` envelope (one status document per instance, same schema as `status --json`); it exits `1` when any instance trips the single-instance exit-1 rules.
 - `logs --all` prints a `== <name> ==` header per instance; `--follow` cannot be combined with `--all` (exit `2`).
 - `rm --all` applies the consumer guard per instance: shared instances are skipped (reported, exit `1`) unless `--force` is passed.
+- `rotate --all` gives each instance its own random location when the pool allows; running instances are rotated, stopped ones are reported and skipped.
 
 ## Configuration
 
@@ -300,11 +321,11 @@ A provider/protocol pair only appears in listings and can only be started when a
 | ProtonVPN | WireGuard | `PROTONVPN_WIREGUARD_PRIVATE_KEY`, `PROTONVPN_WIREGUARD_ADDRESSES` (always `10.2.0.2/32`) | both |
 | ProtonVPN | OpenVPN | `PROTONVPN_OPENVPN_USER`, `PROTONVPN_OPENVPN_PASSWORD` | both |
 
-`HTTP_CONTROL_SERVER_API_KEY` (any random string) is **required** — it authenticates the container's HTTP control server, which the CLI exposes on `127.0.0.1:<port>` only (per instance, see [Instances](#instances)). The commands that mutate or select the runtime config (`up`, `connect`, `bench`) refuse to run without it; read-only commands (`status`, `logs`, `ls`, `dns`, `update`, `down`) don't gate on it.
+`HTTP_CONTROL_SERVER_API_KEY` (any random string) is **required** — it authenticates the container's HTTP control server, which the CLI exposes on `127.0.0.1:<port>` only (per instance, see [Instances](#instances)). The commands that mutate or select the runtime config (`up`, `connect`, `bench`, `rotate`) refuse to run without it; read-only commands (`status`, `logs`, `ls`, `dns`, `update`, `down`) don't gate on it.
 
 ### Set automatically
 
-These are managed by the CLI at container creation time — never define them yourself: `VPN_SERVICE_PROVIDER`, `VPN_TYPE`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `OPENVPN_USER`, `OPENVPN_PASSWORD` (mapped from your provider credentials). A location may be baked via `.env` `SERVER_COUNTRIES`/`SERVER_CITIES` (the compose template interpolates them); after creation, all *runtime* selection changes happen through the control server, and `epoxy up` verifies a fresh start — or a `--recreate` — against the baked location when present.
+These are managed by the CLI at container creation time — never define them yourself: `VPN_SERVICE_PROVIDER`, `VPN_TYPE`, `WIREGUARD_PRIVATE_KEY`, `WIREGUARD_ADDRESSES`, `OPENVPN_USER`, `OPENVPN_PASSWORD` (mapped from your provider credentials). A location may be baked via `.env` `SERVER_COUNTRIES`/`SERVER_CITIES` (the compose template interpolates them); after creation, all *runtime* selection changes happen through the control server, and `epoxy up` verifies a fresh start — or a `--recreate` — against the baked location when present. A selection saved with `epoxy rotate --save` lives in the registry record instead, overrides the env-file location at create/recreate, and is removed with `rotate --clear`.
 
 ## Consumer API (dockerstrator)
 

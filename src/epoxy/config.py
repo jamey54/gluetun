@@ -102,6 +102,11 @@ DOWNLOAD_TIMEOUT_S = 120
 LATENCY_PORT = 443
 LATENCY_TIMEOUT_S = 2.0
 
+# --- Rotate --------------------------------------------------------------
+
+# Locations tried per instance before reporting that the exit IP would not move.
+ROTATE_ATTEMPTS = 3
+
 # --- Bench ---------------------------------------------------------------
 
 DEFAULT_SCAN_SIZE_MB = 10

@@ -243,6 +243,19 @@ def for_each_instance(
         raise SystemExit(1)
 
 
+def speed_test(size: int = DEFAULT_SIZE_MB) -> None:
+    """Download through the tunnel and report the throughput (never fails the command)."""
+    click.echo("Running speed test...")
+    # The bar draws itself on a terminal and is a no-op otherwise, so the
+    # messages below are the whole output for scripts and --json consumers.
+    with progress.download_bar(size, size * 1_000_000) as report:
+        result = speedtest.measure(size, on_progress=report)
+    if result is not None:
+        click.echo(speedtest.format_result(result))
+    else:
+        click.echo("Speed test failed.")
+
+
 def finish_connection(
     expected_country: str | None = None,
     run_speedtest: bool = True,
@@ -252,15 +265,7 @@ def finish_connection(
     """Show connection status and optionally run a speed test."""
     verified = ipinfo.print_ip_status(expected_country=expected_country, exclude_ips=exclude_ips)
     if verified and run_speedtest:
-        click.echo("Running speed test...")
-        # The bar draws itself on a terminal and is a no-op otherwise, so the
-        # messages below are the whole output for scripts and --json consumers.
-        with progress.download_bar(size, size * 1_000_000) as report:
-            result = speedtest.measure(size, on_progress=report)
-        if result is not None:
-            click.echo(speedtest.format_result(result))
-        else:
-            click.echo("Speed test failed.")
+        speed_test(size)
     elif run_speedtest:
         click.echo("Skipping speed test — connection not verified.")
     return verified
