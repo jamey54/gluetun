@@ -448,6 +448,7 @@ def _running(monkeypatch, sel=None):
 
 def test_up_publish_stores_and_renders_forwards(compose_calls, cold, monkeypatch):
     monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
+    monkeypatch.setattr("epoxy.commands.up.host_port_held", lambda ip, port: False)
     result = run_cli(["up", "--instance", "plan-a", "--provider", "surfshark", "--publish", "3000"])
     assert result.exit_code == 0
     assert "Forwarded ports: 127.0.0.1:3000:3000." in result.output
@@ -459,6 +460,7 @@ def test_up_publish_stores_and_renders_forwards(compose_calls, cold, monkeypatch
 
 def test_up_publish_replaces_and_sorts(compose_calls, cold, monkeypatch):
     monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
+    monkeypatch.setattr("epoxy.commands.up.host_port_held", lambda ip, port: False)
     result = run_cli(
         [
             "up",
@@ -644,6 +646,8 @@ def test_up_publish_busy_fails_fast_without_compose(compose_calls, cold, monkeyp
 def test_up_publish_live_port_taken_fails_before_compose(compose_calls, cold, monkeypatch):
     monkeypatch.setattr("epoxy.commands.up.allocate_free_port", lambda exclude=frozenset(): 8123)
     monkeypatch.setattr("epoxy.commands.up.host_port_held", lambda ip, port: True)
+    # Holder lookup reads the live /proc; stub it so the message is host-independent.
+    monkeypatch.setattr("epoxy.commands.up.describe_holder", lambda port, ip: None)
     result = run_cli(["up", "--instance", "plan-a", "--provider", "surfshark", "--publish", "3000"])
     assert result.exit_code == 1
     assert "Host port 3000 is already in use." in result.output
