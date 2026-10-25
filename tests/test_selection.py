@@ -40,6 +40,28 @@ def verified(monkeypatch):
 
 RUNNING = Selection("surfshark", "wireguard", "Germany")
 
+SAVED: dict[str, str | None] = {
+    "provider": "surfshark",
+    "protocol": "wireguard",
+    "country": "Japan",
+    "city": "Tokyo",
+}
+
+
+def seed_saved(name: str = "epoxy", selection: dict[str, str | None] | None = SAVED) -> None:
+    config.INSTANCES_DIR.mkdir(parents=True, exist_ok=True)
+    (config.INSTANCES_DIR / f"{name}.json").write_text(
+        json.dumps(
+            {
+                "instance": name,
+                "control_port": 8123,
+                "env_file": None,
+                "forwarded_ports": [],
+                "selection": selection,
+            }
+        )
+    )
+
 
 def _settings(sel: Selection) -> dict[str, object]:
     """Settings doc the control server would return for a Selection."""
@@ -242,6 +264,63 @@ def test_up_recreate_reverts_to_env_config(monkeypatch, compose_calls, swaps):
     args, _ = compose_calls[0]
     assert "--force-recreate" in args
     assert swaps == []
+
+
+def test_up_recreate_bakes_the_saved_selection(monkeypatch, compose_calls, swaps, verified):
+    """`rotate --save` is config: a recreate bakes it instead of the env file."""
+    seed_saved()
+    running(monkeypatch)
+    monkeypatch.setattr(
+        docker,
+        "container_env",
+        lambda: {
+            "VPN_SERVICE_PROVIDER": "surfshark",
+            "VPN_TYPE": "wireguard",
+            "SERVER_COUNTRIES": "Japan",
+            "SERVER_CITIES": "Tokyo",
+        },
+    )
+    result = run_cli(["up", "--recreate"])
+    assert result.exit_code == 0
+    _, overrides = compose_calls[0]
+    assert overrides["SERVER_COUNTRIES"] == "Japan"
+    assert overrides["SERVER_CITIES"] == "Tokyo"
+    assert swaps == []
+    assert verified[0]["expected_country"] == "Japan"
+
+
+def test_up_explicit_location_wins_over_the_saved_selection(monkeypatch, compose_calls, swaps):
+    seed_saved()
+    running(monkeypatch)
+    result = run_cli(["up", "--recreate", "--country", "Japan"])
+    assert result.exit_code == 0
+    _, overrides = compose_calls[0]
+    assert "SERVER_COUNTRIES" not in overrides  # explicit request stays a runtime swap
+    assert swaps == [Selection("surfshark", "wireguard", "Japan")]
+
+
+def test_up_starts_a_stopped_instance_from_the_saved_selection(
+    monkeypatch, compose_calls, swaps, verified
+):
+    seed_saved()
+    monkeypatch.setattr(docker, "container_running", lambda name=None: False)
+    monkeypatch.setattr(
+        docker,
+        "container_env",
+        lambda: {
+            "VPN_SERVICE_PROVIDER": "surfshark",
+            "VPN_TYPE": "wireguard",
+            "SERVER_COUNTRIES": "Japan",
+            "SERVER_CITIES": "Tokyo",
+        },
+    )
+    result = run_cli(["up"])
+    assert result.exit_code == 0
+    _, overrides = compose_calls[0]
+    assert overrides["VPN_SERVICE_PROVIDER"] == "surfshark"
+    assert overrides["SERVER_COUNTRIES"] == "Japan"
+    assert swaps == []
+    assert verified[0]["expected_country"] == "Japan"
 
 
 def test_up_recreate_verifies_baked_country(monkeypatch, compose_calls, swaps, verified):

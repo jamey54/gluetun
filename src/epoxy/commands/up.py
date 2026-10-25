@@ -33,6 +33,7 @@ from epoxy.instance import (
 from epoxy.listeners import describe_holder
 from epoxy.providers import get_provider_env, resolve_provider
 from epoxy.publish import canonical_spec, parse_publish_spec, spec_host_port
+from epoxy.textutil import fold
 
 
 def _parse_specs(specs: tuple[str, ...], flag: str = "--publish") -> dict[int, str]:
@@ -213,7 +214,7 @@ def _record_claims(name: str, record: dict[str, object], hosts: list[int]) -> li
 @click.option("--country", help="Country to connect to")
 @click.option("--city", help="City within the country")
 @click.option("--pull", is_flag=True, help="Pull the pinned container image first")
-@click.option("--recreate", is_flag=True, help="Recreate the container from compose/.env config")
+@click.option("--recreate", is_flag=True, help="Recreate the container from instance config")
 @click.option("--no-speedtest", is_flag=True, help="Skip the post-connect speed test")
 @click.option(
     "--publish",
@@ -248,9 +249,11 @@ def up(
     """Start the VPN; apply any requested location via hot-swap.
 
     With no arguments on a running container this only verifies the tunnel.
-    Selections are runtime-only: --pull/--recreate revert to compose/.env config.
+    Selections are runtime-only unless saved with ``epoxy rotate --save``;
+    --pull/--recreate revert to instance config (env file or saved selection).
     """
     inst = _resolve_for_command(instance, ctl_port, env_file)
+    saved = inst.saved_selection
     # Forwarded ports are instance config: --publish replaces the stored set,
     # --append-publish unions into it, --no-publish clears it, omitting all
     # three preserves it.
@@ -332,11 +335,32 @@ def up(
         target = Selection("", "")
         prev_ip: str | None = None
         if created:
-            name = provider or (current.provider if current else None)
+            # A saved selection (rotate --save) is instance config: it can
+            # supply the pair when starting a stopped container and is baked
+            # into compose unless this invocation names another location.
+            name = (
+                provider
+                or (saved.provider if saved else None)
+                or (current.provider if current else None)
+            )
             if not name:
                 raise click.UsageError("--provider is required to start the container.")
-            name, proto = resolve_provider(name, protocol, current.protocol if current else None)
+            saved_protocol = (
+                saved.protocol if saved and fold(saved.provider) == fold(name) else None
+            )
+            name, proto = resolve_provider(
+                name, protocol or saved_protocol, current.protocol if current else None
+            )
             overrides = get_provider_env(name, proto)
+            if (
+                saved
+                and fold(saved.provider) == fold(name)
+                and fold(saved.protocol) == fold(proto)
+                and country is None
+                and city is None
+            ):
+                overrides["SERVER_COUNTRIES"] = saved.country or ""
+                overrides["SERVER_CITIES"] = saved.city or ""
             _log_env(overrides)
             if publish_flags:
                 inst, effective_forwards = _locked_create(

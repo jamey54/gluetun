@@ -65,6 +65,7 @@ def test_up_non_default_instance_writes_compose_and_registry(compose_calls, cold
         "control_port": 8123,
         "env_file": None,
         "forwarded_ports": [],
+        "selection": None,
     }
     assert compose_calls == [("up", "-d")]
 

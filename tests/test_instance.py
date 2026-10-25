@@ -11,6 +11,7 @@ from epoxy import config
 from epoxy.instance import (
     PORT_RANGE,
     Instance,
+    SavedSelection,
     allocate_free_port,
     compose_file_for,
     ensure_compose_file,
@@ -87,8 +88,38 @@ def test_registry_round_trip():
         "control_port": 8123,
         "env_file": None,
         "forwarded_ports": [],
+        "selection": None,
     }
     assert list_registry() == ["plan-a"]
+
+
+def test_registry_round_trip_keeps_saved_selection():
+    saved = SavedSelection("surfshark", "wireguard", "Japan", "Tokyo")
+    write_registry(replace(resolve_instance("plan-a", control_port=8123), saved_selection=saved))
+    assert resolve_instance("plan-a").saved_selection == saved
+    record = read_registry("plan-a")
+    assert record is not None
+    assert record["selection"] == {
+        "provider": "surfshark",
+        "protocol": "wireguard",
+        "country": "Japan",
+        "city": "Tokyo",
+    }
+
+
+def test_malformed_saved_selection_is_ignored():
+    config.INSTANCES_DIR.mkdir(parents=True, exist_ok=True)
+    (config.INSTANCES_DIR / "plan-a.json").write_text(
+        json.dumps(
+            {
+                "instance": "plan-a",
+                "control_port": 8123,
+                "env_file": None,
+                "selection": {"provider": "", "protocol": "wireguard"},
+            }
+        )
+    )
+    assert resolve_instance("plan-a").saved_selection is None
 
 
 def test_registry_records_env_file():
@@ -169,7 +200,13 @@ def test_render_compose_publishes_the_host_port_only():
 def test_registry_json_matches_documented_schema():
     write_registry(resolve_instance("plan-a", control_port=8123, env_file="/tmp/e"))
     data = json.loads((config.INSTANCES_DIR / "plan-a.json").read_text())
-    assert set(data) == {"instance", "control_port", "env_file", "forwarded_ports"}
+    assert set(data) == {
+        "instance",
+        "control_port",
+        "env_file",
+        "forwarded_ports",
+        "selection",
+    }
 
 
 def test_render_compose_appends_forwarded_ports():

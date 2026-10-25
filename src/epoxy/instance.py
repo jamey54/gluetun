@@ -84,6 +84,50 @@ def required_name(instance: str | None) -> str:
 
 
 @dataclass(frozen=True)
+class SavedSelection:
+    """A location persisted as instance config (``rotate --save``).
+
+    Unlike the runtime selection, this survives a recreate: ``up`` bakes it
+    into the container's compose environment. Plain strings keep this module
+    free of ``epoxy.apply`` imports (which import this module).
+    """
+
+    provider: str
+    protocol: str
+    country: str | None = None
+    city: str | None = None
+
+    @classmethod
+    def from_doc(cls, doc: object) -> "SavedSelection | None":
+        """Parse a registry ``selection`` value; malformed values are ignored."""
+        if not isinstance(doc, dict):
+            return None
+        provider = doc.get("provider")
+        protocol = doc.get("protocol")
+        if not isinstance(provider, str) or not provider:
+            return None
+        if not isinstance(protocol, str) or not protocol:
+            return None
+        country = doc.get("country")
+        city = doc.get("city")
+        return cls(
+            provider=provider,
+            protocol=protocol,
+            country=country if isinstance(country, str) and country else None,
+            city=city if isinstance(city, str) and city else None,
+        )
+
+    def to_doc(self) -> JsonDoc:
+        """Registry representation (stable, null for an unpinned location)."""
+        return {
+            "provider": self.provider,
+            "protocol": self.protocol,
+            "country": self.country,
+            "city": self.city,
+        }
+
+
+@dataclass(frozen=True)
 class Instance:
     """A fully-resolved epoxy instance: one owned VPN container."""
 
@@ -93,6 +137,7 @@ class Instance:
     env: dict[str, str]
     compose_file: str
     forwarded_ports: tuple[str, ...] = ()
+    saved_selection: SavedSelection | None = None
 
     @property
     def container(self) -> str:
@@ -121,7 +166,7 @@ def registry_path(name: str) -> Path:
 
 
 def read_registry(name: str) -> JsonDoc | None:
-    """Persisted instance state (control port, env file); None when absent."""
+    """Persisted instance state (port, env file, forwards, saved selection)."""
     path = registry_path(name)
     if not path.exists():
         return None
@@ -138,14 +183,32 @@ def _registry_record(instance: Instance) -> JsonDoc:
         "control_port": instance.control_port,
         "env_file": str(instance.env_file) if instance.env_file else None,
         "forwarded_ports": list(instance.forwarded_ports),
+        "selection": instance.saved_selection.to_doc() if instance.saved_selection else None,
     }
 
 
-def write_registry(instance: Instance) -> None:
-    """Persist the instance's control port and env file for later reuse."""
+def _write_record(name: str, record: JsonDoc) -> None:
     config.INSTANCES_DIR.mkdir(parents=True, exist_ok=True)
-    data = _registry_record(instance)
-    registry_path(instance.name).write_text(json.dumps(data, indent=2) + "\n")
+    registry_path(name).write_text(json.dumps(record, indent=2) + "\n")
+
+
+def write_registry(instance: Instance) -> None:
+    """Persist the instance's control port, env file, forwards, and selection."""
+    _write_record(instance.name, _registry_record(instance))
+
+
+def update_saved_selection(name: str, selection: SavedSelection | None) -> bool:
+    """Set or clear the saved selection, preserving the rest of the record.
+
+    Returns False when the instance has no registry record (a container epoxy
+    did not create), so callers can report that instead of inventing one.
+    """
+    record = read_registry(name)
+    if record is None:
+        return False
+    record["selection"] = selection.to_doc() if selection is not None else None
+    _write_record(name, record)
+    return True
 
 
 def sync_registry(instance: Instance) -> None:
@@ -313,6 +376,9 @@ def resolve_instance(
         env=build_env(env_file_path),
         compose_file=compose_file,
         forwarded_ports=forwarded,
+        saved_selection=(
+            SavedSelection.from_doc(registry.get("selection")) if registry is not None else None
+        ),
     )
 
 
