@@ -273,17 +273,24 @@ def for_each_instance(
         raise SystemExit(1)
 
 
-def speed_test(size: int = DEFAULT_SIZE_MB) -> None:
+def speed_test(
+    size: int = DEFAULT_SIZE_MB,
+    say: Callable[[str], None] = click.echo,
+    show_progress: bool = True,
+) -> None:
     """Download through the tunnel and report the throughput (never fails the command)."""
-    click.echo("Running speed test...")
+    say("Running speed test...")
     # The bar draws itself on a terminal and is a no-op otherwise, so the
     # messages below are the whole output for scripts and --json consumers.
-    with progress.download_bar(size, size * 1_000_000) as report:
-        result = speedtest.measure(size, on_progress=report)
-    if result is not None:
-        click.echo(speedtest.format_result(result))
+    if show_progress:
+        with progress.download_bar(size, size * 1_000_000) as report:
+            result = speedtest.measure(size, on_progress=report)
     else:
-        click.echo("Speed test failed.")
+        result = speedtest.measure(size)
+    if result is not None:
+        say(speedtest.format_result(result))
+    else:
+        say("Speed test failed.")
 
 
 def finish_connection(

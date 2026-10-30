@@ -6,7 +6,13 @@ moved. ``--save`` persists the winning location as instance config so a later
 create/recreate (``up --pull``/``up --recreate``) keeps it.
 """
 
+from __future__ import annotations
+
 import random
+import threading
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 
 import click
 
@@ -33,6 +39,16 @@ from epoxy.rotate import folded_location, location_pool, shuffle_locations
 from epoxy.textutil import fold
 
 UsedLocations = dict[tuple[str, str], set[tuple[str, str]]]
+
+
+@contextmanager
+def _use_lock(lock: threading.Lock | None) -> Iterator[None]:
+    """Hold the shared ``used`` guard when present (parallel ``--all``)."""
+    if lock is None:
+        yield
+    else:
+        with lock:
+            yield
 
 
 def _system_random() -> random.Random:
@@ -82,10 +98,18 @@ def _rotate_one(
     used: UsedLocations,
     save_location: bool,
     run_speedtest: bool,
+    say: Callable[[str], None] = click.echo,
+    used_lock: threading.Lock | None = None,
+    show_progress: bool = True,
 ) -> None:
     """Hot-swap one instance until its exit IP changes, then optionally persist."""
-    pool = shuffle_locations(_pool_for(current, country, used), _system_random())
-    attempts = pool[:ROTATE_ATTEMPTS]
+    with _use_lock(used_lock):
+        pool = shuffle_locations(_pool_for(current, country, used), _system_random())
+        attempts = pool[:ROTATE_ATTEMPTS]
+        if attempts:
+            # Reserve the first pick so parallel instances stay distinct.
+            pair = (fold(current.provider), fold(current.protocol))
+            used.setdefault(pair, set()).add(folded_location(*attempts[0]))
     prev_ip = ipinfo.current_exit_ip()
     reason = "exit IP did not change"
     for index, (country_name, city) in enumerate(attempts):
@@ -98,12 +122,13 @@ def _rotate_one(
             ) from exc
         verdict = apply.verify(target, prev_ip)
         if verdict.ok:
-            used.setdefault((fold(current.provider), fold(current.protocol)), set()).add(
-                folded_location(target.country, target.city)
-            )
-            click.echo(f"Swapped to {_print_target(target)} — exit {verdict.ip or 'unknown'}.")
+            with _use_lock(used_lock):
+                used.setdefault((fold(current.provider), fold(current.protocol)), set()).add(
+                    folded_location(target.country, target.city)
+                )
+            say(f"Swapped to {_print_target(target)} — exit {verdict.ip or 'unknown'}.")
             if verdict.geo:
-                click.echo(
+                say(
                     click.style(
                         f"  note: exits via {verdict.geo} (requested {target.country})",
                         fg="yellow",
@@ -117,13 +142,13 @@ def _rotate_one(
                     raise click.ClickException(
                         f"Instance '{inst.name}' has no registry record; could not save."
                     )
-                click.echo("Saved as instance config (applied on the next create/recreate).")
+                say("Saved as instance config (applied on the next create/recreate).")
             if run_speedtest:
-                _common.speed_test()
+                _common.speed_test(say=say, show_progress=show_progress)
             return
         reason = verdict.reason or reason
         if index < len(attempts) - 1:
-            click.echo(f"  {reason}; trying another location.")
+            say(f"  {reason}; trying another location.")
     raise click.ClickException(
         f"Could not move the exit IP after {len(attempts)} "
         f"tr{'y' if len(attempts) == 1 else 'ies'} ({reason})."
@@ -189,8 +214,14 @@ def rotate(
         return
 
     used: UsedLocations = {}
+    used_lock = threading.Lock()
 
-    def rotate_target(inst: Instance, _fan_out: bool) -> None:
+    def rotate_one(
+        inst: Instance,
+        say: Callable[[str], None] = click.echo,
+        lock: threading.Lock | None = None,
+        show_progress: bool = True,
+    ) -> None:
         if save_location and read_registry(inst.name) is None:
             raise click.ClickException(
                 f"Instance '{inst.name}' has no registry record; cannot save a location "
@@ -203,6 +234,56 @@ def rotate(
                     f"Container '{inst.name}' is not running. Use 'epoxy up' first."
                 )
             current = _require_selection()
-            _rotate_one(inst, current, country, used, save_location, speedtest)
+            _rotate_one(
+                inst,
+                current,
+                country,
+                used,
+                save_location,
+                speedtest,
+                say=say,
+                used_lock=lock,
+                show_progress=show_progress,
+            )
 
-    for_each_instance(targets, rotate_target, all_instances, header=True, separate=True)
+    def rotate_target(inst: Instance, _fan_out: bool) -> None:
+        rotate_one(inst)
+
+    if not all_instances or len(targets) <= 1:
+        for_each_instance(targets, rotate_target, all_instances, header=True, separate=True)
+        return
+
+    def work(inst: Instance) -> tuple[list[str], BaseException | None]:
+        """Rotate one instance, buffering its lines for ordered replay.
+
+        Lines stay per-instance so parallel rotations never interleave; the
+        live speedtest bar is suppressed in workers (it cannot draw from
+        several threads at once).
+        """
+        lines: list[str] = []
+        try:
+            rotate_one(inst, say=lines.append, lock=used_lock, show_progress=False)
+        except (Exception, SystemExit) as exc:
+            return lines, exc
+        return lines, None
+
+    with ThreadPoolExecutor(max_workers=len(targets)) as pool:
+        futures = [pool.submit(work, inst) for inst in targets]
+        try:
+            results = [future.result() for future in futures]
+        except KeyboardInterrupt:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+
+    failures = 0
+    for index, (inst, (lines, exc)) in enumerate(zip(targets, results, strict=True)):
+        if index:
+            click.echo()
+        click.echo(f"== {inst.name} ==")
+        for line in lines:
+            click.echo(line)
+        if exc is not None:
+            _common._record_failure(inst.name, exc)
+            failures += 1
+    if failures:
+        raise SystemExit(1)

@@ -197,7 +197,7 @@ The selected row's provider *and* protocol are hot-swapped immediately.
 ```bash
 epoxy rotate                      # random location, runtime only
 epoxy rotate --country Japan      # random location in one country
-epoxy rotate --all                # every running instance, distinct picks
+epoxy rotate --all                # every running instance, distinct picks, in parallel
 epoxy rotate --save               # also persist the pick as instance config
 epoxy rotate --clear              # forget a saved pick, no rotation
 epoxy rotate --speedtest          # measure throughput after a successful swap
@@ -205,7 +205,7 @@ epoxy rotate --speedtest          # measure throughput after a successful swap
 
 - Rotation never changes provider or protocol — use `epoxy connect` for that.
 - The speed test is skipped by default; `rotate` is the fast "new IP now" path. Pass `--speedtest` to measure each new tunnel.
-- `--all` fans out like `status --all`: instances must be running, failures are per instance (`<name>: <error>`), and the run exits `1` when any failed.
+- `--all` fans out like `status --all`: instances must be running, failures are per instance (`<name>: <error>`), and the run exits `1` when any failed. Instances rotate in parallel (each keeps its own random location when the pool allows) while output stays grouped per instance; the live speedtest bar is suppressed under `--all` so concurrent downloads don't garble the display.
 - `--save` stores the winning location in the instance's registry record — *not* `.env`, which stays secrets-only. It applies on the next create/recreate (`up --pull`, `up --recreate`) and overrides a location baked via the env file; an explicit `--country`/`--city` on `up`/`connect` still wins for that invocation. A saved selection also lets `epoxy up` start a stopped instance without `--provider`.
 - `--save` needs an existing registry record (a container epoxy created). `--clear` drops the saved location and is mutually exclusive with `--save`, `--country`, and `--speedtest`.
 
@@ -345,7 +345,7 @@ Rules:
 - `status --all --json` emits an `{"instances": [...]}` envelope (one status document per instance, same schema as `status --json`); it exits `1` when any instance trips the single-instance exit-1 rules.
 - `logs --all` prints a `== <name> ==` header per instance; `--follow` cannot be combined with `--all` (exit `2`).
 - `rm --all` applies the consumer guard per instance: shared instances are skipped (reported, exit `1`) unless `--force` is passed.
-- `rotate --all` gives each instance its own random location when the pool allows; running instances are rotated, stopped ones are reported and skipped.
+- `rotate --all` gives each instance its own random location when the pool allows; running instances are rotated in parallel, stopped ones are reported and skipped.
 
 ## Configuration
 

@@ -2,6 +2,7 @@
 
 import json
 import random
+import threading
 
 import pytest
 
@@ -144,6 +145,42 @@ def test_rotate_all_gives_each_instance_a_distinct_location(monkeypatch, applied
     assert len({(s.country, s.city) for s in targets}) == 2
 
 
+def test_rotate_all_runs_instances_in_parallel(monkeypatch, verdicts):
+    monkeypatch.setattr("epoxy.discovery.known_names", lambda: {"a", "b"})
+    monkeypatch.setattr("epoxy.docker.container_control_port", lambda name=None: None)
+    seed_registry("a")
+    seed_registry("b")
+    # A sequential run would leave the first waiter hanging until this times
+    # out; only overlapping rotations can both pass the barrier.
+    barrier = threading.Barrier(2, timeout=5)
+    seen: list[str] = []
+    guard = threading.Lock()
+
+    def record(sel: Selection) -> None:
+        with guard:
+            seen.append(current_instance().name)
+        barrier.wait()
+
+    monkeypatch.setattr(apply, "apply_location", record)
+    result = run_cli(["rotate", "--all"], catch_exceptions=False)
+    assert result.exit_code == 0
+    assert sorted(seen) == ["a", "b"]
+
+
+def test_rotate_all_keeps_output_grouped_per_instance(monkeypatch, applied, verdicts):
+    monkeypatch.setattr("epoxy.discovery.known_names", lambda: {"a", "b"})
+    monkeypatch.setattr("epoxy.docker.container_control_port", lambda name=None: None)
+    seed_registry("a")
+    seed_registry("b")
+    result = run_cli(["rotate", "--all"], catch_exceptions=False)
+    assert result.exit_code == 0
+    a_head = result.output.index("== a ==")
+    b_head = result.output.index("== b ==")
+    assert a_head < b_head
+    assert result.output.count("Swapped to") == 2
+    assert a_head < result.output.index("Swapped to") < b_head
+
+
 def test_rotate_all_continues_past_a_stopped_instance(monkeypatch, applied, verdicts):
     monkeypatch.setattr("epoxy.discovery.known_names", lambda: {"a", "b"})
     monkeypatch.setattr("epoxy.docker.container_control_port", lambda name=None: None)
@@ -212,7 +249,7 @@ def test_rotate_rejects_conflicting_modes():
 
 def test_rotate_speedtest_is_opt_in(monkeypatch, applied, verdicts):
     calls: list[bool] = []
-    monkeypatch.setattr(_common, "speed_test", lambda size=25: calls.append(True))
+    monkeypatch.setattr(_common, "speed_test", lambda size=25, **_: calls.append(True))
     assert run_cli(["rotate"]).exit_code == 0
     assert calls == []
     assert run_cli(["rotate", "--speedtest"]).exit_code == 0
