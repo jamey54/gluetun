@@ -39,6 +39,7 @@ from epoxy.tui.screens import (
     PaletteScreen,
     RotateScreen,
     ServersScreen,
+    SpeedTestScreen,
 )
 
 ALPHA = InstanceSummary(
@@ -72,6 +73,7 @@ class FakeBackend:
         self.logs_requested: list[str] = []
         self.bench_request: BenchRequest | None = None
         self.last_start: StartRequest | None = None
+        self.speed_sizes: list[int] = []
 
     def docker_available(self) -> bool:
         return True
@@ -162,6 +164,7 @@ class FakeBackend:
 
     def speed_test(self, name: str, size: int, reporter: Reporter) -> ActionResult:
         self.calls.append(("speed", name))
+        self.speed_sizes.append(size)
         return ActionResult(True, f"Speed test for '{name}'.")
 
     def bench(
@@ -416,6 +419,22 @@ def test_bulk_rotate_applies_options_to_every_target() -> None:
         await pilot.press("enter")
         await settle(app, pilot)
         assert backend.calls == [("rotate", "alpha"), ("rotate", "beta")]
+
+    drive(scenario)
+
+
+def test_speed_test_uses_the_chosen_size() -> None:
+    async def scenario(app: EpoxyApp, backend: FakeBackend, pilot: Pilot[None]) -> None:
+        await pilot.press("t")
+        await pilot.pause()
+        assert isinstance(app.screen, SpeedTestScreen)
+        size = app.screen.query_one("#size", Input)
+        size.value = "5"
+        size.focus()
+        await pilot.press("enter")
+        await settle(app, pilot)
+        assert backend.calls == [("speed", "alpha")]
+        assert backend.speed_sizes == [5]
 
     drive(scenario)
 

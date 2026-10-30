@@ -443,6 +443,44 @@ class RotateScreen(_Modal[RotateRequest | None]):
         self._submit()
 
 
+class SpeedTestScreen(_Modal[int | None]):
+    """Choose the download size before testing one or more instances."""
+
+    def __init__(self, count: int = 1) -> None:
+        super().__init__()
+        self.count = count
+
+    def compose(self) -> ComposeResult:
+        title = "Speed test" + (f" ({self.count} instances)" if self.count > 1 else "")
+        with Vertical(classes="modal small"):
+            yield Static(title, classes="modal-title")
+            yield Label("Download size (MB)")
+            yield Input(value=str(DEFAULT_SIZE_MB), id="size")
+            with Horizontal(classes="buttons"):
+                yield Button("Run", id="run", variant="primary")
+                yield Button("Cancel", id="cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel":
+            self.dismiss(None)
+        elif event.button.id == "run":
+            self._submit()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._submit()
+
+    def _submit(self) -> None:
+        try:
+            size = parse_optional_int(self.query_one("#size", Input).value, "Size")
+        except ValueError as exc:
+            self.notify(str(exc), severity="error")
+            return
+        if size is None:
+            self.notify("Size is required.", severity="error")
+            return
+        self.dismiss(size)
+
+
 class BenchScreen(_Modal[BenchRequest | None]):
     """Collect a ``BenchRequest`` before running the benchmark."""
 

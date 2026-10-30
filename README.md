@@ -70,7 +70,7 @@ You only need to set credentials for providers you actually use.
 |---------|-------------|
 | `epoxy` | On a terminal, open the interactive UI. Piped or scripted (non-TTY), print help instead |
 | `epoxy tui` | Open the interactive UI explicitly; refuses to run without a terminal |
-| `epoxy --version` | Print the exact version (e.g. `epoxy 0.9.1`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
+| `epoxy --version` | Print the exact version (e.g. `epoxy 0.9.2`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
 | `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest] [--publish SPEC] [--append-publish SPEC] [--no-publish]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `epoxy connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
 | `epoxy rotate [--instance NAME] [--all] [--country NAME] [--save] [--clear] [--speedtest]` | Change the exit IP via a random location, keeping the provider/protocol; `--save` keeps the pick as instance config |

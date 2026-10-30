@@ -15,7 +15,6 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static
 
-from epoxy.config import DEFAULT_SIZE_MB
 from epoxy.tui.backend import (
     ActionResult,
     Backend,
@@ -43,6 +42,7 @@ from epoxy.tui.screens import (
     PaletteScreen,
     RotateScreen,
     ServersScreen,
+    SpeedTestScreen,
 )
 from epoxy.tui.state import (
     detail_markup,
@@ -528,11 +528,19 @@ class DashboardScreen(Screen[None]):
         if not targets:
             self.notify("Select or highlight an instance first.", severity="warning")
             return
+        self.app.push_screen(
+            SpeedTestScreen(len(targets)),
+            lambda size: self._speedtest_done(targets, size),
+        )
+
+    def _speedtest_done(self, targets: list[str], size: int | None) -> None:
+        if size is None:
+            return
         self._run_operation(
             f"Speed test {len(targets)} instance(s)",
             lambda reporter: self._for_each(
                 targets,
-                lambda name: self.backend.speed_test(name, DEFAULT_SIZE_MB, reporter),
+                lambda name: self.backend.speed_test(name, size, reporter),
                 reporter,
                 "Tested",
             ),
