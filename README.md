@@ -18,7 +18,7 @@ All providers can be active simultaneously — their servers appear side by side
 
 - Python 3.10+
 - A Gluetun image (defaults to `qmcgaw/gluetun:latest`; the settings route is mandatory — run `epoxy up --pull` to (re)pull it, or set `EPOXY_IMAGE` to pin a tag)
-- [click](https://click.palletsprojects.com/), [prompt_toolkit](https://python-prompt-toolkit.readthedocs.io/) and [rich](https://rich.readthedocs.io/) — installed automatically via `pip install .`
+- [click](https://click.palletsprojects.com/), [prompt_toolkit](https://python-prompt-toolkit.readthedocs.io/), [rich](https://rich.readthedocs.io/) and [Textual](https://textual.textualize.io/) — installed automatically via `pip install .`
 
 ## Install
 
@@ -68,7 +68,9 @@ You only need to set credentials for providers you actually use.
 
 | Command | Description |
 |---------|-------------|
-| `epoxy --version` | Print the exact version (e.g. `epoxy 0.5.0`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
+| `epoxy` | On a terminal, open the interactive UI. Piped or scripted (non-TTY), print help instead |
+| `epoxy tui` | Open the interactive UI explicitly; refuses to run without a terminal |
+| `epoxy --version` | Print the exact version (e.g. `epoxy 0.9.1`) and exit `0` — derived from `src/epoxy/version.py`, kept in sync with `pyproject.toml` |
 | `epoxy up [--instance NAME] [--ctl-port P] [--env-file F] [--provider --protocol --country --city] [--pull] [--recreate] [--no-speedtest] [--publish SPEC] [--append-publish SPEC] [--no-publish]` | Start (or verify) the VPN; apply any requested location via hot-swap |
 | `epoxy connect [--instance NAME] [--provider --protocol --country --city] [--list] [--no-speedtest]` | Hot-swap to another server; no arguments opens the picker |
 | `epoxy rotate [--instance NAME] [--all] [--country NAME] [--save] [--clear] [--speedtest]` | Change the exit IP via a random location, keeping the provider/protocol; `--save` keeps the pick as instance config |
@@ -84,6 +86,53 @@ You only need to set credentials for providers you actually use.
 | `epoxy install [--shell SHELL] [--rc-file FILE] [--print] [--force]` | Wire shell completion into your rc file (bash/zsh/fish) |
 
 `--instance` is the first option of every instance-scoped command (`install` and `servers` take none; `ls` treats it as a filter). Scripts must always pass it. See [Instances](#instances).
+
+## Interactive UI
+
+Run `epoxy` on a terminal (or `epoxy tui`) to open the dashboard. The CLI
+subcommands stay exactly as documented above: they are the automation surface,
+and the machine-readable `ls --json` / `status --json` contracts are unchanged.
+Bare `epoxy` only opens the UI when both stdin and stdout are terminals; in a
+pipe it prints help and exits `0`, so scripts never hang on a half-rendered UI.
+
+The dashboard is a master-detail view: filterable instance table on the left,
+live status for the highlighted instance on the right, and an activity log at
+the bottom. A multi-selection applies bulk actions; without one, actions target
+the highlighted row.
+
+| Key | Action |
+|-----|--------|
+| `n` | Create a new instance |
+| `s` / `x` | Start (or reconnect) / stop selected instances |
+| `d` | Remove selected instances (asks first; shared instances need force) |
+| `c` | Connect / hot-swap the highlighted instance |
+| `o` | Rotate the exit IP of selected instances |
+| `S` / `C` | Save the current location as instance config / clear it |
+| `l` | Follow logs for the highlighted instance |
+| `t` | Speed-test selected instances |
+| `b` | Benchmark locations for the highlighted instance |
+| `u` / `D` | Trigger a server-list update / toggle DNS-over-TLS |
+| `v` / `e` | Browse servers / show credential readiness |
+| `space` / `a` | Toggle selection / select all visible |
+| `/` | Filter instances |
+| `escape` | Clear the filter or selection |
+| `p` | Command palette |
+| `?` | Keymap |
+| `r` / `q` | Refresh / quit |
+
+Bulk actions are available for start, stop, rotate, remove, update, DNS and
+speed tests. Create, connect, logs and benchmark remain single-instance because
+their options or output only make sense for one target at a time. Creating an
+instance uses the same options as `epoxy up` (provider, protocol, country, city,
+control port, forwarded ports — replace, append, or clear — env file, pull,
+recreate, speed test). The benchmark form exposes the same candidate cap,
+screening/final sizes, concurrency and connect-winner options as `epoxy bench`.
+
+Credentials are read-only in the UI: the credentials screen lists each
+provider/protocol pair and the *names* of missing environment variables, never
+their values, and never edits `.env`. Update `.env` and restart epoxy instead.
+The command palette (`p`) exposes the same actions as the keymap, so nothing is
+keyboard-only.
 
 ### up vs connect
 

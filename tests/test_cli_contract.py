@@ -53,6 +53,7 @@ EXPECTED_FLAGS = {
     "rotate": {"--all", "--clear", "--country", "--instance", "--save", "--speedtest"},
     "servers": {"--json", "--protocol", "--provider"},
     "status": {"--all", "--instance", "--json", "--no-speedtest", "-s", "--size"},
+    "tui": set(),
     "up": {
         "--append-publish",
         "--city",
