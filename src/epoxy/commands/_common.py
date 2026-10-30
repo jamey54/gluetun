@@ -7,15 +7,9 @@ from typing import Any, NoReturn, TypeVar
 
 import click
 
-from epoxy import apply, control, discovery, docker, ipinfo, picker, progress, speedtest
+from epoxy import discovery, docker, ipinfo, picker, progress, speedtest
 from epoxy.apply import Selection
-from epoxy.config import (
-    CTL_PORT_ENV_VAR,
-    DEFAULT_PROTOCOL,
-    DEFAULT_SIZE_MB,
-    PORT_MAX,
-    PORT_MIN,
-)
+from epoxy.config import CTL_PORT_ENV_VAR, DEFAULT_SIZE_MB, PORT_MAX, PORT_MIN
 from epoxy.instance import (
     Instance,
     current_instance,
@@ -23,8 +17,44 @@ from epoxy.instance import (
     read_registry,
     resolve_instance,
 )
-from epoxy.providers import PROVIDERS, validate_provider
-from epoxy.textutil import fold
+from epoxy.providers import PROVIDERS
+from epoxy.runtime import (
+    apply_request as _apply_request,
+)
+from epoxy.runtime import (
+    await_selection as _await_selection,
+)
+from epoxy.runtime import (
+    baked_selection as _baked_selection,
+)
+from epoxy.runtime import (
+    effective_selection,
+)
+from epoxy.runtime import (
+    print_target as _print_target,
+)
+from epoxy.runtime import (
+    runtime_selection_or_error as _runtime_selection_or_error,
+)
+
+__all__ = [
+    "DEBUG",
+    "PROTOCOL",
+    "SENSITIVE_KEY_PARTS",
+    "_apply_request",
+    "_baked_selection",
+    "_print_target",
+    "_require_selection",
+    "_runtime_selection_or_error",
+    "add_instance_options",
+    "all_option",
+    "await_selection",
+    "effective_selection",
+    "finish_connection",
+    "for_each_instance",
+    "require_api_key",
+    "speed_test",
+]
 
 DEBUG = False
 
@@ -271,104 +301,17 @@ def finish_connection(
     return verified
 
 
-def effective_selection() -> Selection | None:
-    """Runtime selection from the control server; None when unreachable or blank."""
-    return _runtime_selection_or_error()[0]
-
-
-def _runtime_selection_or_error() -> tuple[Selection | None, bool]:
-    """(selection, reachable): the live selection, plus whether the control
-    server responded at all (None/-False when unreachable or blank)."""
-    try:
-        return Selection.from_doc(control.get_settings()), True
-    except control.ControlError:
-        return None, False
+def await_selection() -> Selection | None:
+    """Wait for the control server (CLI announcement included)."""
+    click.echo("Waiting for control server...")
+    return _await_selection()
 
 
 def _require_selection() -> Selection:
+    """The live selection, honoring tests/callers that replace the lookup."""
     sel = effective_selection()
     if sel is None or not sel.provider:
         raise click.ClickException(
             "Cannot read runtime settings — is the control server reachable?"
         )
     return sel
-
-
-def await_selection() -> Selection | None:
-    """Wait for the control server, then re-read the runtime selection.
-
-    A container that is running while its control server is still coming up (e.g.
-    mid-restart, with ``restart: always``) is not broken yet, so give it a bounded
-    grace period before the caller reports it unreachable. None when it never
-    answers.
-    """
-    click.echo("Waiting for control server...")
-    try:
-        return Selection.from_doc(control.wait_for_settings())
-    except control.ControlError:
-        return None
-
-
-def _baked_selection() -> Selection | None:
-    """Selection baked into the container at create time (its compose env)."""
-    env = docker.container_env()
-    provider = env.get("VPN_SERVICE_PROVIDER")
-    if not provider:
-        return None
-    return Selection(
-        provider,
-        env.get("VPN_TYPE") or "",
-        env.get("SERVER_COUNTRIES") or env.get("VPN_COUNTRY"),
-        env.get("SERVER_CITIES") or env.get("VPN_CITY"),
-    )
-
-
-def _print_target(sel: Selection) -> str:
-    loc = ", ".join(filter(None, [sel.city, sel.country]))
-    return f"{sel.provider}/{sel.protocol}" + (f" → {loc}" if loc else "")
-
-
-def _apply_request(
-    provider: str | None,
-    protocol: str | None,
-    country: str | None,
-    city: str | None,
-    base: Selection,
-) -> tuple[Selection, bool]:
-    """Resolve the requested target over base and hot-swap; return (target, swapped).
-
-    An explicit country replaces the location outright; a lone city keeps the
-    current country (and fails when there is none); switching provider drops
-    the old location. Returns swapped=False when the target already matches
-    the running state.
-    """
-    target_provider = provider or base.provider
-    target_protocol = protocol or base.protocol or DEFAULT_PROTOCOL
-    target_country: str | None
-    target_city: str | None
-    if country is not None:
-        target_country, target_city = country, city
-    elif city is not None:
-        target_country, target_city = base.country, city
-    elif fold(target_provider) != fold(base.provider):
-        target_country, target_city = None, None
-    else:
-        target_country, target_city = base.country, base.city
-
-    if city is not None and not target_country:
-        raise click.UsageError(
-            "--city needs a country to search within: pass --country, or connect "
-            "to a country first."
-        )
-
-    target_provider, target_protocol = validate_provider(target_provider, target_protocol)
-    target = Selection(target_provider, target_protocol, target_country, target_city)
-    if target.key == base.key:
-        return target, False
-    try:
-        apply.apply_location(target)
-    except control.ControlError as exc:
-        raise click.ClickException(
-            f"Could not switch to {_print_target(target)} — {exc.message}"
-        ) from exc
-    return target, True
