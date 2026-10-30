@@ -91,7 +91,7 @@ wheels = [
 
 [[package]]
 name = "epoxy"
-version = "0.8.9"
+version = "0.9.1"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

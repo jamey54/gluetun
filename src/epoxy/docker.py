@@ -229,6 +229,7 @@ def compose(
     *args: str,
     env_overrides: dict[str, str] | None = None,
     timeout: float | None = None,
+    capture: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run docker compose against the active instance's file and project.
 
@@ -241,7 +242,7 @@ def compose(
     inst = current_instance()
     cmd = ["docker", "compose", "-f", inst.compose_file, "-p", inst.project, *args]
     env = {**inst.env, **(env_overrides or {})}
-    return run(*cmd, env={**os.environ, **env}, timeout=timeout)
+    return run(*cmd, env={**os.environ, **env}, timeout=timeout, capture=capture)
 
 
 def launch_container(name: str, env: dict[str, str]) -> bool:
